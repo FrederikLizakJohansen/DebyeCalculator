@@ -1,3 +1,29 @@
+"""
+formfactor_coef.py
+
+This file contains a dictionary of form factor coefficients for different chemical elements.
+
+The dictionary `ff_coef` contains form factor coefficients for several chemical elements, used in Debye scattering intensity calculations. The dictionary's keys represent the chemical symbols of the elements, and the corresponding values are lists containing the form factor coefficients and other parameters for the Debye equation.
+
+Dictionary Structure:
+{
+    'element_symbol': [a1, a2, a3, a4, a5, c, b1, b2, b3, b4, b5, Coh_xs],
+    ...
+}
+
+Each element's form factor coefficients are used in the Debye scattering calculation to estimate the scattering intensity at different scattering angles (q-values).
+
+The values in the list have the following meanings:
+- a1 to a5: Form factor coefficients used in the calculation of the element's scattering amplitude.
+- c: Incoherent scattering cross-section.
+- b1 to b5: Coherent scattering lengths used in the calculation of the element's scattering amplitude.
+- Coh_xs: Cohesive scattering cross-section.
+
+Note: This file contains a subset of the available chemical elements and their form factor coefficients. It may be extended to include additional elements if needed.
+
+The form factor coefficients in this file are based on experimental data and are typically used for X-ray and neutron scattering experiments to calculate scattering intensities for atomic structures.
+"""
+
 import numpy as np
 
 ff_coef = {

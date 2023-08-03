@@ -1,8 +1,48 @@
 import collections
 import timeit
 
+class Profiling:
+    """
+    Profiling
 
-class Timings:
+    This class provides a simple profiling mechanism for measuring the execution time of different sections of code. It records the time taken for each named section of code and calculates the mean and variance of the recorded times.
+
+    Methods:
+        __init__():
+            Initialize the Profiling object with default settings.
+
+        reset():
+            Reset the profiling data and start tracking time from the current point.
+
+        time(name):
+            Record the execution time for a specific section of code with the given name.
+
+        means():
+            Get the dictionary of mean times for each recorded section.
+
+        vars():
+            Get the dictionary of variances of the recorded times for each section.
+
+        stds():
+            Get the dictionary of standard deviations of the recorded times for each section.
+
+        total():
+            Calculate the total time taken for all recorded sections.
+
+        summary(prefix=""):
+            Generate a summary of the profiling data with mean time, standard deviation, and percentage of total time for each recorded section.
+
+    Usage:
+        The Profiling object can be used to measure the execution time of different parts of a code by calling the `time` method with a descriptive name for each section. After profiling, the `summary` method can be used to print a summary of the profiling data.
+
+    Example:
+        profiling = Profiling()
+        for i in range(10):
+            # Code segment to be profiled
+            profiling.time("Code Segment %d" % i)
+
+        print(profiling.summary("Profiling Results:"))
+    """
 
     def __init__(self):
         self._means = collections.defaultdict(int)
@@ -21,9 +61,7 @@ class Timings:
         n = self._counts[name]
 
         mean = self._means[name] + (x - self._means[name]) / (n + 1)
-        var = (
-            n * self._vars[name] + n * (self._means[name] - mean) ** 2 + (x - mean) ** 2
-        ) / (n + 1)
+        var = (n * self._vars[name] + n * (self._means[name] - mean) ** 2 + (x - mean) ** 2) / (n + 1)
 
         self._means[name] = mean
         self._vars[name] = var
