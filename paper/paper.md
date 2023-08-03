@@ -66,18 +66,14 @@ We introduce a GPU-accelerated open-source Python package for rapid calculation 
 
 Table: Pseudo-code incl. profiling (times)
 
-![Q and r-space comparison of our software and DiffPy-CMI on two systems - monoatomic (metal) and diatomic (metal oxide): (evt. Topas??)\label{fig:figure_1}](../figures/figure1.png){ width=100% }
-and referenced from text using \autoref{fig:figure_1}.
+![Q and r-space comparison of our software and DiffPy-CMI on two systems - monoatomic (metal) and diatomic (metal oxide): (evt. Topas??).\label{fig:figure1}](../figures/figure1.png){ width=100% }
+and referenced from text using \autoref{fig:figure1}.
 
-![CPU vs. GPU (in Q and in r-space) (+ batching)\label{fig:figure 2}](../figures/figure2.png)
-and referenced from text using \autoref{fig:figure 2}.
+![CPU vs. GPU (in Q and in r-space) (+ batching.\label{fig:figure2}](../figures/figure2.png)
+and referenced from text using \autoref{fig:figure2}.
 
-![GPU time vs. size and #atoms\label{fig:figure 3}](../figures/figure3.png)
-and referenced from text using \autoref{fig:figure 3}.
-
-![Caption for example figure.\label{fig:example}](../figures/figure3.png)
-and referenced from text using \autoref{fig:example}.
-
+![GPU time vs. size and #atoms,\label{fig:figure3}](../figures/figure3.png)
+and referenced from text using \autoref{fig:figure3}.
 
 
 # Conclusions
@@ -89,29 +85,5 @@ XXX
 XXX
 
 # References
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-# Figures
-
-Figures can be included like this:
-![Caption for example figure.\label{fig:example}](figure.png)
-and referenced from text using \autoref{fig:example}.
-
-Figure sizes can be customized by adding an optional second parameter:
-![Caption for example figure.](figure.png){ width=20% }
 
 
