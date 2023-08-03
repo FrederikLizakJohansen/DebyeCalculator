@@ -66,21 +66,18 @@ We introduce a GPU-accelerated open-source Python package for rapid calculation 
 
 Table: Pseudo-code incl. profiling (times)
 
-![Q and r-space comparison of our software and DiffPy-CMI on two systems - monoatomic (metal) and diatomic (metal oxide): (evt. Topas??).\label{fig:figure10}](../figures/figure1.png){width="70%"}
-and referenced from text using \autoref{fig:figure10}.
+![Q and r-space comparison of our software and DiffPy-CMI on two systems - monoatomic (metal) and diatomic (metal oxide): (evt. Topas??).\label{fig:figure1}](../figures/figure1.png){width="100%"}
+
+and referenced from text using \autoref{fig:figure1}.
 
 ![CPU vs. GPU (in Q and in r-space) (+ batching.\label{fig:figure2}](../figures/figure2.png)
+
 and referenced from text using \autoref{fig:figure2}.
 
 ![GPU time vs. size and #atoms,\label{fig:figure3}](../figures/figure3.png)
+
 and referenced from text using \autoref{fig:figure3}.
 
-![The number of dynamic Slow Zones that have been triggered during each full year of the program. This includes Dynamic Management Areas (DMAs), which are triggered by visual detections and began in late 2008, and Acoustic Slow Zones, which are triggered by the detection of right whale upcall vocalizations and were added to the program in late 2020.\label{fig:test}](../figures/figure3.png){width="70%"}
-and referenced from text using \autoref{fig:test}.
-
-![The number of dynamic Slow Zones that have been triggered during each full year of the program. This includes Dynamic Management Areas (DMAs), which are triggered by visual detections and began in late 2008, and Acoustic Slow Zones, which are triggered by the detection of right whale upcall vocalizations and were added to the program in late 2020.\label{fig:figure1}](../figures/figure1.png){width="70%"}
-
-and referenced from text using \autoref{fig:figure1}.
 
 # Conclusions
 
