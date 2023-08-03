@@ -78,6 +78,8 @@ and referenced from text using \autoref{fig:figure3}.
 ![The number of dynamic Slow Zones that have been triggered during each full year of the program. This includes Dynamic Management Areas (DMAs), which are triggered by visual detections and began in late 2008, and Acoustic Slow Zones, which are triggered by the detection of right whale upcall vocalizations and were added to the program in late 2020.\label{fig:test}](../figures/figure3.png){width="70%"}
 and referenced from text using \autoref{fig:test}.
 
+![The number of dynamic Slow Zones that have been triggered during each full year of the program. This includes Dynamic Management Areas (DMAs), which are triggered by visual detections and began in late 2008, and Acoustic Slow Zones, which are triggered by the detection of right whale upcall vocalizations and were added to the program in late 2020.\label{fig:figure1}](../figures/figure3.png){width="70%"}
+
 # Conclusions
 
 XXX
