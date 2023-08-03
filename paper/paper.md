@@ -19,13 +19,13 @@ authors:
     orcid: 0000-0001-6154-1167
     affiliation: "1, 2"
   - name: Erik B. Dam
-    orcid: 0000-0000-0000-0000
+    orcid: 0000-0002-8888-2524
     affiliation: 2
   - name: Kirsten M. Ø. Jensen
-    orcid: 0000-0000-0000-0000
+    orcid: 0000-0003-0291-217X
     affiliation: 1
   - name: Raghavendra Selvan
-    orcid: 0000-0000-0000-0000
+    orcid: 0000-0003-4302-0207
     corresponding: true # (This is how to denote the corresponding author)
     affiliation: "2, 3"
 
@@ -45,39 +45,47 @@ aas-doi: 10.3847/xxxxx <- update this with the DOI from AAS once you know it.
 aas-journal: Astrophysical Journal <- The name of the AAS journal.
 ---
 
-# Summary
+# Abstract
 
-The forces on stars, galaxies, and dark matter under external gravitational
-fields lead to the dynamical evolution of structures in the universe. The orbits
-of these bodies are therefore key to understanding the formation, history, and
-future state of galaxies. The field of "galactic dynamics," which aims to model
-the gravitating components of galaxies to study their structure and evolution,
-is now well-established, commonly taught, and frequently used in astronomy.
-Aside from toy problems and demonstrations, the majority of problems require
-efficient numerical tools, many of which require the same base code (e.g., for
-performing numerical orbit integration).
+XXX
 
-# Statement of need
+# Introduction
 
-`Gala` is an Astropy-affiliated Python package for galactic dynamics. Python
-enables wrapping low-level languages (e.g., C) for speed without losing
-flexibility or ease-of-use in the user-interface. The API for `Gala` was
-designed to provide a class-based and user-friendly interface to fast (C or
-Cython-optimized) implementations of common operations such as gravitational
-potential and force evaluation, orbit integration, dynamical transformations,
-and chaos indicators for nonlinear dynamics. `Gala` also relies heavily on and
-interfaces well with the implementations of physical units and astronomical
-coordinate systems in the `Astropy` package [@astropy] (`astropy.units` and
-`astropy.coordinates`).
+The Debye scattering equation, derived in 1915 by P. Debye, is commonly used to calculate the scattering intensities considering the position of each atom in the structure:[debye1915zerstreuung; @scardi2016celebrating]
 
-`Gala` was designed to be used by both astronomical researchers and by
-students in courses on gravitational dynamics or astronomy. It has already been
-used in a number of scientific publications [@Pearson:2017] and has also been
-used in graduate courses on Galactic dynamics to, e.g., provide interactive
-visualizations of textbook material [@Binney:2008]. The combination of speed,
-design, and support for Astropy functionality in `Gala` will enable exciting
-scientific explorations of forthcoming data releases from the *Gaia* mission
-[@gaia] by students and experts alike.
+\begin{equation}\label{eq:Debye}
+I(Q) = \sum_{i=1}^{N} \sum_{j=1}^{N} f_i(Q) f_j(Q) \frac{\sin(Qr_{ij})}{Qr_{ij}}
+\end{equation}
+
+In this equation, Q is the scattering vector, r_ij is the distance between atom-pair, i and j, and f is the atomic scattering factor. 
+The Debye scattering equation can be used to compute the scattering pattern of any atomic structure and is commonly used to study both crystalline and non-crystalline materials with a range of scattering techniques like powder diffraction (PD), total scattering (TS) with pair distribution function (PDF) and small-angle scattering (SAS).[@scardi2016celebrating] Although the Debye scattering equation is extremely versatile, its applicability has been limited by the double sum of the atoms in the structure which makes the equation computationally expensive to calculate. 
+With the advancement in computing technology,[schaller1997moore] new horizons have opened up for applying the Debye scattering equation to larger materials. Modern central processing Units (CPUs), ranging from tenths to hundreds of cores, offer an opportunity to parallelise the computation, significantly enhancing the computational efficiency. This parallel architecture allows for the distribution of the double sum calculations across multiple cores. Graphics processing units (GPUs) further expand computational possibilities, consisting of hundreds or even thousands of smaller, more efficient cores designed for parallel processing.[garland2008parallel] Unlike traditional CPUs, GPUs are ideally suited for calculations like the Debye scattering equation, where many computations can be performed simultaneously. By leveraging GPU acceleration, researchers can achieve computational speeds that are orders of magnitude faster than even the most advanced multi-core CPUs.
+We introduce a GPU-accelerated open-source Python package for rapid calculation of the scattering intensity from a xyz-file using the Debye scattering equation. The xyz-file format describes the atomic structure with the atomic identify and its xyz-coordinates and is commonly used in materials chemistry. We further calculate the PDF as described in Underneath the Bragg Peaks.[egami2003underneath] We show that our software can simulate the PD, TS, SAS and PDF data orders of magnitudes faster than on the CPU, while being open-source and easy assessable by other scientists.
+![image](https://github.com/FrederikLizakJohansen/DebyeCalculatorGPU/assets/41198747/66cd8a0e-9c41-4af2-9c8a-8f1ed89ca92f)
+
+# Results & Discussion:
+
+Table: Pseudo-code incl. profiling (times)
+
+Figure 1: Q and r-space comparison ours and DiffPy-CMI on two systems: (evt. Topas??)
+-	Monoatomic system (metal)
+-	Diatomic system (metal oxide)
+
+Figure 2: CPU vs. GPU (in Q and in r-space) (+ batching)
+
+Figure 3: GPU time vs. size and #atoms
+
+# Conclusions
+
+XXX
+
+# Acknowledgements
+
+We acknowledge contributions from Brigitta Sipocz, Syrtis Major, and Semyeong
+Oh, and support from Kathryn Johnston during the genesis of this project.
+
+# References
+
 
 # Mathematics
 
@@ -119,9 +127,4 @@ and referenced from text using \autoref{fig:example}.
 Figure sizes can be customized by adding an optional second parameter:
 ![Caption for example figure.](figure.png){ width=20% }
 
-# Acknowledgements
 
-We acknowledge contributions from Brigitta Sipocz, Syrtis Major, and Semyeong
-Oh, and support from Kathryn Johnston during the genesis of this project.
-
-# References
