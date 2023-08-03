@@ -78,6 +78,9 @@ and referenced from text using \autoref{fig:figure 2}.
 
 Figure 2: CPU vs. GPU (in Q and in r-space) (+ batching)
 
+![GPU time vs. size and #atoms\label{fig:figure 3}](figures/figure3.png)
+and referenced from text using \autoref{fig:figure 3}.
+
 Figure 3: GPU time vs. size and #atoms
 
 # Conclusions
