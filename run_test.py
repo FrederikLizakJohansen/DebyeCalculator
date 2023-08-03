@@ -1,5 +1,5 @@
 import argparse
-from DebyeCalculator import DebyeCalculatorGPU
+from DebyeCalculatorGPU import DebyeCalculatorGPU
 
 def test(
     args

@@ -1,7 +1,7 @@
 import torch
 import numpy as np
 from torch.nn.functional import pdist
-from profiling import Timings
+from profiling import Profiler
 from formfactor_coef import ff_coef
 
 class DebyeCalculatorGPU:
@@ -22,7 +22,7 @@ class DebyeCalculatorGPU:
         batch_size (int or None): Batch size for computation. If None, the batch size will be automatically set. Default is None.
         lorch_mod (bool): Flag to enable Lorch modification. Default is False.
         radiation_type (str): Type of radiation for form factor calculations ('xray' or 'neutron'). Default is 'xray'.
-        verbose (int): Verbosity level (0: no messages, 1: show timings). Default is 0.
+        verbose (int): Verbosity level (0: no messages, 1: show profiling). Default is 0.
     """
     def __init__(
         self,
@@ -41,7 +41,7 @@ class DebyeCalculatorGPU:
         radiation_type = 'xray',
         verbose = 0,
     ):
-        self.timings = Timings()
+        self.profiler = Profiler()
         self.verbose = verbose
         
         # Initial parameters
@@ -76,31 +76,12 @@ class DebyeCalculatorGPU:
         # Ligand list
         self.ligand_list = ['O', 'H', 'Cl']
 
-    def _init_structure_formfactors(self):    
-        """
-        Initialize unique element form factors for the atomic structure.
-        """
-        # Unique elements and their counts
-        unique_elements, inverse, counts = np.unique(self.struc_elements, return_counts=True, return_inverse=True)
-        self.triu_indices = torch.triu_indices(self.struc_size, self.struc_size, 1)
-        self.unique_inverse = torch.from_numpy(inverse[self.triu_indices]).to(device=self.device)
-        self.struc_unique_formfactors = torch.stack([self.formfactor_func(self.ff_coef[el]) for el in unique_elements])
-        
-        # Get f_avg_sqrd and f_sqrd_avg
-        counts = torch.from_numpy(counts).to(device=self.device)
-        compositional_fractions = counts / torch.sum(counts)
-        self.struc_fsa = torch.sum(compositional_fractions.reshape(-1,1) * self.struc_unique_formfactors**2, dim=0)
-        #self.struc_fas = torch.sum(compositional_fractions.reshape(-1,1) * self.struc_unique_formfactors, dim=0)**2
-
-        # self scattering
-        self.struc_inverse = torch.from_numpy(np.array([inverse[i] for i in range(self.struc_size)])).to(device=self.device)
-
     def _init_structure(
         self,
         structure,
     ):
         """
-        Initialize atomic structure from an input file.
+        Initialize atomic structure and unique element form factors from an input file.
 
         Parameters:
             structure (str): Path to the atomic structure file in XYZ format.
@@ -121,6 +102,23 @@ class DebyeCalculatorGPU:
                     self.struc_xyz = torch.FloatTensor(struc[:,1:].astype('float')).to(device=self.device)
             else:
                 raise NotImplementedError('Structure File Extention Not Supported')
+
+            # Unique elements and their counts
+            unique_elements, inverse, counts = np.unique(self.struc_elements, return_counts=True, return_inverse=True)
+            self.triu_indices = torch.triu_indices(self.struc_size, self.struc_size, 1)
+            self.unique_inverse = torch.from_numpy(inverse[self.triu_indices]).to(device=self.device)
+            self.struc_unique_formfactors = torch.stack([self.formfactor_func(self.ff_coef[el]) for el in unique_elements])
+            
+            # Get f_avg_sqrd and f_sqrd_avg
+            counts = torch.from_numpy(counts).to(device=self.device)
+            compositional_fractions = counts / torch.sum(counts)
+            self.struc_fsa = torch.sum(compositional_fractions.reshape(-1,1) * self.struc_unique_formfactors**2, dim=0)
+            #self.struc_fas = torch.sum(compositional_fractions.reshape(-1,1) * self.struc_unique_formfactors, dim=0)**2
+
+            # self scattering
+            self.struc_inverse = torch.from_numpy(np.array([inverse[i] for i in range(self.struc_size)])).to(device=self.device)
+        else:
+            raise FileNotFoundError(structure)
 
     def set_parameters(
         self,
@@ -157,15 +155,10 @@ class DebyeCalculatorGPU:
             tuple or numpy.ndarray: Tuple containing q-values and scattering intensity I(q) if _keep_on_device is True, otherwise, numpy arrays on CPU.
         """
         # Setup structure
-        self.timings.reset()
+        self.profiler.reset()
         self._init_structure(structure)
         if self.verbose > 0:
-            self.timings.time('Setup Structure')
-
-        # Setup atomic formfactors
-        self._init_structure_formfactors()
-        if self.verbose > 0:
-            self.timings.time('Setup Formfactors')
+            self.profiler.time('Setup Structure and Formfactors')
 
         # Calculate distances and batch
         if self.batch_size is None:
@@ -177,8 +170,6 @@ class DebyeCalculatorGPU:
         # Calculate scattering using Debye Equation
         iq = torch.zeros((len(self.q))).to(device=self.device)
         for d, inv_idx, idx in zip(dists, inverse_indices, indices):
-            if d < self.rthres:
-                continue
             occ_product = self.struc_occupancy[idx[0]] * self.struc_occupancy[idx[1]]
             sinc = torch.sinc(d * self.q / torch.pi)
             ffp = self.struc_unique_formfactors[inv_idx[0]] * self.struc_unique_formfactors[inv_idx[1]]
@@ -191,14 +182,14 @@ class DebyeCalculatorGPU:
         # For total scattering
         if _for_total_scattering:
             if self.verbose > 0:
-                self.timings.time('I(Q)')
+                self.profiler.time('I(Q)')
             return iq
 
         # Self-scattering contribution
         self_sinc = torch.ones((self.struc_size, len(self.q))).to(device=self.device)
         iq += torch.sum((self.struc_occupancy.unsqueeze(-1) * self.struc_unique_formfactors[self.struc_inverse])**2 * self_sinc, dim=0)
         if self.verbose > 0:
-            self.timings.time('I(Q)')
+            self.profiler.time('I(Q)')
 
         if _keep_on_device:
             return self.q.squeeze(-1), iq
@@ -224,67 +215,21 @@ class DebyeCalculatorGPU:
         iq = self.iq(structure, _keep_on_device=True, _for_total_scattering=True)
         self.sq = iq/self.struc_fsa/self.struc_size
         if self.verbose > 0:
-            self.timings.time('S(Q)')
+            self.profiler.time('S(Q)')
         self.fq = self.q.squeeze(-1) * self.sq
         if self.verbose > 0:
-            self.timings.time('F(Q)')
+            self.profiler.time('F(Q)')
         
         # Calculate total scattering, G(r)
         damp = 1 if self.qdamp == 0.0 else torch.exp(-(self.r.squeeze(-1) * self.qdamp)**2 / 2)
         lorch_mod = 1 if self.lorch_mod == None else torch.sinc(self.q * self.lorch_mod*(torch.pi / self.qmax))
         if self.verbose > 0:
-            self.timings.time('Modifications, Qdamp/Lorch')
+            self.profiler.time('Modifications, Qdamp/Lorch')
         gr = (2 / torch.pi) * torch.sum(self.fq.unsqueeze(-1) * torch.sin(self.q * self.r.permute(1,0))*self.qstep * lorch_mod, dim=0) * damp
         if self.verbose > 0:
-            self.timings.time('G(r)')
+            self.profiler.time('G(r)')
 
         if _keep_on_device:
             return self.r.squeeze(-1), gr
         else:
             return self.r.squeeze(-1).cpu().numpy(), gr.cpu().numpy()
-
-    def _diffpy_gr(self, path):
-        """
-        !NOTE: Only for internal use!
-
-        Calculate the pair distribution function G(r) for the given atomic structure using Diffpy.
-
-        Parameters:
-            path (str): Path to the atomic structure file in XYZ format.
-
-        """
-        self.timings.reset()
-        path_ext = path.split('.')[-1]
-        if path_ext == 'xyz':
-            # Load structure with Diffpy
-            struc = loadStructure(path)
-            if self.verbose > 0:
-                self.timings.time('Load Structure')
-            xyz_device = torch.tensor(struc.xyz_cartn).to(device='cuda')
-            if self.verbose > 0:
-                self.timings.time('Pull Structure from Device')
-    
-            struc.B11 = self.biso
-            struc.B22 = self.biso
-            struc.B33 = self.biso
-            struc.B12 = 0
-            struc.B13 = 0
-            struc.B23 = 0
-            dbc = DebyePDFCalculator(
-                qmin = self.qmin,
-                qmax = self.qmax,
-                qdamp = self.qdamp,
-                rmin = self.rmin,
-                rmax = self.rmax,
-                rstep = self.rstep,
-                delta2 = self.delta2,
-            )
-            if self.verbose > 0:
-                self.timings.time('Setup DebyePDFCalculator')
-            r, gr = dbc(struc)
-            self.timings.time('G(r)')
-            gr = torch.from_numpy(gr).to(dtype=torch.float32, device=self.device)
-            if self.verbose > 0:
-                self.timings.time('Push PDF to Device')
-        else:
-            raise NotImplementedError('Structure File Extention Not Supported')
