@@ -232,7 +232,8 @@ class DebyeCalculatorGPU:
         # Calculate total scattering, G(r)
         damp = 1 if self.qdamp == 0.0 else torch.exp(-(self.r.squeeze(-1) * self.qdamp)**2 / 2)
         lorch_mod = 1 if self.lorch_mod == None else torch.sinc(self.q * self.lorch_mod*(torch.pi / self.qmax))
-        self.timings.time('Modifications, Qdamp/Lorch')
+        if self.verbose > 0:
+            self.timings.time('Modifications, Qdamp/Lorch')
         gr = (2 / torch.pi) * torch.sum(self.fq.unsqueeze(-1) * torch.sin(self.q * self.r.permute(1,0))*self.qstep * lorch_mod, dim=0) * damp
         if self.verbose > 0:
             self.timings.time('G(r)')
