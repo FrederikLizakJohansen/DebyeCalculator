@@ -66,20 +66,22 @@ We introduce a GPU-accelerated open-source Python package for rapid calculation 
 
 Table: Pseudo-code incl. profiling (times)
 
-![Caption for example figure 1.\label{fig:figure 1}](figures/figure1.png)
+![Q and r-space comparison of our software and DiffPy-CMI on two systems - monoatomic (metal) and diatomic (metal oxide): (evt. Topas??)\label{fig:figure 1}](figures/figure1.png)
 and referenced from text using \autoref{fig:figure 1}.
-
-Figure 1: Q and r-space comparison ours and DiffPy-CMI on two systems: (evt. Topas??)
--	Monoatomic system (metal)
--	Diatomic system (metal oxide)
 
 ![CPU vs. GPU (in Q and in r-space) (+ batching)\label{fig:figure 2}](figures/figure2.png)
 and referenced from text using \autoref{fig:figure 2}.
 
-Figure 2: CPU vs. GPU (in Q and in r-space) (+ batching)
-
 ![GPU time vs. size and #atoms\label{fig:figure 3}](figures/figure3.png)
 and referenced from text using \autoref{fig:figure 3}.
+
+
+
+Figure 1: Q and r-space comparison ours and DiffPy-CMI on two systems: (evt. Topas??)
+-	Monoatomic system (metal)
+-	Diatomic system (metal oxide)
+  
+Figure 2: CPU vs. GPU (in Q and in r-space) (+ batching)
 
 Figure 3: GPU time vs. size and #atoms
 
