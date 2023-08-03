@@ -8,15 +8,15 @@ tags:
   - Nanoparticles
 authors:
   - name: Frederik L. Johansen
-    orcid: 0000-0000-0000-0000
+    orcid: 0000-0002-8049-8624
     equal-contrib: true
     affiliation: "1, 2" # (Multiple affiliations must be quoted)
   - name: Andy S. Anker
-    orcid: 0000-0000-0000-0000
+    orcid: 0000-0002-7403-6642
     equal-contrib: true # (This is how you can denote equal contributions between multiple authors)
     affiliation: 1
   - name: Ulrik Friis-Jensen
-    orcid: 0000-0000-0000-0000
+    orcid: 0000-0001-6154-1167
     affiliation: "1, 2"
   - name: Erik B. Dam
     orcid: 0000-0000-0000-0000
