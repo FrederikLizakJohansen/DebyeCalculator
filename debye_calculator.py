@@ -166,7 +166,8 @@ class DebyeCalculator:
             tuple or numpy.ndarray: Tuple containing q-values and scattering intensity I(q) if _keep_on_device is True, otherwise, numpy arrays on CPU.
         """
         # Setup structure
-        self.profiler.reset()
+        if (not _for_total_scattering) and (self.verbose > 0):
+            self.profiler.reset()
         self._initialise_structure(structure)
         if self.verbose > 0:
             self.profiler.time('Setup structure and form factors')
@@ -224,6 +225,8 @@ class DebyeCalculator:
             tuple or numpy.ndarray: Tuple containing r-values and pair distribution function G(r) if _keep_on_device is True, otherwise, numpy arrays on CPU.
         """
         # Calculate Scattering I(Q), S(Q), F(Q)
+        if self.verbose > 0:
+            self.profiler.reset()
         iq = self.iq(structure, _keep_on_device=True, _for_total_scattering=True)
         self.sq = iq/self.struc_fsa/self.struc_size
         if self.verbose > 0:
