@@ -32,6 +32,7 @@ Date: August 2023
 import torch
 import numpy as np
 from tqdm.auto import tqdm
+from torch.nn.functional import pdist
 from torch import cdist
 from ase.io import read
 from ase.build import make_supercell

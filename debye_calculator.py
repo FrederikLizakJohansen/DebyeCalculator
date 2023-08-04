@@ -4,6 +4,7 @@ import torch
 import numpy as np
 from torch.nn.functional import pdist
 from profiling import Profiler
+from ase import Atoms
 
 class DebyeCalculator:
     """
@@ -105,23 +106,29 @@ class DebyeCalculator:
                     self.struc_xyz = torch.FloatTensor(struc[:,1:].astype('float')).to(device=self.device)
             else:
                 raise NotImplementedError('Structure File Extention Not Supported')
-
-            # Unique elements and their counts
-            unique_elements, inverse, counts = np.unique(self.struc_elements, return_counts=True, return_inverse=True)
-            self.triu_indices = torch.triu_indices(self.struc_size, self.struc_size, 1)
-            self.unique_inverse = torch.from_numpy(inverse[self.triu_indices]).to(device=self.device)
-            self.struc_unique_form_factors = torch.stack([self.form_factor_func(self.FORM_FACTOR_COEF[el]) for el in unique_elements])
-            
-            # Get f_avg_sqrd and f_sqrd_avg
-            counts = torch.from_numpy(counts).to(device=self.device)
-            compositional_fractions = counts / torch.sum(counts)
-            self.struc_fsa = torch.sum(compositional_fractions.reshape(-1,1) * self.struc_unique_form_factors**2, dim=0)
-            #self.struc_fas = torch.sum(compositional_fractions.reshape(-1,1) * self.struc_unique_form_factors, dim=0)**2
-
-            # self scattering
-            self.struc_inverse = torch.from_numpy(np.array([inverse[i] for i in range(self.struc_size)])).to(device=self.device)
+        elif isinstance(structure_path, Atoms):
+            self.struc_elements = structure_path.get_chemical_symbols()
+            self.struc_size = len(self.struc_elements)
+            self.num_pairs = self.struc_size * (self.struc_size - 1) // 2
+            self.struc_occupancy = torch.ones((self.struc_size), dtype=torch.float32).to(device=self.device)
+            self.struc_xyz = torch.FloatTensor(np.array(structure_path.get_positions())).to(device=self.device)
         else:
             raise FileNotFoundError(structure_path)
+
+        # Unique elements and their counts
+        unique_elements, inverse, counts = np.unique(self.struc_elements, return_counts=True, return_inverse=True)
+        self.triu_indices = torch.triu_indices(self.struc_size, self.struc_size, 1)
+        self.unique_inverse = torch.from_numpy(inverse[self.triu_indices]).to(device=self.device)
+        self.struc_unique_form_factors = torch.stack([self.form_factor_func(self.FORM_FACTOR_COEF[el]) for el in unique_elements])
+        
+        # Get f_avg_sqrd and f_sqrd_avg
+        counts = torch.from_numpy(counts).to(device=self.device)
+        compositional_fractions = counts / torch.sum(counts)
+        self.struc_fsa = torch.sum(compositional_fractions.reshape(-1,1) * self.struc_unique_form_factors**2, dim=0)
+        #self.struc_fas = torch.sum(compositional_fractions.reshape(-1,1) * self.struc_unique_form_factors, dim=0)**2
+
+        # self scattering
+        self.struc_inverse = torch.from_numpy(np.array([inverse[i] for i in range(self.struc_size)])).to(device=self.device)
 
     def update_parameters(
         self,
@@ -199,7 +206,7 @@ class DebyeCalculator:
         if _keep_on_device:
             return self.q.squeeze(-1), iq
         else:
-            return self.q.squeeze(-1).cpu().numpy(), iq_out.cpu().numpy()
+            return self.q.squeeze(-1).cpu().numpy(), iq.cpu().numpy()
 
     def gr(
         self,
