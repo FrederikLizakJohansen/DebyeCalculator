@@ -1,3 +1,21 @@
+#  The atomic scattering factor is calculated using the method developed by  D. Waasmaier & A. Kirfel 
+#                                                                        
+#          New Analytical Scattering Factor Functions for Free Atoms       
+#                    and Ions for Free Atoms and Ions                      
+#                       D. Waasmaier & A. Kirfel                           
+#                    Acta Cryst. (1995). A51, 416-431                      
+#                                                                          
+#  fo the non-dispersive part of the atomic scattering factor is a           
+#  function of the selected element and of sin(theta)/lambda, where          
+#  lambda is the photon wavelengh and theta is incident angle.               
+#  This function can be approximated by a function:                          
+#                                                                          
+#    f0[k] = c + [SUM a_i*EXP(-b_i*(k^2)) ]                                  
+#                i=1,5                                                       
+#                                                                          
+#  where k = sin(theta) / lambda and c, a_i and b_i                          
+#  are the coefficients tabulated in this file
+
   #           a1            a2          a3            a4          a5            c           b1           b2           b3           b4           b5      Coh_xs (n)
   H    :  [ 0.413048,    0.294953,    0.187491,    0.080701,    0.023736,    0.000049,   15.569946,   32.398468,    5.711404,   61.889874,    1.334118,    1.7568]
   He   :  [ 0.732354,    0.753896,    0.283819,    0.190003,    0.039139,    0.000487,   11.553918,    4.595831,    1.546299,   26.463964,    0.377523,    1.3400]
