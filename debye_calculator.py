@@ -18,7 +18,7 @@ class DebyeCalculator:
         rmin (float): Minimum r-value for the pair distribution function (PDF) calculation. Default is 0.0.
         rmax (float): Maximum r-value for the PDF calculation. Default is 20.0.
         rstep (float): Step size for the r-values in the PDF calculation. Default is 0.01.
-        rthres (float): Threshold value for exclusion of distances below this value in the scattering calculation. Default is 1.0.
+        rthres (float): Threshold value for exclusion of distances below this value in the scattering calculation. Default is 0.0.
         biso (float): Debye-Waller isotropic atomic displacement parameter. Default is 0.0.
         device (str): Device to use for computation (e.g., 'cuda' for GPU or 'cpu' for CPU). Default is 'cuda'.
         batch_size (int or None): Batch size for computation. If None, the batch size will be automatically set. Default is None.
@@ -35,7 +35,7 @@ class DebyeCalculator:
         rmin = 0.0,
         rmax = 20.0,
         rstep = 0.01,
-        rthres = 1.0,
+        rthres = 0.0,
         biso = 0.0,
         device = 'cuda',
         batch_size = None,
@@ -178,15 +178,21 @@ class DebyeCalculator:
         dists = pdist(self.struc_xyz).split(self.batch_size)
         indices = self.triu_indices.split(self.batch_size, dim=1)
         inverse_indices = self.unique_inverse.split(self.batch_size, dim=1)
+        if self.verbose > 0:
+            self.profiler.time('Batching and Distances')
 
         # Calculate scattering using Debye Equation
         iq = torch.zeros((len(self.q))).to(device=self.device)
         for d, inv_idx, idx in zip(dists, inverse_indices, indices):
             mask = d >= self.rthres
             occ_product = self.struc_occupancy[idx[0]] * self.struc_occupancy[idx[1]]
+            #self.profiler.time('occ_product')
             sinc = torch.sinc(d[mask] * self.q / torch.pi)
+            #self.profiler.time('Sinc')
             ffp = self.struc_unique_form_factors[inv_idx[0]] * self.struc_unique_form_factors[inv_idx[1]]
+            #self.profiler.time('FFP')
             iq += torch.sum(occ_product.unsqueeze(-1) * ffp * sinc.permute(1,0), dim=0)
+            #self.profiler.time('I(Q) Addition')
 
         # Apply Debye-Weller Isotropic Atomic Displacement
         DW = 1 if self.biso == 0.0 else torch.exp(-self.q.squeeze(-1).pow(2) * self.biso/(8*torch.pi**2))
@@ -200,7 +206,8 @@ class DebyeCalculator:
 
         # Self-scattering contribution
         self_sinc = torch.ones((self.struc_size, len(self.q))).to(device=self.device)
-        iq += torch.sum((self.struc_occupancy.unsqueeze(-1) * self.struc_unique_form_factors[self.struc_inverse])**2 * self_sinc, dim=0)
+        iq += torch.sum((self.struc_occupancy.unsqueeze(-1) * self.struc_unique_form_factors[self.struc_inverse])**2 * self_sinc, dim=0) / 2
+        iq *= 2
         if self.verbose > 0:
             self.profiler.time('I(Q)')
 
@@ -208,6 +215,33 @@ class DebyeCalculator:
             return self.q.squeeze(-1), iq
         else:
             return self.q.squeeze(-1).cpu().numpy(), iq.cpu().numpy()
+
+    def sq(
+        self,
+        structure,
+        _keep_on_device = False,
+    ):
+        # Calculate Scattering S(Q)
+        iq = self.iq(structure, _keep_on_device=True, _for_total_scattering=True)
+        sq = iq/self.struc_fsa/self.struc_size
+        if _keep_on_device:
+            return self.q.squeeze(-1), sq
+        else:
+            return self.q.squeeze(-1).cpu().numpy(), sq.cpu().numpy()
+    
+    def fq(
+        self,
+        structure,
+        _keep_on_device = False,
+    ):
+        # Calculate Scattering S(Q)
+        iq = self.iq(structure, _keep_on_device=True, _for_total_scattering=True)
+        sq = iq/self.struc_fsa/self.struc_size
+        fq = self.q.squeeze(-1) * sq
+        if _keep_on_device:
+            return self.q.squeeze(-1), fq
+        else:
+            return self.q.squeeze(-1).cpu().numpy(), fq.cpu().numpy()
 
     def gr(
         self,
@@ -228,10 +262,10 @@ class DebyeCalculator:
         if self.verbose > 0:
             self.profiler.reset()
         iq = self.iq(structure, _keep_on_device=True, _for_total_scattering=True)
-        self.sq = iq/self.struc_fsa/self.struc_size
+        sq = iq/self.struc_fsa/self.struc_size
         if self.verbose > 0:
             self.profiler.time('S(Q)')
-        self.fq = self.q.squeeze(-1) * self.sq
+        fq = self.q.squeeze(-1) * sq
         if self.verbose > 0:
             self.profiler.time('F(Q)')
         
@@ -240,7 +274,7 @@ class DebyeCalculator:
         lorch_mod = 1 if self.lorch_mod == None else torch.sinc(self.q * self.lorch_mod*(torch.pi / self.qmax))
         if self.verbose > 0:
             self.profiler.time('Modifications, Qdamp/Lorch')
-        gr = (2 / torch.pi) * torch.sum(self.fq.unsqueeze(-1) * torch.sin(self.q * self.r.permute(1,0))*self.qstep * lorch_mod, dim=0) * damp
+        gr = (2 / torch.pi) * torch.sum(fq.unsqueeze(-1) * torch.sin(self.q * self.r.permute(1,0))*self.qstep * lorch_mod, dim=0) * damp
         if self.verbose > 0:
             self.profiler.time('G(r)')
 
