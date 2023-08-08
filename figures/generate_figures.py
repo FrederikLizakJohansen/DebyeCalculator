@@ -1,4 +1,4 @@
-from DebyeCalculatorGPU.debye_calculator import DebyeCalculator
+from ..package.debye_calculator import DebyeCalculator
 
 dc = DebyeCalculator()
 print(dc)
