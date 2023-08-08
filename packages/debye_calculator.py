@@ -165,9 +165,6 @@ class DebyeCalculator:
         Returns:
             tuple or numpy.ndarray: Tuple containing q-values and scattering intensity I(q) if _keep_on_device is True, otherwise, numpy arrays on CPU.
         """
-        # Setup structure
-        if (not _for_total_scattering) and (self.verbose > 0):
-            self.profiler.reset()
         self._initialise_structure(structure)
         if self.verbose > 0:
             self.profiler.time('Setup structure and form factors')
@@ -186,13 +183,9 @@ class DebyeCalculator:
         for d, inv_idx, idx in zip(dists, inverse_indices, indices):
             mask = d >= self.rthres
             occ_product = self.struc_occupancy[idx[0]] * self.struc_occupancy[idx[1]]
-            #self.profiler.time('occ_product')
             sinc = torch.sinc(d[mask] * self.q / torch.pi)
-            #self.profiler.time('Sinc')
             ffp = self.struc_unique_form_factors[inv_idx[0]] * self.struc_unique_form_factors[inv_idx[1]]
-            #self.profiler.time('FFP')
             iq += torch.sum(occ_product.unsqueeze(-1) * ffp * sinc.permute(1,0), dim=0)
-            #self.profiler.time('I(Q) Addition')
 
         # Apply Debye-Weller Isotropic Atomic Displacement
         DW = 1 if self.biso == 0.0 else torch.exp(-self.q.squeeze(-1).pow(2) * self.biso/(8*torch.pi**2))
