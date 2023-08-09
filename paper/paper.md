@@ -64,7 +64,9 @@ We introduce a GPU-accelerated open-source Python package for rapid calculation 
 
 # Results & Discussion:
 
-Blabla text
+The DebyeCalculator, illustrated in the pseudocode that follows, begins with an initialisation function that sets various parameters. These parameters are either user-defined or set to default. They include aspects of the computational environment (such as q-range, q-step, r-range, r-step, batch size, and device), atomic vibrations, radiation type, and instrumental parameters. During this initialisation phase, atomic form factor coefficients are loaded, tailoring the form factor calculation to the chosen radiation type. 
+Once initialised, the DebyeCalculator can compute various quantities: the scattering intensity I(q) through the Debye scattering equation, the Total Scattering Structure Function S(q), the Reduced Total Scattering Function F(q), and the Reduced Atomic Pair Distribution Function G(r). In this section, we specifically illustrate the pseudocode for the G(r) calculation. This is because the process for G(r) inherently involves the calculations for I(q), S(q), and F(q). If the atomic structure has not been loaded, the DebyeCalculator loads the structure and computes atomic form factors. Following this, it calculates the scattering intensity I(q) using the Debye scattering equation and subsequently determines the structure factor S(q). The function F(q) is derived using q-values and S(q). Necessary modifications, such as damping and the Lorch function, are applied before computing the G(r). Users have the flexibility to retain the results on the GPU or transfer them to the CPU.
+It is worth noting that the majority of the computational expense arises from the double sum calculation inherent in the Debye scattering equation.
 
 ```plaintext
 CLASS DebyeCalculator:                                                  | Time |
