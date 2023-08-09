@@ -6,8 +6,6 @@ from time import time
 import numpy as np
 from tqdm.auto import tqdm, trange
 import matplotlib.pyplot as plt
-import matplotlib
-matplotlib.use('Agg')
 from ase.io import write
 from debye_calculator import DebyeCalculator
 from generate_nanoparticles import generate_nanoparticles
@@ -80,6 +78,9 @@ def compare_methods(args):
     iq_dp = iq_dp_full[int(debye_calc.qmin/debye_calc.qstep):]
     
     # Figure
+    import matplotlib
+    matplotlib.use('Agg')
+
     fig, ((ax_iq, ax_sas), (ax_fq, ax_gr)) = plt.subplots(2,2, figsize=(13,8))
     
     ax_iq.plot(q,iq_dp, label='Diffpy-CMI')
@@ -117,7 +118,7 @@ def compare_methods(args):
     ax_gr.set_title('Pair Distribution Function')
     
     fig.tight_layout()
-    fig.savefig('../figures/figure2.png')
+    fig.savefig(os.path.join(args['output_folder'], 'figure2.png'))
     plt.close(fig)
     print('Finished Figure 2')
 
@@ -147,7 +148,8 @@ def time_methods(args):
             for _ in range(args['reps']):
                 t = time()
                 debye_calc.gr(particles[i]);
-                timings.append(time() - t)
+                t = time() - t
+                timings.append(t)
             mu.append(np.mean(timings))
             sigma.append(np.std(timings))
 
@@ -156,20 +158,21 @@ def time_methods(args):
     def time_diffpy():
         mu, sigma = [], []
         debye_calc = DebyeCalculator(qmin=1, qmax=25, qstep=0.1, biso=0.3)
-        debye_diffpy = DebyePDFCalculator(
-            rmin=debye_calc.rmin,
-            rmax=debye_calc.rmax,
-            rstep=debye_calc.rstep,
-            qmin=debye_calc.qmin,
-            qmax=debye_calc.qmax,
-            qdamp=debye_calc.qdamp
-        )
         for i in trange(len(radii), leave=False):
             timings = []
             for _ in range(args['reps']):
                 with tempfile.TemporaryDirectory() as tmpdirname:
                     tmp_structure_path = os.path.join(tmpdirname,'tmp_struc.xyz')
                     write(tmp_structure_path, particles[i], 'xyz')
+        
+                    debye_diffpy = DebyePDFCalculator(
+                        rmin=debye_calc.rmin,
+                        rmax=debye_calc.rmax,
+                        rstep=debye_calc.rstep,
+                        qmin=debye_calc.qmin,
+                        qmax=debye_calc.qmax,
+                        qdamp=debye_calc.qdamp
+                    )
                 
                     t = time()
                     diffpy_structure = loadStructure(tmp_structure_path)
@@ -180,33 +183,38 @@ def time_methods(args):
                     diffpy_structure.B13 = 0
                     diffpy_structure.B23 = 0
                     debye_diffpy(diffpy_structure);
-                    timings.append(time() - t)
+                    t = time() - t
+                    timings.append(t)
 
             mu.append(np.mean(timings))
             sigma.append(np.std(timings))
 
         return np.array(mu), np.array(sigma)
 
+    # Make output folder
+    if not os.path.exists(args['output_folder']):
+        os.mkdir(args['output_folder'])
+
     # Run CPU and save
     mu, sigma = time_debye_calculator(device='cpu', batch_size=args['batch_size_cpu'])
     out = np.array([sizes, n_atoms, mu, sigma]).T
-    np.savetxt(f'../figures/timings_cpu.csv', out, delimiter=',', header='diameter, n_atoms, mu, sigma', fmt='%f')
+    np.savetxt(os.path.join(args['output_folder'],'timings_cpu.csv'), out, delimiter=',', header='diameter, n_atoms, mu, sigma', fmt='%f')
 
     # Run CUDA and save
     if torch.cuda.is_available():
-        mu, sigma = time_debye_calculator(device='cpu', batch_size=args['batch_size_cuda'])
+        mu, sigma = time_debye_calculator(device='cuda', batch_size=args['batch_size_cuda'])
         out = np.array([sizes, n_atoms, mu, sigma]).T
         gpu_id = torch.cuda.get_device_name()
-        np.savetxt(f'../figures/timings_cuda_{gpu_id}.csv', out, delimiter=',', header='diameter, n_atoms, mu, sigma', fmt='%f')
+        np.savetxt(os.path.join(args['output_folder'], f'timings_cuda_{gpu_id}.csv'), out, delimiter=',', header='diameter, n_atoms, mu, sigma', fmt='%f')
 
     # Run Diffpy and save
     mu, sigma = time_diffpy()
     out = np.array([sizes, n_atoms, mu, sigma]).T
-    np.savetxt(f'../figures/timings_diffpy.csv', out, delimiter=',', header='diameter, n_atoms, mu, sigma', fmt='%f')
+    np.savetxt(os.path.join(args['output_folder'], 'timings_diffpy.csv'), out, delimiter=',', header='diameter, n_atoms, mu, sigma', fmt='%f')
 
     print('Finished generating data for Figure 3')
 
-def main(args):
+def produce_figures(args):
 
     if args['figure2']:
         compare_methods(args)
@@ -216,6 +224,7 @@ def main(args):
 if __name__ == '__main__':	
     parser = argparse.ArgumentParser()
     parser.add_argument('--cif', type=str, required=True)
+    parset.add_argument('--output_folder', type=str, required=True)
     parser.add_argument('--min_radius', type=float, default=2)
     parser.add_argument('--max_radius', type=float, default=10)
     parser.add_argument('--batch_size_cpu', type=int, default=1000)
@@ -224,4 +233,4 @@ if __name__ == '__main__':
     parser.add_argument('--figure3', action='store_true')
     parser.add_argument('--reps', type=int, default=1)
     args = parser.parse_args()
-    main(vars(args))
+    produce_figures(vars(args))
