@@ -89,10 +89,9 @@ CLASS DebyeCalculator:                                                  | Time |
       - Return G(r) either on the GPU-device or moved to CPU            | XX   |
 ```
 
-
-![Q and r-space comparison of our software and DiffPy-CMI on two systems - monoatomic (metal) and diatomic (metal oxide): (evt. Topas??).\label{fig:figure1}](../figures/figure1.png){width="100%"}
-
-and referenced from text using \autoref{fig:figure1}.
+DebyeCalculator produces results comparable to DiffPy-CMI[@juhas2015complex] (Appendix A), a widely recognised software for scattering pattern computations. \autoref{fig:figure2} Demonstrate the computational speed of our DebyeCalculator using CPU and GPU against DiffPy-CMI.[@juhas2015complex] While our CPU-based implementation tends to be marginally slower than DiffPy-CMI on CPU—owing to the latter's optimisation in C++—shifting our calculations to the GPU provides a notable boost in speed. This improvement primarily stems from the distribution of the double sum calculations across a more extensive set of cores than is feasible with a CPU.
+It is important to note the overhead associated with initiating GPU calculations. For atomic structures with fewer than 10 atoms, this overhead results in our GPU computations being marginally slower compared to DiffPy-CMI.[@juhas2015complex] Once the atomic structure size exceeds this 10-atom threshold, we observe a speed-up using the GPU. Specifically, from XXX atoms onward, the performance gain is on the order of YYY times.
+The choice of GPU hardware has a substantial influence on this speed advantage. As demonstrated in \autoref{fig:figure2}, using a KKK GPU, which offers XXX GB of RAM, the speed benefits become even more evident. Beyond the same 100-atom threshold, the KKK GPU delivers a performance that is two orders of magnitude faster, underscoring the significant role of the hardware. With the advancements of GPUs like NVIDIA's Grace Hopper Superchip[@NVIDIA], which boasts 576GB of fast-access GPU memory, there is potential for DebyeCalculator to achieve even greater speeds in the future.
 
 ![CPU vs. GPU (in Q and in r-space) (+ batching.\label{fig:figure2}](../figures/figure2.png)
 
@@ -111,6 +110,13 @@ XXX
 
 XXX
 
-# References
+# Appendix
 
+DebyeCalculator achieves similar results to DiffPy-CMI[@juhas2015complex] which is commonly used software to calculate the scattering pattern. \autoref{fig:figure1} shows the I(Q), SAXS pattern, F(Q) and G(r) for DebyeCalculator and DiffPy-CMI[@juhas2015complex] simulated from XXXX.[REF where chemical CIF are from] Here, similar scattering patterns are calculated. The F(Q) and G(r) calculation are slightly different as [blablabla].
+
+![Comparison of the calculated I(Q), SAXS, F(Q) and G(r) of our software and DiffPy-CMI[@juhas2015complex] on a chemical system of XXXX.[REF where chemical CIF are from].\label{fig:figure1}](../figures/figure1.png){width="100%"}
+
+and referenced from text using \autoref{fig:figure1}.
+
+# References
 
