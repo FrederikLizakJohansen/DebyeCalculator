@@ -64,7 +64,29 @@ We introduce a GPU-accelerated open-source Python package for rapid calculation 
 
 # Results & Discussion:
 
-Table: Pseudo-code incl. profiling (times)
+Blabla text
+
+```plaintext
+CLASS DebyeCalculator:                                                  | Time |
+  FUNCTION Initialize(parameters...):
+      - Set class parameters based on given input or defaults           | XX ms|
+      - Setup computational environment (e.g., q-values, r-values)      | XX   |
+      - Load atomic formfactor coefficients                             | XX   |
+      - Setup form factor calculation based on radiation type           | XX   |
+  
+  FUNCTION gr(structure, _keep_on_device):
+      - IF structure is not already loaded THEN                         | XX   |
+          - Load atomic structure from given path                       | XX   |
+          - Calculate atomic formfactors                                | XX   |
+      END IF
+      - Calculate scattering intensity I(Q) (Debye scattering equation) | XX   |
+      - Compute structure factor S(Q) based on I(Q)                     | XX   |
+      - Calculate F(Q) based on q-values and S(Q)                       | XX   |
+      - Apply modifications if necessary (like damping and Lorch)       | XX   |
+      - Calculate pair distribution function G(r) based on F(Q)         | XX   |
+      - Return G(r) either on the GPU-device or moved to CPU            | XX   |
+```
+
 
 ![Q and r-space comparison of our software and DiffPy-CMI on two systems - monoatomic (metal) and diatomic (metal oxide): (evt. Topas??).\label{fig:figure1}](../figures/figure1.png){width="100%"}
 
