@@ -22,9 +22,13 @@ def compare_methods(args):
     else:
         my_device = 'cpu'
         batch_size = args['batch_size_cpu']
+    
+    # Make output folder
+    if not os.path.exists(args['output_folder']):
+        os.mkdir(args['output_folder'])
 
     # Create instances
-    debye_calc = DebyeCalculator(device=my_device, batch_size = batch_size, qmin=1, qmax=25, qstep=0.01)
+    debye_calc = DebyeCalculator(device=my_device, batch_size = batch_size, qmin=1, qmax=40, qstep=0.01, rmax=20)
     debye_diffpy = DebyePDFCalculator(
         rmin = debye_calc.rmin,
         rmax = debye_calc.rmax,
@@ -47,7 +51,7 @@ def compare_methods(args):
     # Small Angle Scattering
     debye_calc.update_parameters(qmin=0, qmax=2)
     q_sas, sas_dc = debye_calc.iq(particle)
-    debye_calc.update_parameters(qmin=1, qmax=25)
+    debye_calc.update_parameters(qmin=1, qmax=40)
     
     with tempfile.TemporaryDirectory() as tmpdirname:
         tmp_structure_path = os.path.join(tmpdirname,'tmp_struc.xyz')
@@ -83,73 +87,76 @@ def compare_methods(args):
 
     fig, ((ax_iq, ax_sas), (ax_fq, ax_gr)) = plt.subplots(2,2, figsize=(13,8))
     
-    ax_iq.plot(q,iq_dp, label='Diffpy-CMI')
-    ax_iq.plot(q,iq_dc, label='Ours')
+    ax_iq.plot(q,iq_dp, label='DiffPy-CMI')
+    ax_iq.plot(q,iq_dc, label='DebyeCalculator (Ours)')
     ax_iq.plot(q,iq_dp-iq_dc, c='r', label='Difference')
     ax_iq.set(xlabel='$Q \; [\AA^{-1}]$', ylabel='$I(Q) \; [counts]$')
     ax_iq.grid(alpha=0.2)
     ax_iq.legend()
     ax_iq.set_title('Scattering Intensity')
     
-    ax_sas.plot(q_sas, iq_dp_full[:len(q_sas)], label='Diffpy-CMI')
-    ax_sas.plot(q_sas, sas_dc, label='Ours')
-    ax_sas.plot(q_sas, abs(iq_dp_full[:len(q_sas)]-sas_dc), c='r', label='Abs. Difference')
+    ax_sas.plot(q_sas, iq_dp_full[:len(q_sas)], label='DiffPy-CMI')
+    ax_sas.plot(q_sas, sas_dc, label='DebyeCalculator (Ours)')
+    ax_sas.plot(q_sas, iq_dp_full[:len(q_sas)]-sas_dc, c='r', label='Difference')
     ax_sas.set(xlabel='$Q \; [\AA^{-1}]$', ylabel='$I(Q) \; [counts]$')
     ax_sas.grid(alpha=0.2)
-    ax_sas.legend()
-    ax_sas.set_yscale('log')
+    #ax_sas.legend()
+    #ax_sas.set_yscale('log')
     ax_sas.set_xscale('log')
     ax_sas.set_title('Small Angle Scattering Intensity')
     
-    ax_fq.plot(q,fq_dp/max(fq_dp), label='Diffpy-CMI')
-    ax_fq.plot(q,fq_dc/max(fq_dc), label='Ours')
+    ax_fq.plot(q,fq_dp/max(fq_dp), label='DiffPy-CMI')
+    ax_fq.plot(q,fq_dc/max(fq_dc), label='DebyeCalculator (Ours)')
     ax_fq.plot(q, fq_dp/max(fq_dp) - fq_dc/max(fq_dc) - 1, c='r', label='Difference')
     ax_fq.set(xlabel='$Q \; [\AA^{-1}]$', ylabel='$F(Q)\; [a.u.]$', yticks=[])
     ax_fq.grid(alpha=0.2)
-    ax_fq.legend()
+    #ax_fq.legend()
     ax_fq.set_title('Reduced Structure Function')
     
-    ax_gr.plot(r,gr_dp/max(gr_dp), label='Diffpy-CMI')
-    ax_gr.plot(r,gr_dc/max(gr_dc), label='Ours')
+    ax_gr.plot(r,gr_dp/max(gr_dp), label='DiffPy-CMI')
+    ax_gr.plot(r,gr_dc/max(gr_dc), label='DebyeCalculator (Ours)')
     ax_gr.plot(r, gr_dp/max(gr_dp) - gr_dc/max(gr_dc) - 0.5, c='r', label='Difference')
-    ax_gr.set(xlabel='$r \; [\AA]$', ylabel='$G(r) \; [a.u.]$', yticks=[])
+    ax_gr.set(xlabel='$r \; [\AA]$', ylabel='$G_r(r) \; [a.u.]$', yticks=[])
     ax_gr.grid(alpha=0.2)
-    ax_gr.legend()
+    #ax_gr.legend()
     ax_gr.set_title('Pair Distribution Function')
     
     fig.tight_layout()
-    fig.savefig(os.path.join(args['output_folder'], 'figure2.png'))
+    fig.savefig(os.path.join(args['output_folder'], 'figure2.pdf'))
     plt.close(fig)
     print('Finished Figure 2')
 
 def time_methods(args):
     print('Generating data for Figure 3')
     structure_path = args['cif']
-    radii = np.arange(args['min_radius'], args['max_radius'], 1)
+    radii = np.arange(args['min_radius'], args['max_radius'], args['step_radius'])
     particles, sizes = generate_nanoparticles(structure_path, radii)
     n_atoms = [p.get_global_number_of_atoms() for p in particles]
     
     def dummy_calculations():
         # Perform some dummy calculations on the GPU
         dummy_data = torch.rand(1000, 1000, device='cuda')
-        for _ in range(100):
+        for _ in range(10000):
             dummy_data = torch.matmul(dummy_data, dummy_data)
 
     def time_debye_calculator(device, batch_size):
         mu, sigma = [], []
         debye_calc = DebyeCalculator(device=device, qmin=1, qmax=25, qstep=0.1, biso=0.3, batch_size=batch_size)
-        if device == 'cuda':
+        #if device == 'cuda':
             # Move a dummy tensor to the GPU to initialize the CUDA context
-            torch.cuda.FloatTensor(1).to('cuda')
-            for _ in range(10):
-                dummy_calculations()
+            #torch.cuda.FloatTensor(1000).to('cuda')
+            #dummy_calculations()
         for i in trange(len(radii), leave=False):
             timings = []
-            for _ in range(args['reps']):
+            for j in range(args['reps']+2):
+                #if device == 'cuda':
+                #    torch.cuda.FloatTensor(1000).to('cuda')
+                #    dummy_calculations()
                 t = time()
                 debye_calc.gr(particles[i]);
                 t = time() - t
-                timings.append(t)
+                if j > 1: 
+                    timings.append(t)
             mu.append(np.mean(timings))
             sigma.append(np.std(timings))
 
@@ -224,9 +231,10 @@ def produce_figures(args):
 if __name__ == '__main__':	
     parser = argparse.ArgumentParser()
     parser.add_argument('--cif', type=str, required=True)
-    parset.add_argument('--output_folder', type=str, required=True)
+    parser.add_argument('--output_folder', type=str, required=True)
     parser.add_argument('--min_radius', type=float, default=2)
     parser.add_argument('--max_radius', type=float, default=10)
+    parser.add_argument('--step_radius', type=float, default=1)
     parser.add_argument('--batch_size_cpu', type=int, default=1000)
     parser.add_argument('--batch_size_cuda', type=int, default=5000)
     parser.add_argument('--figure2', action='store_true')

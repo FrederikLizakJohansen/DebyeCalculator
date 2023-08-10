@@ -124,8 +124,8 @@ class DebyeCalculator:
         # Get f_avg_sqrd and f_sqrd_avg
         counts = torch.from_numpy(counts).to(device=self.device)
         compositional_fractions = counts / torch.sum(counts)
-        self.struc_fsa = torch.sum(compositional_fractions.reshape(-1,1) * self.struc_unique_form_factors**2, dim=0)
-        #self.struc_fas = torch.sum(compositional_fractions.reshape(-1,1) * self.struc_unique_form_factors, dim=0)**2
+        #self.struc_fsa = torch.sum(compositional_fractions.reshape(-1,1) * self.struc_unique_form_factors**2, dim=0)
+        self.struc_fsa = torch.sum(compositional_fractions.reshape(-1,1) * self.struc_unique_form_factors, dim=0)**2 # FAS
 
         # self scattering
         self.struc_inverse = torch.from_numpy(np.array([inverse[i] for i in range(self.struc_size)])).to(device=self.device)
