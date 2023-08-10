@@ -28,7 +28,7 @@ def compare_methods(args):
         os.mkdir(args['output_folder'])
 
     # Create instances
-    debye_calc = DebyeCalculator(device=my_device, batch_size = batch_size, qmin=1, qmax=40, qstep=0.01, rmax=20)
+    debye_calc = DebyeCalculator(device=my_device, batch_size = batch_size, qmin=1, qmax=40, qstep=0.01, rmax=20, biso=0.1)
     debye_diffpy = DebyePDFCalculator(
         rmin = debye_calc.rmin,
         rmax = debye_calc.rmax,
@@ -89,40 +89,46 @@ def compare_methods(args):
     
     ax_iq.plot(q,iq_dp, label='DiffPy-CMI')
     ax_iq.plot(q,iq_dc, label='DebyeCalculator (Ours)')
-    ax_iq.plot(q,iq_dp-iq_dc, c='r', label='Difference')
-    ax_iq.set(xlabel='$Q \; [\AA^{-1}]$', ylabel='$I(Q) \; [counts]$')
+    ax_iq.plot(q,iq_dp-iq_dc, c='#d62728', label='Difference')
+    ax_iq.set(xlabel='$Q$ [$\AA^{-1}$]', ylabel='$I(Q)$ [counts]')
     ax_iq.grid(alpha=0.2)
     ax_iq.legend()
     ax_iq.set_title('Scattering Intensity')
+    ax_iq.ticklabel_format(axis='y', style='sci', scilimits=(0,0))
     
     ax_sas.plot(q_sas, iq_dp_full[:len(q_sas)], label='DiffPy-CMI')
     ax_sas.plot(q_sas, sas_dc, label='DebyeCalculator (Ours)')
-    ax_sas.plot(q_sas, iq_dp_full[:len(q_sas)]-sas_dc, c='r', label='Difference')
-    ax_sas.set(xlabel='$Q \; [\AA^{-1}]$', ylabel='$I(Q) \; [counts]$')
-    ax_sas.grid(alpha=0.2)
-    #ax_sas.legend()
-    #ax_sas.set_yscale('log')
+    ax_sas.plot(q_sas, iq_dp_full[:len(q_sas)]-sas_dc, c='#d62728', label='Difference')
+    ax_sas.set(xlabel='$Q$ [$\AA^{-1}$]', ylabel='$I(Q)$ [counts]')
+    ax_sas.grid(alpha=0.2, which='both')
     ax_sas.set_xscale('log')
     ax_sas.set_title('Small Angle Scattering Intensity')
+    ax_sas.ticklabel_format(axis='y', style='sci', scilimits=(0,0))
+
+    ax_sas_inset = ax_sas.inset_axes([0.625, 0.625, 0.35, 0.35])
+    ax_sas_inset.plot(q_sas, iq_dp_full[:len(q_sas)], label='DiffPy-CMI')
+    ax_sas_inset.plot(q_sas, sas_dc, label='DebyeCalculator (Ours)')
+    ax_sas_inset.set_yscale('log')
+    ax_sas_inset.set_xscale('log')
+    ax_sas_inset.set(xlabel='$Q$ [$\AA^{-1}$]', ylabel='$I(Q)$ [counts]')
+    ax_sas_inset.grid(alpha=0.2, which='both')
     
     ax_fq.plot(q,fq_dp/max(fq_dp), label='DiffPy-CMI')
     ax_fq.plot(q,fq_dc/max(fq_dc), label='DebyeCalculator (Ours)')
-    ax_fq.plot(q, fq_dp/max(fq_dp) - fq_dc/max(fq_dc) - 1, c='r', label='Difference')
-    ax_fq.set(xlabel='$Q \; [\AA^{-1}]$', ylabel='$F(Q)\; [a.u.]$', yticks=[])
+    ax_fq.plot(q, fq_dp/max(fq_dp) - fq_dc/max(fq_dc) - 1, c='#d62728', label='Difference')
+    ax_fq.set(xlabel='$Q$ [$\AA^{-1}$]', ylabel='$F(Q)$ [a.u.]', yticks=[])
     ax_fq.grid(alpha=0.2)
-    #ax_fq.legend()
     ax_fq.set_title('Reduced Structure Function')
     
     ax_gr.plot(r,gr_dp/max(gr_dp), label='DiffPy-CMI')
     ax_gr.plot(r,gr_dc/max(gr_dc), label='DebyeCalculator (Ours)')
-    ax_gr.plot(r, gr_dp/max(gr_dp) - gr_dc/max(gr_dc) - 0.5, c='r', label='Difference')
-    ax_gr.set(xlabel='$r \; [\AA]$', ylabel='$G_r(r) \; [a.u.]$', yticks=[])
+    ax_gr.plot(r, gr_dp/max(gr_dp) - gr_dc/max(gr_dc) - 0.5, c='#d62728', label='Difference')
+    ax_gr.set(xlabel='$r$ [$\AA$]', ylabel='$G_r(r)$ [a.u.]', yticks=[])
     ax_gr.grid(alpha=0.2)
-    #ax_gr.legend()
-    ax_gr.set_title('Pair Distribution Function')
+    ax_gr.set_title('Reduced Pair Distribution Function')
     
     fig.tight_layout()
-    fig.savefig(os.path.join(args['output_folder'], 'figure2.pdf'))
+    fig.savefig(os.path.join(args['output_folder'], 'figure2.png'), dpi=300)
     plt.close(fig)
     print('Finished Figure 2')
 
