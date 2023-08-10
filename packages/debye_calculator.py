@@ -42,6 +42,8 @@ class DebyeCalculator:
         lorch_mod = False,
         radiation_type = 'xray',
         verbose = 0,
+        max_batch_size_bytes = 10000000000,
+        max_structure_size = 1000
     ):
         self.profiler = Profiler()
         self.verbose = verbose
@@ -74,11 +76,42 @@ class DebyeCalculator:
         for k,v in self.FORM_FACTOR_COEF.items():
             if None in v:
                 v = [value if value is not None else np.nan for value in v]
-            self.FORM_FACTOR_COEF[k] = torch.FloatTensor(v).to(device=self.device)
+            self.FORM_FACTOR_COEF[k] = torch.tensor(v).to(device=self.device, dtype=torch.float32)
         if radiation_type.lower() in ['xray', 'x']:
             self.form_factor_func = lambda p: torch.sum(p[:5] * torch.exp(-1*p[6:11] * (self.q / (4*torch.pi)).pow(2)), dim=1) + p[5]
         elif radiation_type.lower() in ['neutron', 'n']:
             self.form_factor_func = lambda p: p[11].unsqueeze(-1)
+
+        # Estimate optimal batch size
+        self.estopt_batch_size = self._estimate_optimal_batch_size_bytes(max_batch_size_bytes, max_structure_size) // 4
+        self.estopt_batch_size = 100 # TODO
+
+    def _estimate_optimal_batch_size_bytes(
+        self,
+        max_batch_size_bytes,
+        max_structure_size,
+        step = 100,
+    ):
+        # Estimate available memory
+        if self.device == 'cuda':
+            available_memory = torch.cuda.mem_get_info()[0] * 1/6
+        else:
+            available_memory = 6000000000 # 6 GB in bytes, placeholder
+
+        # Iterate over batch sizes and estimate memory usage
+        dists_size = (max_structure_size*(max_structure_size - 1) // 2) * 4 # Assuming float32 elements (4 bytes each)
+        structure_size = max_structure_size * 4 # Assuming float32 elements (4 bytes each)
+        q_size =  self.q.shape[0] * 4 # Assuming float32 elements (4 bytes each)
+        r_size = self.r.shape[0] * 4 # Assuming float32 elements (4 bytes each)
+
+        for batch_size in range(1, max_batch_size_bytes + 1, step):
+            memory_usage = r_size + 3 * q_size + structure_size + 2*dists_size + min(batch_size * q_size, dists_size * q_size)
+            #print(memory_usage)
+            if memory_usage >= available_memory:
+                print(memory_usage)
+                return max(4, batch_size - step)  # Return previous batch size that fit within memory
+
+        return max_batch_size_bytes # If no size fits, return the largest tried
 
     def _initialise_structure(
         self,
@@ -99,11 +132,11 @@ class DebyeCalculator:
                 self.struc_size = len(self.struc_elements)
                 self.num_pairs = self.struc_size * (self.struc_size - 1) // 2
                 if struc.shape[1] == 5:
-                    self.struc_occupancy = torch.from_numpy(struc[:,-1]).to(device=self.device)
-                    self.struc_xyz = torch.FloatTensor(struc[:,1:-1].astype('float')).to(device=self.device)
+                    self.struc_occupancy = torch.from_numpy(struc[:,-1]).to(device=self.device, dtype=torch.float32)
+                    self.struc_xyz = torch.tensor(struc[:,1:-1].astype('float')).to(device=self.device, dtype=torch.float32)
                 else:
                     self.struc_occupancy = torch.ones((self.struc_size), dtype=torch.float32).to(device=self.device)
-                    self.struc_xyz = torch.FloatTensor(struc[:,1:].astype('float')).to(device=self.device)
+                    self.struc_xyz = torch.tensor(struc[:,1:].astype('float')).to(device=self.device, dtype=torch.float32)
             else:
                 raise NotImplementedError('Structure File Extention Not Supported')
         elif isinstance(structure_path, Atoms):
@@ -111,7 +144,7 @@ class DebyeCalculator:
             self.struc_size = len(self.struc_elements)
             self.num_pairs = self.struc_size * (self.struc_size - 1) // 2
             self.struc_occupancy = torch.ones((self.struc_size), dtype=torch.float32).to(device=self.device)
-            self.struc_xyz = torch.FloatTensor(np.array(structure_path.get_positions())).to(device=self.device)
+            self.struc_xyz = torch.tensor(np.array(structure_path.get_positions())).to(device=self.device, dtype=torch.float32)
         else:
             raise FileNotFoundError(structure_path)
 
@@ -145,8 +178,8 @@ class DebyeCalculator:
             
         if np.any([k in ['qmin','qmax','qstep','rmin', 'rmax', 'rstep'] for k in kwargs.keys()]):
             # Re-initialise ranges
-            self.q = torch.arange(self.qmin, self.qmax, self.qstep).unsqueeze(-1).to(device=self.device)
-            self.r = torch.arange(self.rmin, self.rmax, self.rstep).unsqueeze(-1).to(device=self.device)
+            self.q = torch.arange(self.qmin, self.qmax, self.qstep).unsqueeze(-1).to(device=self.device, dtype=torch.float32)
+            self.r = torch.arange(self.rmin, self.rmax, self.rstep).unsqueeze(-1).to(device=self.device, dtype=torch.float32)
 
     def iq(
         self,
@@ -171,7 +204,7 @@ class DebyeCalculator:
 
         # Calculate distances and batch
         if self.batch_size is None:
-            self.batch_size = self.num_pairs
+            self.batch_size = self.estopt_batch_size
         dists = pdist(self.struc_xyz).split(self.batch_size)
         indices = self.triu_indices.split(self.batch_size, dim=1)
         inverse_indices = self.unique_inverse.split(self.batch_size, dim=1)
@@ -179,17 +212,22 @@ class DebyeCalculator:
             self.profiler.time('Batching and Distances')
 
         # Calculate scattering using Debye Equation
-        iq = torch.zeros((len(self.q))).to(device=self.device)
+        iq = torch.zeros((len(self.q))).to(device=self.device, dtype=torch.float32)
         for d, inv_idx, idx in zip(dists, inverse_indices, indices):
             mask = d >= self.rthres
             occ_product = self.struc_occupancy[idx[0]] * self.struc_occupancy[idx[1]]
+            print(occ_product.shape)
             sinc = torch.sinc(d[mask] * self.q / torch.pi)
+            print(sinc.shape)
             ffp = self.struc_unique_form_factors[inv_idx[0]] * self.struc_unique_form_factors[inv_idx[1]]
+            print(ffp.shape)
+            print(torch.sum(occ_product.unsqueeze(-1) * ffp * sinc.permute(1,0), dim=0).shape)
             iq += torch.sum(occ_product.unsqueeze(-1) * ffp * sinc.permute(1,0), dim=0)
 
         # Apply Debye-Weller Isotropic Atomic Displacement
         DW = 1 if self.biso == 0.0 else torch.exp(-self.q.squeeze(-1).pow(2) * self.biso/(8*torch.pi**2))
         iq *= DW
+        #print(iq.dtype)
         
         # For total scattering
         if _for_total_scattering:
@@ -198,8 +236,8 @@ class DebyeCalculator:
             return iq
 
         # Self-scattering contribution
-        self_sinc = torch.ones((self.struc_size, len(self.q))).to(device=self.device)
-        iq += torch.sum((self.struc_occupancy.unsqueeze(-1) * self.struc_unique_form_factors[self.struc_inverse])**2 * self_sinc, dim=0) / 2
+        sinc = torch.ones((self.struc_size, len(self.q))).to(device=self.device)
+        iq += torch.sum((self.struc_occupancy.unsqueeze(-1) * self.struc_unique_form_factors[self.struc_inverse])**2 * sinc, dim=0) / 2
         iq *= 2
         if self.verbose > 0:
             self.profiler.time('I(Q)')
