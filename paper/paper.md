@@ -45,11 +45,7 @@ aas-doi: 10.3847/xxxxx <- update this with the DOI from AAS once you know it.
 aas-journal: Astrophysical Journal <- The name of the AAS journal.
 ---
 
-# Abstract
-
-XXX
-
-# Introduction
+# Summary
 
 The Debye scattering equation, derived in 1915 by P. Debye, is commonly used to calculate the scattering intensities considering the position of each atom in the structure:[@debye:1915; @scardi:2016]
 
@@ -59,14 +55,12 @@ I(Q) = \sum_{i=1}^{N} \sum_{j=1}^{N} f_i(Q) f_j(Q) \frac{\sin(Qr_{ij})}{Qr_{ij}}
 
 In this equation, Q is the scattering vector, r<sub>ij</sub> is the distance between atom-pair, i and j, and f is the atomic scattering factor. 
 The Debye scattering equation can be used to compute the scattering pattern of any atomic structure and is commonly used to study both crystalline and non-crystalline materials with a range of scattering techniques like powder diffraction (PD), total scattering (TS) with pair distribution function (PDF) and small-angle scattering (SAS).[@scardi:2016] Although the Debye scattering equation is extremely versatile, its applicability has been limited by the double sum of the atoms in the structure which makes the equation computationally expensive to calculate. 
-With the advancement in computing technology,[@schaller1997moore] new horizons have opened up for applying the Debye scattering equation to larger materials. Modern central processing Units (CPUs), ranging from tenths to hundreds of cores, offer an opportunity to parallelise the computation, significantly enhancing computational efficiency. This parallel architecture allows for the distribution of the double sum calculations across multiple cores. Graphics processing units (GPUs) further expand computational possibilities, consisting of hundreds or even thousands of smaller, more efficient cores designed for parallel processing.[@garland2008parallel] Unlike traditional CPUs, GPUs are ideally suited for calculations like the Debye scattering equation, where many computations can be performed simultaneously. By leveraging GPU acceleration, researchers can achieve computational speeds that are orders of magnitude faster than even the most advanced multi-core CPUs.
-We introduce a GPU-accelerated open-source Python package for rapid calculation of the scattering intensity from an xyz-file using the Debye scattering equation. The xyz-file format describes the atomic structure with the atomic identity and its xyz-coordinates and is commonly used in materials chemistry. We further calculate the PDF as described in Underneath the Bragg Peaks.[@egami2003underneath] We show that our software can simulate the PD, TS, SAS and PDF data orders of magnitudes faster than on the CPU while being open-source and easily assessable by other scientists.
-
-# Results & Discussion:
+With the advancement in computing technology,[@schaller1997moore] new horizons have opened up for applying the Debye scattering equation to larger materials. Modern central processing Units (CPUs), ranging from tenths to hundreds of cores, offer an opportunity to parallelise the computation, significantly enhancing computational efficiency. This parallel architecture allows for the distribution of the double sum calculations across multiple cores. Graphics processing units (GPUs) further expand computational possibilities, consisting of hundreds or even thousands of smaller, more efficient cores designed for parallel processing.[@garland2008parallel] Unlike traditional CPUs, GPUs are ideally suited for calculations like the Debye scattering equation, where many computations can be performed simultaneously. By leveraging GPU acceleration, computational speeds that are orders of magnitude faster than even the most advanced multi-core CPUs are obtained.
+We introduce a GPU-accelerated open-source Python package for rapid calculation of the scattering intensity from a xyz-file using the Debye scattering equation. The xyz-file format describes the atomic structure with the atomic identify and its xyz-coordinates and is commonly used in materials chemistry. We further calculate the PDF as described in Underneath the Bragg Peaks.[@egami2003underneath] We show that our software can simulate the PD, TS, SAS and PDF data orders of magnitudes faster than on the CPU, while being open-source and easily assessable from our GitHub (https://github.com/FrederikLizakJohansen/DebyeCalculatorGPU/tree/main).
 
 The DebyeCalculator, illustrated in the pseudocode that follows, begins with an initialisation function that sets various parameters. These parameters are either user-defined or set to default. They include aspects of the computational environment (such as q-range, q-step, r-range, r-step, batch size, and device), atomic vibrations, radiation type, and instrumental parameters. During this initialisation phase, atomic form factor coefficients are loaded, tailoring the form factor calculation to the chosen radiation type. 
-Once initialised, the DebyeCalculator can compute various quantities: the scattering intensity I(q) through the Debye scattering equation, the Total Scattering Structure Function S(q), the Reduced Total Scattering Function F(q), and the Reduced Atomic Pair Distribution Function G(r). In this section, we specifically illustrate the pseudocode for the G(r) calculation. This is because the process for G(r) inherently involves the calculations for I(q), S(q), and F(q). If the atomic structure has not been loaded, the DebyeCalculator loads the structure and computes atomic form factors. Following this, it calculates the scattering intensity I(q) using the Debye scattering equation and subsequently determines the structure factor S(q). The function F(q) is derived using q-values and S(q). Necessary modifications, such as damping and the Lorch function, are applied before computing the G(r). Users have the flexibility to retain the results on the GPU or transfer them to the CPU.
-It is worth noting that the majority of the computational expense arises from the double sum calculation inherent in the Debye scattering equation.
+Once initialised, the DebyeCalculator can compute various quantities: the scattering intensity I(q) through the Debye scattering equation, the Total Scattering Structure Function S(q), the Reduced Total Scattering Function F(q), and the Reduced Atomic Pair Distribution Function G(r). In this section, we specifically illustrate the pseudocode for the G(r) calculation. This is because the process for G(r) inherently involves the calculations for I(q), S(q), and F(q). If the atomic structure has not been loaded, the DebyeCalculator loads the structure and computes the atomic form factors. Following this, it calculates the scattering intensity I(q) using the Debye scattering equation and subsequently determines the structure factor S(q). The function F(q) is derived using q-values and S(q). Necessary modifications, such as damping and the Lorch function, are applied before computing the G(r). Users have the flexibility to retain the results on the GPU or transfer them to the CPU. 
+It is worth noting that the majority of the computational expense arises from the double sum calculation inherent in the Debye scattering equation. In order to take full advantage of parallel computing, we introduce a batch size parameter which determines the number of calculations processed simultaneously. Larger batch sizes generally lead to faster computation times as they can exploit the parallel nature of GPUs more effectively. However, it's essential to note that larger batch sizes consume more RAM, thereby necessitating better hardware. Consequently, users with more substantial GPU memory can accommodate even larger batch sizes and achieve even greater computation speeds.
 
 ```plaintext
 CLASS DebyeCalculator:                                                  | Time |
@@ -89,34 +83,26 @@ CLASS DebyeCalculator:                                                  | Time |
       - Return G(r) either on the GPU-device or moved to CPU            | XX   |
 ```
 
-DebyeCalculator produces results comparable to DiffPy-CMI[@juhas2015complex] (Appendix A), a widely recognised software for scattering pattern computations. \autoref{fig:figure2} Demonstrate the computational speed of our DebyeCalculator using CPU and GPU against DiffPy-CMI.[@juhas2015complex] While our CPU-based implementation tends to be marginally slower than DiffPy-CMI on CPU—owing to the latter's optimisation in C++—shifting our calculations to the GPU provides a notable boost in speed. This improvement primarily stems from the distribution of the double sum calculations across a more extensive set of cores than is feasible with a CPU.
-It is important to note the overhead associated with initiating GPU calculations. For atomic structures with fewer than 10 atoms, this overhead results in our GPU computations being marginally slower compared to DiffPy-CMI.[@juhas2015complex] Once the atomic structure size exceeds this 10-atom threshold, we observe a speed-up using the GPU. Specifically, from XXX atoms onward, the performance gain is on the order of YYY times.
-The choice of GPU hardware has a substantial influence on this speed advantage. As demonstrated in \autoref{fig:figure2}, using a KKK GPU, which offers XXX GB of RAM, the speed benefits become even more evident. Beyond the same 100-atom threshold, the KKK GPU delivers a performance that is two orders of magnitude faster, underscoring the significant role of the hardware. With the advancements of GPUs like NVIDIA's Grace Hopper Superchip[@NVIDIA], which boasts 576GB of fast-access GPU memory, there is potential for DebyeCalculator to achieve even greater speeds in the future.
-
-![CPU vs. GPU (in Q and in r-space) (+ batching.\label{fig:figure2}](../figures/figure2.png)
-
-and referenced from text using \autoref{fig:figure2}.
+In order to benchmark our implementation, we compare simulated scattering patterns from DebyeCalculator against DiffPy-CMI,[@juhas2015complex] which is a widely recognised software for scattering patterns computations. Here, our implementation obtains the same scattering patterns as DiffPy-CMI (Supporting Information A), while being about three times faster on CPU (\autoref{fig:figure3}). Both calculations are run on a LLL CPU with a 004 batch size.
+Shifting our calculations to the GPU provides another notable boost in speed (\autoref{fig:figure3}). This improvement primarily stems from the distribution of the double sum calculations across a more extensive set of cores than is feasible with the CPU. It is important to note the overhead associated with initiating GPU calculations. For atomic structures with fewer than 000 atoms, this overhead results in our GPU computations being slower than DiffPy-CMI and our CPU implementation. Once the atomic structure size exceeds this 000-atom threshold, we observe a speed-up using a blabla GPU and a batch size of 004. Specifically, 001 atoms onwards, the performance gain is on the order of 002 times.
+The choice of GPU hardware has a substantial influence on this speed advantage. As demonstrated in Figure 1, using a KKK GPU, which offers XXX GB of RAM enabling a batch size of 004, the speed benefits become even more evident. Beyond the same 000-atom threshold, the KKK GPU delivers a performance that is two orders of magnitude faster, underscoring the significant role of the hardware. With the advancements of GPUs like NVIDIA's Grace Hopper Superchip[@NVIDIA], which boasts 576GB of fast-access GPU memory, there is potential for DebyeCalculator to achieve even greater speeds in the future.
 
 ![GPU time vs. size and #atoms,\label{fig:figure3}](../figures/figure3.png)
 
-and referenced from text using \autoref{fig:figure3}.
+# Statement of need
 
+Several software packages already exist for simulating the Debye scattering equation, including DiffPy-CMI, debyer[@debyer], Debussy,[@cervellino2010debussy; @cervellino2015debussy] TOPAS,[@coelho2018topas] and BCL::SAXS.[@putnam2015bcl] Our software distinguishes itself in several ways. Firstly, it is freely available and open-source licensed under the Apache License 2.0. Moreover, it is conveniently implemented as a ‘pip’ install package and has been integrated with Google Colab (https://github.com/FrederikLizakJohansen/DebyeCalculatorGPU/blob/main/quickstart/QuickStart.ipynb), allowing users to rapidly calculate the Debye scattering equation without the need of local software installations. At the same time, our software is fast, and GPU accelerated. Crucially, our software is optimised for speed and outputs both I(Q), S(Q), F(Q) and G(r).
 
-# Conclusions
-
-XXX
 
 # Acknowledgements
 
-XXX
+This work is part of a project that has received funding from the European Research Council (ERC) under the European Union’s Horizon 2020 Research and Innovation Programme (grant agreement No. 804066).
 
-# Appendix
+Raghav, Kirsten: Please add ack.
 
-DebyeCalculator achieves similar results to DiffPy-CMI[@juhas2015complex] which is commonly used software to calculate the scattering pattern. \autoref{fig:figure1} shows the I(Q), SAXS pattern, F(Q) and G(r) for DebyeCalculator and DiffPy-CMI[@juhas2015complex] simulated from XXXX.[REF where chemical CIF are from] Here, similar scattering patterns are calculated. The F(Q) and G(r) calculation are slightly different as [blablabla].
+# Supporting Information A
 
-![Comparison of the calculated I(Q), SAXS, F(Q) and G(r) of our software and DiffPy-CMI[@juhas2015complex] on a chemical system of XXXX.[REF where chemical CIF are from].\label{fig:figure1}](../figures/figure1.png){width="100%"}
-
-and referenced from text using \autoref{fig:figure1}.
+![Comparison of the calculated I(Q), SAXS, F(Q) and G(r) of DebyeCalculator and DiffPy-CMI[@juhas2015complex] on a synthetic crystallographic information file describing a CoO2 antifluorite crystal structure.[@CIF] Note that the scattering pattern simulated with DiffPy-CMI is hidden underneath the scattering pattern simulated with DebyeCalculator.\label{fig:figure2}](../figures/figure2.png)
 
 # References
 
