@@ -299,3 +299,31 @@ class DebyeCalculator:
             return self.r.squeeze(-1), gr
         else:
             return self.r.squeeze(-1).cpu().numpy(), gr.cpu().numpy()
+
+    def _return_all(
+        self,
+        structure,
+        _keep_on_device = False,
+    ):
+        """
+        Calculate I(Q), S(Q), F(Q) and G(r) for the given atomic structure and return all.
+
+        Parameters:
+            structure (str): Path to the atomic structure file in XYZ format.
+            _keep_on_device (bool): Flag to keep the results on the class device. Default is False.
+
+        Returns:
+            tuple or numpy.ndarray: Tuple containing r-values, Q-values and I(Q), S(Q), F(Q) and G(r) if _keep_on_device is True, otherwise, numpy arrays on CPU.
+        """
+        iq = self.iq(structure, _keep_on_device=True, _for_total_scattering=True)
+        _, iq_out = self.iq(structure, _keep_on_device=True, _for_total_scattering=False)
+        sq = iq/self.struc_form_avg_sq/self.struc_size
+        fq = self.q.squeeze(-1) * sq
+        damp = 1 if self.qdamp == 0.0 else torch.exp(-(self.r.squeeze(-1) * self.qdamp).pow(2) / 2)
+        lorch_mod = 1 if self.lorch_mod == None else torch.sinc(self.q * self.lorch_mod*(torch.pi / self.qmax))
+        gr = (2 / torch.pi) * torch.sum(fq.unsqueeze(-1) * torch.sin(self.q * self.r.permute(1,0))*self.qstep * lorch_mod, dim=0) * damp
+
+        if _keep_on_device:
+            return self.r.squeeze(-1), self.q.squeeze(-1), iq_out, sq, fq, gr
+        else:
+            return self.r.squeeze(-1).cpu().numpy(), self.q.squeeze(-1).cpu().numpy(), iq_out.cpu().numpy(), sq.cpu().numpy(), fq.cpu().numpy(), gr.cpu().numpy()
