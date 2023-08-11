@@ -42,8 +42,7 @@ class DebyeCalculator:
         lorch_mod = False,
         radiation_type = 'xray',
         verbose = 0,
-        max_batch_size_bytes = 10000000000,
-        max_structure_size = 1000
+        _max_batch_size = 4000,
     ):
         self.profiler = Profiler()
         self.verbose = verbose
@@ -82,36 +81,8 @@ class DebyeCalculator:
         elif radiation_type.lower() in ['neutron', 'n']:
             self.form_factor_func = lambda p: p[11].unsqueeze(-1)
 
-        # Estimate optimal batch size
-        self.estopt_batch_size = self._estimate_optimal_batch_size_bytes(max_batch_size_bytes, max_structure_size) // 4
-        self.estopt_batch_size = 100 # TODO
-
-    def _estimate_optimal_batch_size_bytes(
-        self,
-        max_batch_size_bytes,
-        max_structure_size,
-        step = 100,
-    ):
-        # Estimate available memory
-        if self.device == 'cuda':
-            available_memory = torch.cuda.mem_get_info()[0] * 1/6
-        else:
-            available_memory = 6000000000 # 6 GB in bytes, placeholder
-
-        # Iterate over batch sizes and estimate memory usage
-        dists_size = (max_structure_size*(max_structure_size - 1) // 2) * 4 # Assuming float32 elements (4 bytes each)
-        structure_size = max_structure_size * 4 # Assuming float32 elements (4 bytes each)
-        q_size =  self.q.shape[0] * 4 # Assuming float32 elements (4 bytes each)
-        r_size = self.r.shape[0] * 4 # Assuming float32 elements (4 bytes each)
-
-        for batch_size in range(1, max_batch_size_bytes + 1, step):
-            memory_usage = r_size + 3 * q_size + structure_size + 2*dists_size + min(batch_size * q_size, dists_size * q_size)
-            #print(memory_usage)
-            if memory_usage >= available_memory:
-                print(memory_usage)
-                return max(4, batch_size - step)  # Return previous batch size that fit within memory
-
-        return max_batch_size_bytes # If no size fits, return the largest tried
+        # Batch size
+        self._max_batch_size = _max_batch_size
 
     def _initialise_structure(
         self,
@@ -139,6 +110,7 @@ class DebyeCalculator:
                     self.struc_xyz = torch.tensor(struc[:,1:].astype('float')).to(device=self.device, dtype=torch.float32)
             else:
                 raise NotImplementedError('Structure File Extention Not Supported')
+        # ASE Atoms object
         elif isinstance(structure_path, Atoms):
             self.struc_elements = structure_path.get_chemical_symbols()
             self.struc_size = len(self.struc_elements)
@@ -157,8 +129,7 @@ class DebyeCalculator:
         # Get f_avg_sqrd and f_sqrd_avg
         counts = torch.from_numpy(counts).to(device=self.device)
         compositional_fractions = counts / torch.sum(counts)
-        #self.struc_fsa = torch.sum(compositional_fractions.reshape(-1,1) * self.struc_unique_form_factors**2, dim=0)
-        self.struc_fsa = torch.sum(compositional_fractions.reshape(-1,1) * self.struc_unique_form_factors, dim=0)**2 # FAS
+        self.struc_form_avg_sq = torch.sum(compositional_fractions.reshape(-1,1) * self.struc_unique_form_factors, dim=0)**2
 
         # self scattering
         self.struc_inverse = torch.from_numpy(np.array([inverse[i] for i in range(self.struc_size)])).to(device=self.device)
@@ -188,15 +159,15 @@ class DebyeCalculator:
         _for_total_scattering = False,
     ):
         """
-        Calculate the scattering intensity I(q) for the given atomic structure.
+        Calculate the scattering intensity I(Q) for the given atomic structure.
 
         Parameters:
             structure (str): Path to the atomic structure file in XYZ format.
             _keep_on_device (bool): Flag to keep the results on the class device. Default is False.
-            _for_total_scattering (bool): Flag to return the scattering intensity I(q) without the self-scattering contribution. Default is False.
+            _for_total_scattering (bool): Flag to return the scattering intensity I(Q) without the self-scattering contribution. Default is False.
 
         Returns:
-            tuple or numpy.ndarray: Tuple containing q-values and scattering intensity I(q) if _keep_on_device is True, otherwise, numpy arrays on CPU.
+            tuple or numpy.ndarray: Tuple containing Q-values and scattering intensity I(Q) if _keep_on_device is True, otherwise, numpy arrays on CPU.
         """
         self._initialise_structure(structure)
         if self.verbose > 0:
@@ -204,7 +175,7 @@ class DebyeCalculator:
 
         # Calculate distances and batch
         if self.batch_size is None:
-            self.batch_size = self.estopt_batch_size
+            self.batch_size = self._max_batch_size
         dists = pdist(self.struc_xyz).split(self.batch_size)
         indices = self.triu_indices.split(self.batch_size, dim=1)
         inverse_indices = self.unique_inverse.split(self.batch_size, dim=1)
@@ -216,18 +187,13 @@ class DebyeCalculator:
         for d, inv_idx, idx in zip(dists, inverse_indices, indices):
             mask = d >= self.rthres
             occ_product = self.struc_occupancy[idx[0]] * self.struc_occupancy[idx[1]]
-            print(occ_product.shape)
             sinc = torch.sinc(d[mask] * self.q / torch.pi)
-            print(sinc.shape)
             ffp = self.struc_unique_form_factors[inv_idx[0]] * self.struc_unique_form_factors[inv_idx[1]]
-            print(ffp.shape)
-            print(torch.sum(occ_product.unsqueeze(-1) * ffp * sinc.permute(1,0), dim=0).shape)
             iq += torch.sum(occ_product.unsqueeze(-1) * ffp * sinc.permute(1,0), dim=0)
 
         # Apply Debye-Weller Isotropic Atomic Displacement
         DW = 1 if self.biso == 0.0 else torch.exp(-self.q.squeeze(-1).pow(2) * self.biso/(8*torch.pi**2))
         iq *= DW
-        #print(iq.dtype)
         
         # For total scattering
         if _for_total_scattering:
@@ -252,9 +218,19 @@ class DebyeCalculator:
         structure,
         _keep_on_device = False,
     ):
+        """
+        Calculate the structure function S(Q) for the given atomic structure.
+
+        Parameters:
+            structure (str): Path to the atomic structure file in XYZ format.
+            _keep_on_device (bool): Flag to keep the results on the class device. Default is False.
+
+        Returns:
+            tuple or numpy.ndarray: Tuple containing Q-values and structure function S(Q) if _keep_on_device is True, otherwise, numpy arrays on CPU.
+        """
         # Calculate Scattering S(Q)
         iq = self.iq(structure, _keep_on_device=True, _for_total_scattering=True)
-        sq = iq/self.struc_fsa/self.struc_size
+        sq = iq/self.struc_form_avg_sq/self.struc_size
         if _keep_on_device:
             return self.q.squeeze(-1), sq
         else:
@@ -265,9 +241,19 @@ class DebyeCalculator:
         structure,
         _keep_on_device = False,
     ):
+        """
+        Calculate the reduced structure function F(Q) for the given atomic structure.
+
+        Parameters:
+            structure (str): Path to the atomic structure file in XYZ format.
+            _keep_on_device (bool): Flag to keep the results on the class device. Default is False.
+
+        Returns:
+            tuple or numpy.ndarray: Tuple containing Q-values and reduced structure function F(Q) if _keep_on_device is True, otherwise, numpy arrays on CPU.
+        """
         # Calculate Scattering S(Q)
         iq = self.iq(structure, _keep_on_device=True, _for_total_scattering=True)
-        sq = iq/self.struc_fsa/self.struc_size
+        sq = iq/self.struc_form_avg_sq/self.struc_size
         fq = self.q.squeeze(-1) * sq
         if _keep_on_device:
             return self.q.squeeze(-1), fq
@@ -280,20 +266,20 @@ class DebyeCalculator:
         _keep_on_device = False,
     ):
         """
-        Calculate the pair distribution function G(r) for the given atomic structure.
+        Calculate the reduced pair distribution function G(r) for the given atomic structure.
 
         Parameters:
             structure (str): Path to the atomic structure file in XYZ format.
             _keep_on_device (bool): Flag to keep the results on the class device. Default is False.
 
         Returns:
-            tuple or numpy.ndarray: Tuple containing r-values and pair distribution function G(r) if _keep_on_device is True, otherwise, numpy arrays on CPU.
+            tuple or numpy.ndarray: Tuple containing r-values and reduced pair distribution function G(r) if _keep_on_device is True, otherwise, numpy arrays on CPU.
         """
         # Calculate Scattering I(Q), S(Q), F(Q)
         if self.verbose > 0:
             self.profiler.reset()
         iq = self.iq(structure, _keep_on_device=True, _for_total_scattering=True)
-        sq = iq/self.struc_fsa/self.struc_size
+        sq = iq/self.struc_form_avg_sq/self.struc_size
         if self.verbose > 0:
             self.profiler.time('S(Q)')
         fq = self.q.squeeze(-1) * sq
