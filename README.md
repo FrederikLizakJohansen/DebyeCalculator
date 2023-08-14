@@ -3,7 +3,7 @@
 # DebyeCalculator
 Welcome to DebyeCalculator! This is a simple tool for XXXX
 
-1. [Usage](#deepStruc-app)
+1. [Usage](#usage)
     1. [Google Colab](#google-colab)
     2. [Install locally](#install-locally)
 2. [Authors](#authors)
@@ -64,14 +64,14 @@ POMFinder --data "Experimental_Data/DanMAX_AlphaKeggin.gr" --nyquist "no" --Qmin
 
 ```  
 # Authors
-__Frederik L. Johansen__<sup>1</sup>, <sup>2</sup>   
+__Frederik L. Johansen__<sup>1</sup><sup>, 2</sup>   
 __Andy S. Anker__<sup>1</sup>   
  
-<sup>1</sup> Department of Chemistry & Nano-Science Center, University of Copenhagen, Denmark.
+<sup>1</sup> Department of Chemistry & Nano-Science Center, University of Copenhagen, Denmark
 
-<sup>2</sup> Department of Computer Science, University of Copenhagen, Denmark.
+<sup>2</sup> Department of Computer Science, University of Copenhagen, Denmark
 
-Should there be any question, desired improvements or bugs please contact us on GitHub or 
+Should there be any questions, desired improvements or bugs please contact us on GitHub or 
 through email: __frjo@di.ku.dk__ and __andy@chem.ku.dk__.
 
 # Cite
