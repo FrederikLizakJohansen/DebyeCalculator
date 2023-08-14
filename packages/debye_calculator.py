@@ -2,13 +2,15 @@ import os
 import yaml
 import torch
 import numpy as np
+from ase import Atoms
 from torch.nn.functional import pdist
 from profiling import Profiler
-from ase import Atoms
 
 class DebyeCalculator:
     """
-    Calculate Debye scattering intensity and pair distribution function (PDF) for a given atomic structure.
+    Calculate the scattering intensity I(q) through the Debye scattering equation, the Total Scattering Structure Function S(q), 
+    the Reduced Total Scattering Function F(q), and the Reduced Atomic Pair Distribution Function G(r) for a given atomic structure.
+
 
     Parameters:
         qmin (float): Minimum q-value for the scattering calculation. Default is 0.0.

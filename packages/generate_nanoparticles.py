@@ -29,14 +29,17 @@ Author: Johansen & Anker et. al.
 Date: August 2023
 """
 
+import os
 import torch
+import tempfile
 import numpy as np
 from tqdm.auto import tqdm
 from torch.nn.functional import pdist
 from torch import cdist
-from ase.io import read
+from ase.io import read, write
 from ase.build import make_supercell
 from ase.build.tools import sort as ase_sort
+from diffpy.structure import loadStructure
 
 def generate_nanoparticles(
     structure_path,
@@ -108,6 +111,48 @@ def generate_nanoparticles(
 
     return nanoparticle_list, nanoparticle_sizes
 
+def ase_to_diffpy(particle):
+    """
+    Convert an ASE object to a DiffPy structure.
+
+    Parameters:
+    - particle (ase.Atoms): The ASE object representing the atomic structure.
+
+    Returns:
+    - diffpy.Structure.Structure: The corresponding DiffPy structure.
+
+    This function works by first writing the ASE object to a temporary XYZ file, 
+    then modifying the file for compatibility with DiffPy, and finally loading 
+    the modified file into a DiffPy structure.
+    """
+
+    with tempfile.TemporaryDirectory() as tmpdirname:
+        tmp_structure_path = os.path.join(tmpdirname, 'tmp_struc.xyz')
+        write(tmp_structure_path, particle, 'xyz')
+
+        # Read the content of the saved tmp_struc.xyz file
+        with open(tmp_structure_path, "r") as file:
+            content = file.readlines()
+
+        # Modify the content for diffpy compatibility
+        modified_content = [content[0]]  # keep the number of atoms line
+
+        # Start from the third line and only keep element symbol and x, y, z positions
+        for line in content[2:]:
+            parts = line.split()
+            modified_line = f"{parts[0]} {parts[1]} {parts[2]} {parts[3]}\n"
+            modified_content.append(modified_line)
+
+        # Insert an empty line at the second position
+        modified_content.insert(1, '\n')
+
+        # Save the modified content back to tmp_struc.xyz
+        with open(tmp_structure_path, "w") as file:
+            file.writelines(modified_content)
+
+        diffpy_structure = loadStructure(tmp_structure_path)
+        
+    return diffpy_structure
 
 # Sample ligand list (add your ligands if different)
 ligands = ['O', 'H', 'Cl']
