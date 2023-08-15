@@ -7,11 +7,11 @@ import numpy as np
 from tqdm.auto import tqdm, trange
 import matplotlib.pyplot as plt
 from ase.io import write
-from debye_calculator import DebyeCalculator
-from generate_nanoparticles import generate_nanoparticles
 from diffpy.structure import loadStructure
 from diffpy.srreal.pdfcalculator import DebyePDFCalculator
 from SASCalculator import SASCalculator
+from debye_calculator import DebyeCalculator
+from generate_nanoparticles import generate_nanoparticles, ase_to_diffpy
 
 def compare_methods(args):
 
@@ -53,6 +53,7 @@ def compare_methods(args):
     q_sas, sas_dc = debye_calc.iq(particle)
     debye_calc.update_parameters(qmin=1, qmax=40)
     
+    """
     with tempfile.TemporaryDirectory() as tmpdirname:
         tmp_structure_path = os.path.join(tmpdirname,'tmp_struc.xyz')
         write(tmp_structure_path, particle, 'xyz')
@@ -63,7 +64,9 @@ def compare_methods(args):
         diffpy_structure.B12 = 0
         diffpy_structure.B13 = 0
         diffpy_structure.B23 = 0
-    
+    """
+    diffpy_structure = ase_to_diffpy(particle)
+
     _, gr_dp = debye_diffpy(diffpy_structure)
     fq_dp = debye_diffpy.fq[int(debye_calc.qmin/debye_calc.qstep):]
     
