@@ -1,8 +1,9 @@
 import os
 os.chdir('../packages')
 
+import base64
 import ipywidgets as widgets
-from IPython.display import display
+from IPython.display import display, HTML
 from ipywidgets import interact, interact_manual
 from debye_calculator import DebyeCalculator
 import matplotlib.pyplot as plt
@@ -12,10 +13,10 @@ import traitlets
 from glob import glob
 
 """
-Interact with the DebyeCalculator to visualize scattering intensity and distribution functions.
+Interact with the DebyeCalculator to calculate the scattering intensity I(q) through the Debye scattering equation, 
+the Total Scattering Structure Function S(q), the Reduced Total Scattering Function F(q), and the Reduced Atomic Pair Distribution Function G(r).
 
-This script demonstrates an interactive interface using ipywidgets and DebyeCalculator for visualizing
-scattering intensity and distribution functions (S(Q), F(Q), G(r)) based on user-provided parameters.
+This script demonstrates an interactive interface using ipywidgets and DebyeCalculator for I(Q), S(Q), F(Q), and G(r) based on user-provided parameters.
 
 Usage:
 1. Run the script in a Jupyter Notebook environment.
@@ -23,7 +24,7 @@ Usage:
 3. Select a data folder containing XYZ files to analyze.
 4. Choose a specific XYZ file from the dropdown menu.
 5. Adjust other parameters such as batch size, hardware (CPU or CUDA), radiation type, etc.
-6. The graphs showing scattering intensity and distribution functions will be displayed and updated as parameters change.
+6. The graphs showing I(Q), S(Q), F(Q), and G(r) will be displayed and updated as parameters change.
 
 Note: Make sure to have the necessary libraries installed, including ipywidgets, matplotlib, and the DebyeCalculator package.
 
@@ -31,7 +32,6 @@ Note: Make sure to have the necessary libraries installed, including ipywidgets,
 
 def interact_debye(
     _cont_updates = False,
-    _step_size = 0.1
 ):
     radtype = widgets.ToggleButtons(
         options=['Xray', 'Neutron'],
@@ -74,7 +74,7 @@ def interact_debye(
         value=[0.8, 25],
         min=0.0,
         max=50.0,
-        step=_step_size,
+        step=0.01,
         description='Qmin/Qmax:',
         disabled=False,
         continuous_update=_cont_updates,
@@ -87,10 +87,10 @@ def interact_debye(
     )
 
     qdamp_slider = widgets.FloatSlider(
-        min=0.0,
-        max=1.0,
-        value=0.0, 
-        step=_step_size,
+        min=0.00,
+        max=0.10,
+        value=0.04, 
+        step=0.01,
         description='Qdamp:',
         layout = widgets.Layout(width='900px'),
         continuous_update=_cont_updates,
@@ -100,7 +100,7 @@ def interact_debye(
         value=[0.0, 25],
         min=0,
         max=100.0,
-        step=_step_size,
+        step=0.1,
         description='rmin/rmax:',
         disabled=False,
         continuous_update=_cont_updates,
@@ -113,23 +113,30 @@ def interact_debye(
     )
 
     biso_slider = widgets.FloatSlider(
-        min=0.0,
-        max=10.0,
-        value=0.1,
-        step=_step_size,
+        min=0.00,
+        max=1.00,
+        value=0.30,
+        step=0.01,
         description='B-iso:',
         layout = widgets.Layout(width='900px'),
         continuous_update=_cont_updates,
     )
 
+    scale_type = widgets.ToggleButtons(
+        options=['Normal', 'SAS'],
+        value='Normal',
+        description='Axes scale:',
+        button_style='info'
+    )
+
     # Create a color dropdown widget
     folder = widgets.Text(description='Data Folder:', placeholder='path/to/data/folder')
 
-    # Create a dropdown menu widget for fruits and an output area
+    # Create a dropdown menu widget for selection of XYZ file and an output area
     standard_msg = 'provide valid folder'
     select_file = widgets.Dropdown(description='Select File:', options=[standard_msg], value=standard_msg, disabled=True)
 
-    # Define a function to update the fruit options based on the selected color
+    # Define a function to update the scattering patterns based on the selected parameters
     def update_options(change):
         folder = change.new
         paths = sorted(glob(os.path.join(folder, '*.xyz')))
@@ -141,11 +148,40 @@ def interact_debye(
             select_file.value = standard_msg
             select_file.disabled = True
 
-    # Link the update function to the color_dropdown widget's value change event
+    # Link the update function to the dropdown widget's value change event
     folder.observe(update_options, names='value')
 
+    def save_datasets():
+        # Save each dataset to a CSV file using numpy
+        np.savetxt("iq_data.csv", np.column_stack([q, iq_values]), delimiter=",", header="q,I(Q)", comments='')
+        np.savetxt("sq_data.csv", np.column_stack([q, sq_values]), delimiter=",", header="q,S(Q)", comments='')
+        np.savetxt("fq_data.csv", np.column_stack([q, fq_values]), delimiter=",", header="q,F(Q)", comments='')
+        np.savetxt("gr_data.csv", np.column_stack([r, gr_values]), delimiter=",", header="r,G(r)", comments='')
+
+    def create_download_link(filename, data, header=None):
+        content = "\n".join([",".join(map(str, row)) for row in data])
+        if header:
+            content = header + "\n" + content
+        b64 = base64.b64encode(content.encode()).decode()
+        href = f'<a href="data:text/csv;base64,{b64}" download="{filename}">Download {filename}</a>'
+        return href
+
+    def on_download_button_click(button):
+        save_datasets()
+        
+        iq_data = np.column_stack([q, iq_values])
+        sq_data = np.column_stack([q, sq_values])
+        fq_data = np.column_stack([q, fq_values])
+        gr_data = np.column_stack([r, gr_values])
+
+        display(HTML(create_download_link("iq_data.csv", iq_data, "q,I(Q)")))
+        display(HTML(create_download_link("sq_data.csv", sq_data, "q,S(Q)")))
+        display(HTML(create_download_link("fq_data.csv", fq_data, "q,F(Q)")))
+        display(HTML(create_download_link("gr_data.csv", gr_data, "r,G(r)")))
+
     # Create a function to update the output area
-    def update_output(folder, file, batch_size, device, radtype, lorch_mod, qminmax, qdamp, rminmax, biso):
+    def update_output(folder, file, batch_size, device, radtype, lorch_mod, qminmax, qdamp, rminmax, biso, scale_type):
+        global q, r, iq_values, sq_values, fq_values, gr_values  # Declare these variables as global
         if (file is not None) and file != standard_msg:
 
             calculator = DebyeCalculator(device=device.lower(), batch_size=batch_size, radiation_type=radtype,
@@ -157,6 +193,10 @@ def interact_debye(
 
             fig, axs = plt.subplots(2, 2, figsize=(12, 8), dpi=75)
             axs = axs.flatten()
+
+            if scale_type == 'SAS':
+                axs[0].set_xscale('log')
+                axs[0].set_yscale('log')
 
             axs[0].plot(q, iq_values, lw=None)
             axs[0].set(xlabel='$Q$ [$\AA^{-1}$]', ylabel='$I(Q)$ [counts]')
@@ -180,11 +220,14 @@ def interact_debye(
                 ax.set_title(label)
                 ax.grid(alpha=0.2)
 
-            fig.suptitle(file.split('/')[-1].split('.')[0])
+            fig.suptitle("XYZ file: " + file.split('/')[-1].split('.')[0])
             fig.tight_layout()
 
+            download_button = widgets.Button(description="Download Data")
+            download_button.on_click(on_download_button_click)
+            display(download_button)
 
-    # Create an interactive function that triggers when the fruit selection changes
+    # Create an interactive function that triggers when the user-defined parameters changes
     interact(
         update_output, 
         folder=folder,
@@ -197,4 +240,7 @@ def interact_debye(
         qdamp = qdamp_slider,
         rminmax = rslider,
         biso = biso_slider,
+        scale_type=scale_type
     );
+
+    
