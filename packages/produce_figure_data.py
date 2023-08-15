@@ -212,21 +212,23 @@ def time_methods(args):
         os.mkdir(args['output_folder'])
 
     # Run CPU and save
-    mu, sigma = time_debye_calculator(device='cpu', batch_size=args['batch_size_cpu'])
-    out = np.array([sizes, n_atoms, mu, sigma]).T
-    np.savetxt(os.path.join(args['output_folder'],'timings_cpu.csv'), out, delimiter=',', header='diameter, n_atoms, mu, sigma', fmt='%f')
+    if args['gen_cpu']:
+        mu, sigma = time_debye_calculator(device='cpu', batch_size=args['batch_size_cpu'])
+        out = np.array([sizes, n_atoms, mu, sigma]).T
+        np.savetxt(os.path.join(args['output_folder'],'timings_cpu.csv'), out, delimiter=',', header='diameter, n_atoms, mu, sigma', fmt='%f')
 
     # Run CUDA and save
-    if torch.cuda.is_available():
+    if args['gen_cuda'] and torch.cuda.is_available():
         mu, sigma = time_debye_calculator(device='cuda', batch_size=args['batch_size_cuda'])
         out = np.array([sizes, n_atoms, mu, sigma]).T
         gpu_id = torch.cuda.get_device_name()
         np.savetxt(os.path.join(args['output_folder'], f'timings_cuda_{gpu_id}.csv'), out, delimiter=',', header='diameter, n_atoms, mu, sigma', fmt='%f')
 
     # Run Diffpy and save
-    mu, sigma = time_diffpy()
-    out = np.array([sizes, n_atoms, mu, sigma]).T
-    np.savetxt(os.path.join(args['output_folder'], 'timings_diffpy.csv'), out, delimiter=',', header='diameter, n_atoms, mu, sigma', fmt='%f')
+    if args['gen_diffpy']:
+        mu, sigma = time_diffpy()
+        out = np.array([sizes, n_atoms, mu, sigma]).T
+        np.savetxt(os.path.join(args['output_folder'], 'timings_diffpy.csv'), out, delimiter=',', header='diameter, n_atoms, mu, sigma', fmt='%f')
 
     print('Finished generating data for Figure 3')
 
@@ -248,6 +250,9 @@ if __name__ == '__main__':
     parser.add_argument('--batch_size_cuda', type=int, default=5000)
     parser.add_argument('--figure2', action='store_true')
     parser.add_argument('--figure3', action='store_true')
+    parser.add_argument('--gen_cpu', action='store_true')
+    parser.add_argument('--gen_cuda', action='store_true')
+    parser.add_argument('--gen_diffpy', action='store_true')
     parser.add_argument('--reps', type=int, default=1)
     args = parser.parse_args()
     produce_figures(vars(args))
