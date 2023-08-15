@@ -215,14 +215,14 @@ def time_methods(args):
     if args['gen_cpu']:
         mu, sigma = time_debye_calculator(device='cpu', batch_size=args['batch_size_cpu'])
         out = np.array([sizes, n_atoms, mu, sigma]).T
-        np.savetxt(os.path.join(args['output_folder'],'timings_cpu.csv'), out, delimiter=',', header='diameter, n_atoms, mu, sigma', fmt='%f')
+        np.savetxt(os.path.join(args['output_folder'],f'timings_cpu_{args["batch_size"]}.csv'), out, delimiter=',', header='diameter, n_atoms, mu, sigma', fmt='%f')
 
     # Run CUDA and save
     if args['gen_cuda'] and torch.cuda.is_available():
         mu, sigma = time_debye_calculator(device='cuda', batch_size=args['batch_size_cuda'])
         out = np.array([sizes, n_atoms, mu, sigma]).T
         gpu_id = torch.cuda.get_device_name()
-        np.savetxt(os.path.join(args['output_folder'], f'timings_cuda_{gpu_id}.csv'), out, delimiter=',', header='diameter, n_atoms, mu, sigma', fmt='%f')
+        np.savetxt(os.path.join(args['output_folder'], f'timings_cuda_{gpu_id}_bs{args["batch_size"]}.csv'), out, delimiter=',', header='diameter, n_atoms, mu, sigma', fmt='%f')
 
     # Run Diffpy and save
     if args['gen_diffpy']:
