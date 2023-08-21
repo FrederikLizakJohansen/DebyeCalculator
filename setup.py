@@ -16,6 +16,9 @@ setup(
     install_requires=[
         'numpy',
         'ase',
+        'torch',
+        'torchvision',
+        'torchaudio',
     ],
     packages=find_packages(
         exclude=[
