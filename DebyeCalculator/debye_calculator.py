@@ -2,9 +2,10 @@ import os
 import yaml
 import torch
 import numpy as np
+import pkg_resources
 from ase import Atoms
 from torch.nn.functional import pdist
-from profiling import Profiler
+from DebyeCalculator.profiling import Profiler
 
 class DebyeCalculator:
     """
@@ -70,7 +71,7 @@ class DebyeCalculator:
         self.r = torch.arange(self.rmin, self.rmax, self.rstep).unsqueeze(-1).to(device=self.device)
 
         # Form factor coefficients
-        with open('form_factor_coef.yaml', 'r') as yaml_file:
+        with open(pkg_resources.resource_filename(__name__, 'form_factor_coef.yaml'), 'r') as yaml_file:
             self.FORM_FACTOR_COEF = yaml.safe_load(yaml_file)
 
         # Formfactor retrieval lambda
