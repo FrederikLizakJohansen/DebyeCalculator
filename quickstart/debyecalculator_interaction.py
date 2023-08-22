@@ -1,11 +1,9 @@
 import os
-os.chdir('../packages')
-
 import base64
 import ipywidgets as widgets
 from IPython.display import display, HTML
 from ipywidgets import interact, interact_manual
-from debye_calculator import DebyeCalculator
+from DebyeCalculator.debye_calculator import DebyeCalculator
 import matplotlib.pyplot as plt
 import time
 import numpy as np
