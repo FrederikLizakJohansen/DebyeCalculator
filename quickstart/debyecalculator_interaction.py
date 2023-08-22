@@ -1,6 +1,6 @@
 import os
 os.chdir('../packages')
-
+import sys
 import base64
 import ipywidgets as widgets
 from IPython.display import display, HTML
@@ -128,6 +128,39 @@ def interact_debye(
         description='Axes scale:',
         button_style='info'
     )
+    
+    global no_data_loaded_display 
+    no_data_loaded_display = False
+    
+    def on_download_button_click(button):
+        global no_data_loaded_display
+        
+        try:
+            save_datasets()
+        
+            iq_data = np.column_stack([q, iq_values])
+            sq_data = np.column_stack([q, sq_values])
+            fq_data = np.column_stack([q, fq_values])
+            gr_data = np.column_stack([r, gr_values])
+            
+            sys.stdout.write('\x1b[1A')
+            sys.stdout.write('\x1b[1A')
+            sys.stdout.write('\x1b[1A')
+            sys.stdout.write('\x1b[2K')
+
+            display(HTML(create_download_link("iq_data.csv", iq_data, "q,I(Q)")))
+            display(HTML(create_download_link("sq_data.csv", sq_data, "q,S(Q)")))
+            display(HTML(create_download_link("fq_data.csv", fq_data, "q,F(Q)")))
+            display(HTML(create_download_link("gr_data.csv", gr_data, "r,G(r)")))
+            
+            
+        except Exception as e:
+            #if not no_data_loaded_display:
+            print('Data not loaded', end="\r")
+                #no_data_loaded_display = True
+              
+    download_button = widgets.Button(description="Download Data")
+    download_button.on_click(on_download_button_click)
 
     # Create a color dropdown widget
     folder = widgets.Text(description='Data Folder:', placeholder='path/to/data/folder')
@@ -165,20 +198,7 @@ def interact_debye(
         b64 = base64.b64encode(content.encode()).decode()
         href = f'<a href="data:text/csv;base64,{b64}" download="{filename}">Download {filename}</a>'
         return href
-
-    def on_download_button_click(button):
-        save_datasets()
-        
-        iq_data = np.column_stack([q, iq_values])
-        sq_data = np.column_stack([q, sq_values])
-        fq_data = np.column_stack([q, fq_values])
-        gr_data = np.column_stack([r, gr_values])
-
-        display(HTML(create_download_link("iq_data.csv", iq_data, "q,I(Q)")))
-        display(HTML(create_download_link("sq_data.csv", sq_data, "q,S(Q)")))
-        display(HTML(create_download_link("fq_data.csv", fq_data, "q,F(Q)")))
-        display(HTML(create_download_link("gr_data.csv", gr_data, "r,G(r)")))
-
+    
     # Create a function to update the output area
     def update_output(folder, file, batch_size, device, radtype, lorch_mod, qminmax, qdamp, rminmax, biso, scale_type):
         global q, r, iq_values, sq_values, fq_values, gr_values  # Declare these variables as global
@@ -222,10 +242,7 @@ def interact_debye(
 
             fig.suptitle("XYZ file: " + file.split('/')[-1].split('.')[0])
             fig.tight_layout()
-
-            download_button = widgets.Button(description="Download Data")
-            download_button.on_click(on_download_button_click)
-            display(download_button)
+       
 
     # Create an interactive function that triggers when the user-defined parameters changes
     interact(
@@ -240,7 +257,9 @@ def interact_debye(
         qdamp = qdamp_slider,
         rminmax = rslider,
         biso = biso_slider,
-        scale_type=scale_type
+        scale_type=scale_type,
     );
+    
+    display(download_button)
 
     
