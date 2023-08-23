@@ -218,7 +218,6 @@ class DebyeCalculator:
             sinc = torch.sinc(d[mask] * self.q / torch.pi)
             ffp = self.struc_unique_form_factors[inv_idx[0]] * self.struc_unique_form_factors[inv_idx[1]]
             iq += torch.sum(occ_product.unsqueeze(-1) * ffp * sinc.permute(1,0), dim=0)
-        iq *= 2
 
         # Apply Debye-Weller Isotropic Atomic Displacement
         if self.biso != 0.0:
@@ -233,6 +232,7 @@ class DebyeCalculator:
         # Self-scattering contribution
         sinc = torch.ones((self.struc_size, len(self.q))).to(device=self.device)
         iq += torch.sum((self.struc_occupancy.unsqueeze(-1) * self.struc_unique_form_factors[self.struc_inverse])**2 * sinc, dim=0) / 2
+        iq *= 2
 
         if self.profile:
             self.profiler.time('I(Q)')
@@ -305,23 +305,23 @@ class DebyeCalculator:
             Tuple of torch tensors containing Q-values and PDF G(r) if keep_on_device is True, otherwise, numpy arrays on CPU.
         """
         # Calculate Scattering I(Q), S(Q), F(Q)
-        if self.verbose > 0:
+        if self.profile:
             self.profiler.reset()
         iq = self.iq(structure, keep_on_device=True, _total_scattering=True)
         sq = iq/self.struc_form_avg_sq/self.struc_size
-        if self.verbose > 0:
+        if self.profile:
             self.profiler.time('S(Q)')
         fq = self.q.squeeze(-1) * sq
-        if self.verbose > 0:
+        if self.profile:
             self.profiler.time('F(Q)')
         
         # Calculate total scattering, G(r)
         damp = 1 if self.qdamp == 0.0 else torch.exp(-(self.r.squeeze(-1) * self.qdamp).pow(2) / 2)
         lorch_mod = 1 if self.lorch_mod == None else torch.sinc(self.q * self.lorch_mod*(torch.pi / self.qmax))
-        if self.verbose > 0:
+        if self.profile:
             self.profiler.time('Modifications, Qdamp/Lorch')
         gr = (2 / torch.pi) * torch.sum(fq.unsqueeze(-1) * torch.sin(self.q * self.r.permute(1,0))*self.qstep * lorch_mod, dim=0) * damp
-        if self.verbose > 0:
+        if self.profile:
             self.profiler.time('G(r)')
 
         if keep_on_device:
@@ -329,7 +329,7 @@ class DebyeCalculator:
         else:
             return self.r.squeeze(-1).cpu().numpy(), gr.cpu().numpy()
 
-    def _return_scattering(
+    def _get_all(
         self,
         structure: str,
         keep_on_device: bool = False,
@@ -344,13 +344,39 @@ class DebyeCalculator:
         Returns:
             Tuple of torch tensors containing r-values, Q-values and I(Q), S(Q), F(Q) and G(r) if keep_on_device is True, otherwise, numpy arrays on CPU.
         """
-        iq = self.iq(structure, keep_on_device=True, _total_scattering=True)
-        _, iq_out = self.iq(structure, keep_on_device=True, _total_scattering=False)
+        self._initialise_structure(structure)
+
+        # Calculate distances and batch
+        if self.batch_size is None:
+            self.batch_size = self._max_batch_size
+        dists = pdist(self.struc_xyz).split(self.batch_size)
+        indices = self.triu_indices.split(self.batch_size, dim=1)
+        inverse_indices = self.unique_inverse.split(self.batch_size, dim=1)
+
+        # Calculate scattering using Debye Equation
+        iq = torch.zeros((len(self.q))).to(device=self.device, dtype=torch.float32)
+        for d, inv_idx, idx in zip(dists, inverse_indices, indices):
+            mask = d >= self.rthres
+            occ_product = self.struc_occupancy[idx[0]] * self.struc_occupancy[idx[1]]
+            sinc = torch.sinc(d[mask] * self.q / torch.pi)
+            ffp = self.struc_unique_form_factors[inv_idx[0]] * self.struc_unique_form_factors[inv_idx[1]]
+            iq += torch.sum(occ_product.unsqueeze(-1) * ffp * sinc.permute(1,0), dim=0)
+
+        # Apply Debye-Weller Isotropic Atomic Displacement
+        if self.biso != 0.0:
+            iq *= torch.exp(-self.q.squeeze(-1).pow(2) * self.biso/(8*torch.pi**2))
+        
+        # Calculate S(Q), F(Q) and G(r)
         sq = iq/self.struc_form_avg_sq/self.struc_size
         fq = self.q.squeeze(-1) * sq
         damp = 1 if self.qdamp == 0.0 else torch.exp(-(self.r.squeeze(-1) * self.qdamp).pow(2) / 2)
         lorch_mod = 1 if self.lorch_mod == None else torch.sinc(self.q * self.lorch_mod*(torch.pi / self.qmax))
         gr = (2 / torch.pi) * torch.sum(fq.unsqueeze(-1) * torch.sin(self.q * self.r.permute(1,0))*self.qstep * lorch_mod, dim=0) * damp
+
+        # Self-scattering contribution / Calculate I(Q)
+        sinc = torch.ones((self.struc_size, len(self.q))).to(device=self.device)
+        iq += torch.sum((self.struc_occupancy.unsqueeze(-1) * self.struc_unique_form_factors[self.struc_inverse])**2 * sinc, dim=0) / 2
+        iq *= 2
 
         if keep_on_device:
             return self.r.squeeze(-1), self.q.squeeze(-1), iq_out, sq, fq, gr
@@ -413,10 +439,6 @@ class DebyeCalculator:
         lorch_mod = self.lorch_mod
         radiation_type = self.radiation_type
         profile = False
-        parameters = {'qmin': self.qmin, 'qmax': self.qmax, 'qdamp': self.qdamp, 'qstep': self.qstep,
-                      'rmin': self.rmin, 'rmax': self.rmax, 'rstep': self.rstep, 'rthres': self.rthres,
-                      'biso': self.biso, 'device': self.device, 'batch_size': self.batch_size, 'lorch_mod': self.lorch_mod,
-                      'radiation_type': self.radiation_type}
         
         # Radiation type button
         radtype_btn = widgets.ToggleButtons(
@@ -453,7 +475,6 @@ class DebyeCalculator:
             description='Hardware batch-size',
             style = {'description_width': 'initial'},
         )
-
 
         # Q value min/max slider
         qslider = widgets.FloatRangeSlider(
@@ -550,9 +571,12 @@ class DebyeCalculator:
         )
         
         # Download options
-        def create_download_link(filename, data, header=None, metadata=parameters):
+        def create_download_link(filename, data, header=None):
+            metadata = str({'qmin': qslider.value[0], 'qmax': qslider.value[1], 'qdamp': qdamp_slider.value, 'qstep': qstep_btn.value,
+                          'rmin': rslider.value[0], 'rmax': rslider.value[1], 'rstep': rstep_btn.value, 'rthres': rthres_btn.value,
+                          'biso': biso_slider.value, 'device': device_btn.value, 'batch_size': batch_size_btn.value, 'lorch_mod': lorch_mod_btn.value,
+                          'radiation_type': radtype_btn.value}) + "\n"
             content = "\n".join([",".join(map(str, row)) for row in data])
-            metadata = str(metadata) + "\n" if metadata else ""
             if header:
                 content = metadata + "\n" + header + "\n" + content
             b64 = base64.b64encode(content.encode()).decode()
@@ -581,7 +605,6 @@ class DebyeCalculator:
                 display(HTML(create_download_link("gr_data.csv", gr_data, "r,G(r)")))
                 
             except Exception as e:
-                print(e)
                 print('No data is loaded', end="\r")
                   
         # Download buttons
@@ -639,7 +662,7 @@ class DebyeCalculator:
     
                 r, q, iq_values, sq_values, fq_values, gr_values = calculator._return_scattering(path)
     
-                fig, axs = plt.subplots(2, 2, figsize=(12, 8), dpi=75)
+                fig, axs = plt.subplots(2, 2, figsize=(12, 8), dpi=300)
                 axs = axs.flatten()
     
                 if scale_type == 'logarithmic':
