@@ -40,17 +40,17 @@ class DebyeCalculator:
     """
     def __init__(
         self,
-        qmin: float = 0.0,
+        qmin: float = 1.0,
         qmax: float = 30.0,
-        qstep: float = 0.1,
-        qdamp: float = 0.0,
+        qstep: float = 0.01,
+        qdamp: float = 0.04,
         rmin: float = 0.0,
         rmax: float = 20.0,
         rstep: float = 0.01,
         rthres: float = 0.0,
-        biso: float = 0.0,
-        device: str = 'cuda',
-        batch_size: Union[int, None] = 100,
+        biso: float = 0.3,
+        device: str = 'cpu',
+        batch_size: Union[int, None] = 1000,
         lorch_mod: bool = False,
         radiation_type: str = 'xray',
         profile: bool = False,
@@ -413,6 +413,10 @@ class DebyeCalculator:
         lorch_mod = self.lorch_mod
         radiation_type = self.radiation_type
         profile = False
+        parameters = {'qmin': self.qmin, 'qmax': self.qmax, 'qdamp': self.qdamp, 'qstep': self.qstep,
+                      'rmin': self.rmin, 'rmax': self.rmax, 'rstep': self.rstep, 'rthres': self.rthres,
+                      'biso': self.biso, 'device': self.device, 'batch_size': self.batch_size, 'lorch_mod': self.lorch_mod,
+                      'radiation_type': self.radiation_type}
         
         # Radiation type button
         radtype_btn = widgets.ToggleButtons(
@@ -546,10 +550,11 @@ class DebyeCalculator:
         )
         
         # Download options
-        def create_download_link(filename, data, header=None):
+        def create_download_link(filename, data, header=None, metadata=parameters):
             content = "\n".join([",".join(map(str, row)) for row in data])
+            metadata = str(metadata) + "\n" if metadata else ""
             if header:
-                content = header + "\n" + content
+                content = metadata + "\n" + header + "\n" + content
             b64 = base64.b64encode(content.encode()).decode()
             t = datetime.now()
             hours = f'{t.hour}'.zfill(2)
@@ -576,6 +581,7 @@ class DebyeCalculator:
                 display(HTML(create_download_link("gr_data.csv", gr_data, "r,G(r)")))
                 
             except Exception as e:
+                print(e)
                 print('No data is loaded', end="\r")
                   
         # Download buttons
