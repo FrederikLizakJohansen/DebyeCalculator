@@ -138,9 +138,9 @@ def compare_methods(args):
 def time_methods(args):
     print('Generating data for Figure 3')
     structure_path = args['cif']
-    radii = np.arange(args['min_radius'], args['max_radius'], args['step_radius'])
-    particles, sizes = generate_nanoparticles(structure_path, radii)
-    n_atoms = [p.get_global_number_of_atoms() for p in particles]
+    radii = list(np.arange(args['min_radius'], args['max_radius'], args['step_radius']))
+    #particles, sizes = generate_nanoparticles(structure_path, radii)
+    #n_atoms = [p.get_global_number_of_atoms() for p in particles]
     
     def dummy_calculations():
         # Perform some dummy calculations on the GPU
@@ -151,35 +151,48 @@ def time_methods(args):
     def time_debye_calculator(device, batch_size):
         mu, sigma = [], []
         debye_calc = DebyeCalculator(device=device, qmin=1, qmax=25, qstep=0.1, biso=0.3, batch_size=batch_size)
+        nps, sizes = debye_calc.generate_nanoparticles(structure_path, radii)
+        n_atoms = [len(np) for np in nps]
+
         #if device == 'cuda':
             # Move a dummy tensor to the GPU to initialize the CUDA context
             #torch.cuda.FloatTensor(1000).to('cuda')
             #dummy_calculations()
+            
         for i in trange(len(radii), leave=False):
-            timings = []
-            for j in range(args['reps']+2):
-                #if device == 'cuda':
-                #    torch.cuda.FloatTensor(1000).to('cuda')
-                #    dummy_calculations()
-                t = time()
-                debye_calc.gr(particles[i]);
-                t = time() - t
-                if j > 1: 
-                    timings.append(t)
+            with tempfile.TemporaryDirectory() as tmpdirname:
+                tmp_structure_path = os.path.join(tmpdirname,'tmp_struc.xyz')
+                write(tmp_structure_path, nps[i], 'xyz')
+
+                timings = []
+                for j in range(args['reps']+2):
+
+                    #if device == 'cuda':
+                    #    torch.cuda.FloatTensor(1000).to('cuda')
+                    #    dummy_calculations()
+
+                    t = time()
+                    debye_calc.gr(tmp_structure_path);
+                    t = time() - t
+
+                    if j > 1: 
+                        timings.append(t)
             mu.append(np.mean(timings))
             sigma.append(np.std(timings))
 
-        return np.array(mu), np.array(sigma)
+        return np.array(mu), np.array(sigma), sizes, n_atoms
 
     def time_diffpy():
         mu, sigma = [], []
         debye_calc = DebyeCalculator(qmin=1, qmax=25, qstep=0.1, biso=0.3)
+        nps, sizes = debye_calc.generate_nanoparticles(structure_path, radii)
+        n_atoms = [len(np) for np in nps]
         for i in trange(len(radii), leave=False):
             timings = []
             for _ in range(args['reps']):
                 with tempfile.TemporaryDirectory() as tmpdirname:
                     tmp_structure_path = os.path.join(tmpdirname,'tmp_struc.xyz')
-                    write(tmp_structure_path, particles[i], 'xyz')
+                    write(tmp_structure_path, nps[i], 'xyz')
         
                     debye_diffpy = DebyePDFCalculator(
                         rmin=debye_calc.rmin,
@@ -205,7 +218,7 @@ def time_methods(args):
             mu.append(np.mean(timings))
             sigma.append(np.std(timings))
 
-        return np.array(mu), np.array(sigma)
+        return np.array(mu), np.array(sigma), sizes, n_atoms
 
     # Make output folder
     if not os.path.exists(args['output_folder']):
@@ -213,20 +226,20 @@ def time_methods(args):
 
     # Run CPU and save
     if args['gen_cpu']:
-        mu, sigma = time_debye_calculator(device='cpu', batch_size=args['batch_size_cpu'])
+        mu, sigma, sizes, n_atoms = time_debye_calculator(device='cpu', batch_size=args['batch_size_cpu'])
         out = np.array([sizes, n_atoms, mu, sigma]).T
         np.savetxt(os.path.join(args['output_folder'],f'timings_cpu_bs{args["batch_size_cpu"]}.csv'), out, delimiter=',', header='diameter, n_atoms, mu, sigma', fmt='%f')
 
     # Run CUDA and save
     if args['gen_cuda'] and torch.cuda.is_available():
-        mu, sigma = time_debye_calculator(device='cuda', batch_size=args['batch_size_cuda'])
+        mu, sigma, sizes, n_atoms = time_debye_calculator(device='cuda', batch_size=args['batch_size_cuda'])
         out = np.array([sizes, n_atoms, mu, sigma]).T
         gpu_id = torch.cuda.get_device_name()
         np.savetxt(os.path.join(args['output_folder'], f'timings_cuda_{gpu_id}_bs{args["batch_size_cuda"]}.csv'), out, delimiter=',', header='diameter, n_atoms, mu, sigma', fmt='%f')
 
     # Run Diffpy and save
     if args['gen_diffpy']:
-        mu, sigma = time_diffpy()
+        mu, sigma, sizes, n_atoms = time_diffpy()
         out = np.array([sizes, n_atoms, mu, sigma]).T
         np.savetxt(os.path.join(args['output_folder'], 'timings_diffpy.csv'), out, delimiter=',', header='diameter, n_atoms, mu, sigma', fmt='%f')
 
