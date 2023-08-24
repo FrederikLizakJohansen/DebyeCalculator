@@ -117,57 +117,7 @@ class DebyeCalculator:
                       'biso': self.biso}
 
         return f"DebyeCalculator{parameters}"
-
-    def _initialise_structure(
-        self,
-        structure_path: str,
-    ) -> None:
-        """
-        Initialize atomic structure and unique element form factors from an input file.
-
-        Parameters:
-            structure_path (str): Path to the atomic structure file in XYZ format.
-        """
-        # XYZ file
-        if isinstance(structure_path, str):
-            path_ext = os.path.splitext(structure_path)[1]
-            if path_ext == '.xyz':
-                struc = np.genfromtxt(structure_path, dtype='str', skip_header=2)
-                self.struc_elements = struc[:,0]
-                self.struc_size = len(self.struc_elements)
-                self.num_pairs = self.struc_size * (self.struc_size - 1) // 2
-                if struc.shape[1] == 5:
-                    self.struc_occupancy = torch.from_numpy(struc[:,-1]).to(device=self.device, dtype=torch.float32)
-                    self.struc_xyz = torch.tensor(struc[:,1:-1].astype('float')).to(device=self.device, dtype=torch.float32)
-                else:
-                    self.struc_occupancy = torch.ones((self.struc_size), dtype=torch.float32).to(device=self.device)
-                    self.struc_xyz = torch.tensor(struc[:,1:].astype('float')).to(device=self.device, dtype=torch.float32)
-            else:
-                raise NotImplementedError('Structure File Extention Not Supported')
-        # ASE Atoms object
-        elif isinstance(structure_path, Atoms):
-            self.struc_elements = structure_path.get_chemical_symbols()
-            self.struc_size = len(self.struc_elements)
-            self.num_pairs = self.struc_size * (self.struc_size - 1) // 2
-            self.struc_occupancy = torch.ones((self.struc_size), dtype=torch.float32).to(device=self.device)
-            self.struc_xyz = torch.tensor(np.array(structure_path.get_positions())).to(device=self.device, dtype=torch.float32)
-        else:
-            raise FileNotFoundError(structure_path)
-
-        # Unique elements and their counts
-        unique_elements, inverse, counts = np.unique(self.struc_elements, return_counts=True, return_inverse=True)
-        self.triu_indices = torch.triu_indices(self.struc_size, self.struc_size, 1)
-        self.unique_inverse = torch.from_numpy(inverse[self.triu_indices]).to(device=self.device)
-        self.struc_unique_form_factors = torch.stack([self.form_factor_func(self.FORM_FACTOR_COEF[el]) for el in unique_elements])
-        
-        # Get f_avg_sqrd and f_sqrd_avg
-        counts = torch.from_numpy(counts).to(device=self.device)
-        compositional_fractions = counts / torch.sum(counts)
-        self.struc_form_avg_sq = torch.sum(compositional_fractions.reshape(-1,1) * self.struc_unique_form_factors, dim=0)**2
-
-        # self scattering
-        self.struc_inverse = torch.from_numpy(np.array([inverse[i] for i in range(self.struc_size)])).to(device=self.device)
-
+    
     def update_parameters(
         self,
         **kwargs: Any,
@@ -190,73 +140,190 @@ class DebyeCalculator:
             self.q = torch.arange(self.qmin, self.qmax, self.qstep).unsqueeze(-1).to(device=self.device, dtype=torch.float32)
             self.r = torch.arange(self.rmin, self.rmax, self.rstep).unsqueeze(-1).to(device=self.device, dtype=torch.float32)
 
+    def _initialise_structures(
+        self,
+        structure_path: str,
+        radii: Union[List[float], float, None] = None,
+    ) -> None:
+
+        """
+        Initialise atomic structures and unique elements form factors from an input file.
+
+        Parameters:
+            structure_path (str): Path to the atomic structure file in XYZ/CIF format.
+            radii (Union[List[float], float, None]): List/float of radii/radius of particle(s) to generate with parsed CIF
+        """
+
+        # Check file and extention
+        try:
+            structure_ext = structure_path.split('.')[-1]
+            if structure_ext not in ['xyz', 'cif']:
+                raise FileNotFoundError('FAILED: Invalid file/file-extention, accepts only .xyz or .cif data file')
+        except:
+            raise FileNotFoundError('FAILED: Invalid file/file-extention, accepts only .xyz or .cif data file')
+
+        # If cif, check for radii and generate particles
+        if structure_ext == 'cif':
+            if radii is not None:
+                ase_structures, _ = self.generate_nanoparticles(structure_path, radii)
+                self.num_structures = len(ase_structures)
+            else:
+                raise ValueError('FAILED: When providing .cif data file, please provide radii (Union[List[float], float]) to generate from.')
+
+            self.struc_elements = []
+            self.struc_size = []
+            self.struc_occupancy = []
+            self.struc_xyz = []
+            
+            for structure in ase_structures:
+                elements = structure.get_chemical_symbols()
+                size = len(elements)
+                occupancy = torch.ones((size), dtype=torch.float32).to(device=self.device)
+                xyz = torch.tensor(np.array(structure.get_positions())).to(device=self.device, dtype=torch.float32)
+
+                self.struc_elements.append(elements)
+                self.struc_size.append(size)
+                self.struc_occupancy.append(occupancy)
+                self.struc_xyz.append(xyz)
+
+        elif structure_ext == 'xyz':
+                
+            self.num_structures = 1
+            struc = np.genfromtxt(structure_path, dtype='str', skip_header=2) # Gen
+            self.struc_elements = [struc[:,0]] # Identities
+            self.struc_size = [len(self.struc_elements[0])] # Size
+
+            # Append occupancy if nothing is provided
+            if struc.shape[1] == 5:
+                self.struc_occupancy = [torch.from_numpy(struc[:,-1]).to(device=self.device, dtype=torch.float32)]
+                self.struc_xyz = [torch.tensor(struc[:,1:-1].astype('float')).to(device=self.device, dtype=torch.float32)]
+            else:
+                self.struc_occupancy = [torch.ones((self.struc_size[0]), dtype=torch.float32).to(device=self.device)]
+                self.struc_xyz = [torch.tensor(struc[:,1:].astype('float')).to(device=self.device, dtype=torch.float32)]
+        else:
+            raise FileNotFoundError('FAILED: Invalid file/file-extention, accepts only .xyz or .cif data file')
+
+        # Unique elements and their counts
+        self.triu_indices = []
+        self.unique_inverse = []
+        self.struc_unique_form_factors = []
+        self.struc_form_avg_sq = []
+        self.struc_inverse = []
+
+        for i in range(self.num_structures):
+
+            # Get unique elements and construc form factor stacks
+            unique_elements, inverse, counts = np.unique(self.struc_elements[i], return_counts=True, return_inverse=True)
+
+            triu_indices = torch.triu_indices(self.struc_size[i], self.struc_size[i], 1)
+            unique_inverse = torch.from_numpy(inverse[triu_indices]).to(device=self.device)
+            struc_unique_form_factors = torch.stack([self.form_factor_func(self.FORM_FACTOR_COEF[el]) for el in unique_elements])
+
+            self.triu_indices.append(triu_indices)
+            self.unique_inverse.append(unique_inverse)
+            self.struc_unique_form_factors.append(struc_unique_form_factors)
+
+            # Calculate average squared form factor and self scattering inverse indices
+            counts = torch.from_numpy(counts).to(device=self.device)
+            compositional_fractions = counts / torch.sum(counts)
+            struc_form_avg_sq = torch.sum(compositional_fractions.reshape(-1,1) * struc_unique_form_factors, dim=0)**2
+            struc_inverse = torch.from_numpy(np.array([inverse[i] for i in range(self.struc_size[i])])).to(device=self.device)
+
+            self.struc_form_avg_sq.append(struc_form_avg_sq)
+            self.struc_inverse.append(struc_inverse)
+
     def iq(
         self,
-        structure: str,
+        structure_path: str,
+        radii: Union[List[float], float, None] = None,
         keep_on_device: bool = False,
         _total_scattering: bool = False,
-    ) -> Union[Tuple[np.float32, np.float32], Tuple[torch.FloatTensor, torch.FloatTensor]]:
+    ) -> Union[Tuple[np.float32, Union[List[np.float32], np.float32]], Tuple[torch.FloatTensor, Union[List[torch.FloatTensor], torch.FloatTensor]]]:
+
         """
         Calculate the scattering intensity I(Q) for the given atomic structure.
 
         Parameters:
-            structure (str): Path to the atomic structure file in XYZ format.
+            structure_path (str): Path to the atomic structure file in XYZ format.
+            radii (Union[List[float], float, None]): List/float of radii/radius of particle(s) to generate with parsed CIF
             keep_on_device (bool): Flag to keep the results on the class device. Default is False.
             _total_scattering (bool): Flag to return the scattering intensity I(Q) without the self-scattering contribution. Default is False.
 
         Returns:
             Tuple of torch tensors containing Q-values and scattering intensity I(Q) if keep_on_device is True, otherwise, numpy arrays on CPU.
         """
-        self._initialise_structure(structure)
+
+        # Initialise structure
+        self._initialise_structures(structure_path, radii)
+
         if self.profile:
-            self.profiler.time('Setup structure and form factors')
+            self.profiler.time('Setup structures and form factors')
 
-        # Calculate distances and batch
-        if self.batch_size is None:
-            self.batch_size = self._max_batch_size
-        dists = pdist(self.struc_xyz).split(self.batch_size)
-        indices = self.triu_indices.split(self.batch_size, dim=1)
-        inverse_indices = self.unique_inverse.split(self.batch_size, dim=1)
-        if self.profile:
-            self.profiler.time('Batching and Distances')
+        # Calculate I(Q) for all initialised structures
+        iq_output = []
+        for i in range(self.num_structures):
 
-        # Calculate scattering using Debye Equation
-        iq = torch.zeros((len(self.q))).to(device=self.device, dtype=torch.float32)
-        for d, inv_idx, idx in zip(dists, inverse_indices, indices):
-            mask = d >= self.rthres
-            occ_product = self.struc_occupancy[idx[0]] * self.struc_occupancy[idx[1]]
-            sinc = torch.sinc(d[mask] * self.q / torch.pi)
-            ffp = self.struc_unique_form_factors[inv_idx[0]] * self.struc_unique_form_factors[inv_idx[1]]
-            iq += torch.sum(occ_product.unsqueeze(-1) * ffp * sinc.permute(1,0), dim=0)
+            # Calculate distances and batch
+            if self.batch_size is None:
+                self.batch_size = self._max_batch_size
+            dists = pdist(self.struc_xyz[i]).split(self.batch_size)
+            indices = self.triu_indices[i].split(self.batch_size, dim=1)
+            inverse_indices = self.unique_inverse[i].split(self.batch_size, dim=1)
 
-        # Apply Debye-Weller Isotropic Atomic Displacement
-        if self.biso != 0.0:
-            iq *= torch.exp(-self.q.squeeze(-1).pow(2) * self.biso/(8*torch.pi**2))
-        
-        # For total scattering
-        if _total_scattering:
+            if self.profile:
+                self.profiler.time('Batching and Distances')
+
+            # Calculate scattering using Debye Equation
+            iq = torch.zeros((len(self.q))).to(device=self.device, dtype=torch.float32)
+            for d, inv_idx, idx in zip(dists, inverse_indices, indices):
+                mask = d >= self.rthres
+                occ_product = self.struc_occupancy[i][idx[0]] * self.struc_occupancy[i][idx[1]]
+                sinc = torch.sinc(d[mask] * self.q / torch.pi)
+                ffp = self.struc_unique_form_factors[i][inv_idx[0]] * self.struc_unique_form_factors[i][inv_idx[1]]
+                iq += torch.sum(occ_product.unsqueeze(-1) * ffp * sinc.permute(1,0), dim=0)
+
+            # Apply Debye-Weller Isotropic Atomic Displacement
+            if self.biso != 0.0:
+                iq *= torch.exp(-self.q.squeeze(-1).pow(2) * self.biso/(8*torch.pi**2))
+            
+            # For total scattering
+            if _total_scattering:
+                if self.profile:
+                    self.profiler.time('I(Q)')
+                iq_output.append(iq) # TODO Times 2
+                continue
+
+            # Self-scattering contribution
+            sinc = torch.ones((self.struc_size[i], len(self.q))).to(device=self.device)
+            iq += torch.sum((self.struc_occupancy[i].unsqueeze(-1) * self.struc_unique_form_factors[i][self.struc_inverse[i]])**2 * sinc, dim=0) / 2
+            iq *= 2
+
             if self.profile:
                 self.profiler.time('I(Q)')
-            return iq # TODO Times 2
 
-        # Self-scattering contribution
-        sinc = torch.ones((self.struc_size, len(self.q))).to(device=self.device)
-        iq += torch.sum((self.struc_occupancy.unsqueeze(-1) * self.struc_unique_form_factors[self.struc_inverse])**2 * sinc, dim=0) / 2
-        iq *= 2
-
-        if self.profile:
-            self.profiler.time('I(Q)')
+            iq_output.append(iq)
+            
+        if _total_scattering:
+            return self.q.squeeze(-1), iq_output
 
         if keep_on_device:
-            return self.q.squeeze(-1), iq
+            if self.num_structures == 1:
+                return self.q.squeeze(-1), iq_output[0]
+            else:
+                return self.q.squeeze(-1), iq_output
         else:
-            return self.q.squeeze(-1).cpu().numpy(), iq.cpu().numpy()
+            if self.num_structures == 1:
+                return self.q.squeeze(-1).cpu().numpy(), iq_output[0].cpu().numpy()
+            else:
+                return self.q.squeeze(-1).cpu().numpy(), [iq.cpu().numpy() for iq in iq_output]
 
     def sq(
         self,
-        structure: str,
+        structure_path: str,
+        radii: Union[List[float], float, None] = None,
         keep_on_device: bool = False,
-    ) -> Union[Tuple[np.float32, np.float32], Tuple[torch.FloatTensor, torch.FloatTensor]]:
+    ) -> Union[Tuple[np.float32, Union[List[np.float32], np.float32]], Tuple[torch.FloatTensor, Union[List[torch.FloatTensor], torch.FloatTensor]]]:
+
         """
         Calculate the structure function S(Q) for the given atomic structure.
 
@@ -267,19 +334,32 @@ class DebyeCalculator:
         Returns:
             Tuple of torch tensors containing Q-values and structure function S(Q) if keep_on_device is True, otherwise, numpy arrays on CPU.
         """
+
         # Calculate Scattering S(Q)
-        iq = self.iq(structure, keep_on_device=True, _total_scattering=True)
-        sq = iq/self.struc_form_avg_sq/self.struc_size
+        _, iq = self.iq(structure_path, radii, keep_on_device=True, _total_scattering=True)
+        
+        sq_output = []
+        for i in range(self.num_structures):
+            sq = iq[i]/self.struc_form_avg_sq[i]/self.struc_size[i]
+            sq_output.append(sq)
+
         if keep_on_device:
-            return self.q.squeeze(-1), sq
+            if self.num_structures == 1:
+                return self.q.squeeze(-1), sq_output[0]
+            else:
+                return self.q.squeeze(-1), sq_output
         else:
-            return self.q.squeeze(-1).cpu().numpy(), sq.cpu().numpy()
+            if self.num_structures == 1:
+                return self.q.squeeze(-1).cpu().numpy(), sq_output[0].cpu().numpy()
+            else:
+                return self.q.squeeze(-1).cpu().numpy(), [sq.cpu().numpy() for sq in sq_output]
     
     def fq(
         self,
-        structure: str,
+        structure_path: str,
+        radii: Union[List[float], float, None] = None,
         keep_on_device: bool = False,
-    ) -> Union[Tuple[np.float32, np.float32], Tuple[torch.FloatTensor, torch.FloatTensor]]:
+    ) -> Union[Tuple[np.float32, Union[List[np.float32], np.float32]], Tuple[torch.FloatTensor, Union[List[torch.FloatTensor], torch.FloatTensor]]]:
         """
         Calculate the reduced structure function F(Q) for the given atomic structure.
 
@@ -291,19 +371,32 @@ class DebyeCalculator:
             Tuple of torch tensors containing Q-values and reduced structure function F(Q) if keep_on_device is True, otherwise, numpy arrays on CPU.
         """
         # Calculate Scattering S(Q)
-        iq = self.iq(structure, keep_on_device=True, _total_scattering=True)
-        sq = iq/self.struc_form_avg_sq/self.struc_size
-        fq = self.q.squeeze(-1) * sq
+        _, iq = self.iq(structure_path, radii, keep_on_device=True, _total_scattering=True)
+
+        fq_output = []
+        for i in range(self.num_structures):
+            sq = iq[i]/self.struc_form_avg_sq[i]/self.struc_size[i]
+            fq = self.q.squeeze(-1) * sq
+            fq_output.append(fq)
+
         if keep_on_device:
-            return self.q.squeeze(-1), fq
+            if self.num_structures == 1:
+                return self.q.squeeze(-1), fq_output[0]
+            else:
+                return self.q.squeeze(-1), fq_output
         else:
-            return self.q.squeeze(-1).cpu().numpy(), fq.cpu().numpy()
+            if self.num_structures == 1:
+                return self.q.squeeze(-1).cpu().numpy(), fq_output[0].cpu().numpy()
+            else:
+                return self.q.squeeze(-1).cpu().numpy(), [fq.cpu().numpy() for fq in fq_output]
 
     def gr(
         self,
-        structure: str,
+        structure_path: str,
+        radii: Union[List[float], float, None] = None,
         keep_on_device: bool = False,
-    ) -> Union[Tuple[np.float32, np.float32], Tuple[torch.FloatTensor, torch.FloatTensor]]:
+    ) -> Union[Tuple[np.float32, Union[List[np.float32], np.float32]], Tuple[torch.FloatTensor, Union[List[torch.FloatTensor], torch.FloatTensor]]]:
+
         """
         Calculate the reduced pair distribution function G(r) for the given atomic structure.
 
@@ -314,36 +407,51 @@ class DebyeCalculator:
         Returns:
             Tuple of torch tensors containing Q-values and PDF G(r) if keep_on_device is True, otherwise, numpy arrays on CPU.
         """
-        # Calculate Scattering I(Q), S(Q), F(Q)
         if self.profile:
             self.profiler.reset()
-        iq = self.iq(structure, keep_on_device=True, _total_scattering=True)
-        sq = iq/self.struc_form_avg_sq/self.struc_size
-        if self.profile:
-            self.profiler.time('S(Q)')
-        fq = self.q.squeeze(-1) * sq
-        if self.profile:
-            self.profiler.time('F(Q)')
-        
-        # Calculate total scattering, G(r)
-        damp = 1 if self.qdamp == 0.0 else torch.exp(-(self.r.squeeze(-1) * self.qdamp).pow(2) / 2)
-        lorch_mod = 1 if self.lorch_mod == None else torch.sinc(self.q * self.lorch_mod*(torch.pi / self.qmax))
-        if self.profile:
-            self.profiler.time('Modifications, Qdamp/Lorch')
-        gr = (2 / torch.pi) * torch.sum(fq.unsqueeze(-1) * torch.sin(self.q * self.r.permute(1,0))*self.qstep * lorch_mod, dim=0) * damp
-        if self.profile:
-            self.profiler.time('G(r)')
 
+        # Calculate Scattering I(Q), S(Q), F(Q)
+        _, iq = self.iq(structure_path, radii, keep_on_device=True, _total_scattering=True)
+
+        gr_output = []
+        for i in range(self.num_structures):
+            sq = iq[i]/self.struc_form_avg_sq[i]/self.struc_size[i]
+            if self.profile:
+                self.profiler.time('S(Q)')
+            fq = self.q.squeeze(-1) * sq
+            if self.profile:
+                self.profiler.time('F(Q)')
+        
+            # Calculate total scattering, G(r)
+            damp = 1 if self.qdamp == 0.0 else torch.exp(-(self.r.squeeze(-1) * self.qdamp).pow(2) / 2)
+            lorch_mod = 1 if self.lorch_mod == None else torch.sinc(self.q * self.lorch_mod*(torch.pi / self.qmax))
+            if self.profile:
+                self.profiler.time('Modifications, Qdamp/Lorch')
+            gr = (2 / torch.pi) * torch.sum(fq.unsqueeze(-1) * torch.sin(self.q * self.r.permute(1,0))*self.qstep * lorch_mod, dim=0) * damp
+            if self.profile:
+                self.profiler.time('G(r)')
+
+            gr_output.append(gr)
+        
         if keep_on_device:
-            return self.r.squeeze(-1), gr
+            if self.num_structures == 1:
+                return self.r.squeeze(-1), gr_output[0]
+            else:
+                return self.r.squeeze(-1), gr_output
         else:
-            return self.r.squeeze(-1).cpu().numpy(), gr.cpu().numpy()
+            if self.num_structures == 1:
+                return self.r.squeeze(-1).cpu().numpy(), gr_output[0].cpu().numpy()
+            else:
+                return self.r.squeeze(-1).cpu().numpy(), [gr.cpu().numpy() for gr in gr_output]
 
     def _get_all(
         self,
-        structure: str,
+        structure_path: str,
+        radii: Union[List[float], float, None] = None,
         keep_on_device: bool = False,
-    ) -> Union[Tuple[np.float32,...], Tuple[torch.FloatTensor,...]]:
+    ) -> Union[Tuple[np.float32,np.float32,Union[List[np.float32], np.float32],Union[List[np.float32],np.float32], Union[List[np.float32],np.float32], Union[List[np.float32], np.float32]],
+               Tuple[torch.FloatTensor,torch.FloatTensor,Union[List[torch.FloatTensor], torch.FloatTensor],Union[List[torch.FloatTensor],torch.FloatTensor], Union[List[torch.FloatTensor],torch.FloatTensor], Union[List[torch.FloatTensor], torch.FloatTensor]]]:
+
         """
         Calculate I(Q), S(Q), F(Q) and G(r) for the given atomic structure and return all.
 
@@ -352,46 +460,68 @@ class DebyeCalculator:
             keep_on_device (bool): Flag to keep the results on the class device. Default is False.
 
         Returns:
-            Tuple of torch tensors containing r-values, Q-values and I(Q), S(Q), F(Q) and G(r) if keep_on_device is True, otherwise, numpy arrays on CPU.
+            Tuple of torch tensors containing of r-values, Q-values and Union[List[float_vec], float_vec] of I(Q), S(Q), F(Q) and G(r) if keep_on_device is True, otherwise, numpy arrays on CPU.
         """
-        self._initialise_structure(structure)
 
-        # Calculate distances and batch
-        if self.batch_size is None:
-            self.batch_size = self._max_batch_size
-        dists = pdist(self.struc_xyz).split(self.batch_size)
-        indices = self.triu_indices.split(self.batch_size, dim=1)
-        inverse_indices = self.unique_inverse.split(self.batch_size, dim=1)
+        # Initialise structure
+        self._initialise_structures(structure_path, radii)
 
-        # Calculate scattering using Debye Equation
-        iq = torch.zeros((len(self.q))).to(device=self.device, dtype=torch.float32)
-        for d, inv_idx, idx in zip(dists, inverse_indices, indices):
-            mask = d >= self.rthres
-            occ_product = self.struc_occupancy[idx[0]] * self.struc_occupancy[idx[1]]
-            sinc = torch.sinc(d[mask] * self.q / torch.pi)
-            ffp = self.struc_unique_form_factors[inv_idx[0]] * self.struc_unique_form_factors[inv_idx[1]]
-            iq += torch.sum(occ_product.unsqueeze(-1) * ffp * sinc.permute(1,0), dim=0)
+        # Calculate I(Q) for all initialised structures
+        iq_output = []
+        sq_output = []
+        fq_output = []
+        gr_output = []
+        for i in range(self.num_structures):
 
-        # Apply Debye-Weller Isotropic Atomic Displacement
-        if self.biso != 0.0:
-            iq *= torch.exp(-self.q.squeeze(-1).pow(2) * self.biso/(8*torch.pi**2))
+            # Calculate distances and batch
+            if self.batch_size is None:
+                self.batch_size = self._max_batch_size
+            dists = pdist(self.struc_xyz).split(self.batch_size)
+            indices = self.triu_indices.split(self.batch_size, dim=1)
+            inverse_indices = self.unique_inverse.split(self.batch_size, dim=1)
+
+            # Calculate scattering using Debye Equation
+            _, iq = torch.zeros((len(self.q))).to(device=self.device, dtype=torch.float32)
+            for d, inv_idx, idx in zip(dists, inverse_indices, indices):
+                mask = d >= self.rthres
+                occ_product = self.struc_occupancy[i][idx[0]] * self.struc_occupancy[i][idx[1]]
+                sinc = torch.sinc(d[mask] * self.q / torch.pi)
+                ffp = self.struc_unique_form_factors[i][inv_idx[0]] * self.struc_unique_form_factors[i][inv_idx[1]]
+                iq += torch.sum(occ_product.unsqueeze(-1) * ffp * sinc.permute(1,0), dim=0)
+
+            # Apply Debye-Weller Isotropic Atomic Displacement
+            if self.biso != 0.0:
+                iq *= torch.exp(-self.q.squeeze(-1).pow(2) * self.biso/(8*torch.pi**2))
         
-        # Calculate S(Q), F(Q) and G(r)
-        sq = iq/self.struc_form_avg_sq/self.struc_size
-        fq = self.q.squeeze(-1) * sq
-        damp = 1 if self.qdamp == 0.0 else torch.exp(-(self.r.squeeze(-1) * self.qdamp).pow(2) / 2)
-        lorch_mod = 1 if self.lorch_mod == None else torch.sinc(self.q * self.lorch_mod*(torch.pi / self.qmax))
-        gr = (2 / torch.pi) * torch.sum(fq.unsqueeze(-1) * torch.sin(self.q * self.r.permute(1,0))*self.qstep * lorch_mod, dim=0) * damp
+            # Calculate S(Q), F(Q) and G(r)
+            sq = iq/self.struc_form_avg_sq[i]/self.struc_size[i]
+            sq_output.append(sq)
+            
+            fq = self.q.squeeze(-1) * sq
+            fq_output.append(fq)
 
-        # Self-scattering contribution / Calculate I(Q)
-        sinc = torch.ones((self.struc_size, len(self.q))).to(device=self.device)
-        iq += torch.sum((self.struc_occupancy.unsqueeze(-1) * self.struc_unique_form_factors[self.struc_inverse])**2 * sinc, dim=0) / 2
-        iq *= 2
+            damp = 1 if self.qdamp == 0.0 else torch.exp(-(self.r.squeeze(-1) * self.qdamp).pow(2) / 2)
+            lorch_mod = 1 if self.lorch_mod == None else torch.sinc(self.q * self.lorch_mod*(torch.pi / self.qmax))
+            gr = (2 / torch.pi) * torch.sum(fq.unsqueeze(-1) * torch.sin(self.q * self.r.permute(1,0))*self.qstep * lorch_mod, dim=0) * damp
+            gr_output.append(gr)
+            
+            # Self-scattering contribution
+            sinc = torch.ones((self.struc_size[i], len(self.q))).to(device=self.device)
+            iq += torch.sum((self.struc_occupancy[i].unsqueeze(-1) * self.struc_unique_form_factors[i][self.struc_inverse[i]])**2 * sinc, dim=0) / 2
+            iq *= 2
 
+            iq_output.append(iq)
+            
         if keep_on_device:
-            return self.r.squeeze(-1), self.q.squeeze(-1), iq, sq, fq, gr
+            if self.num_structures == 1:
+                return self.r.squeeze(-1), self.q.squeeze(-1), iq_output[0], sq_output[0], fq_output[0], gr_output[0]
+            else:
+                return self.r.squeeze(-1), self.q.squeeze(-1), iq_output, sq_output, fq_output, gr_output
         else:
-            return self.r.squeeze(-1).cpu().numpy(), self.q.squeeze(-1).cpu().numpy(), iq.cpu().numpy(), sq.cpu().numpy(), fq.cpu().numpy(), gr.cpu().numpy()
+            if self.num_structures == 1:
+                return self.r.squeeze(-1).cpu().numpy(), self.q.squeeze(-1).cpu().numpy(), iq_output[0].cpu().numpy(), sq_output[0].cpu().numpy(), fq_output[0].cpu().numpy(), gr_output[0].cpu().numpy()
+            else:
+                return self.r.squeeze(-1).cpu().numpy(), self.q.squeeze(-1).cpu().numpy(), [iq.cpu.numpy() for iq in iq_output], [sq.cpu.numpy() for sq in sq_output], [fq.cpu.numpy() for fq in fq_output], [gr.cpu.numpy() for gr in gr_output]
 
     def generate_nanoparticles(
         self,
@@ -399,7 +529,8 @@ class DebyeCalculator:
         radii: Union[List[float], float],
         sort_atoms: bool = True,
         _override_device: bool = True,
-    ) -> Tuple[Union[List[Atoms], Atoms, None], Union[List[float], float, None]]:
+    ) -> Tuple[Union[List[Atoms], Atoms], Union[List[float], float]]:
+
         """
         Generate nanoparticles from a given structure and list of radii.
     
@@ -413,19 +544,16 @@ class DebyeCalculator:
             list: List of ASE Atoms objects representing the generated nanoparticles.
             list: List of nanoparticle sizes (diameter) corresponding to each radius.
         """
+
         # Fix radii type
         if isinstance(radii, list):
-            radii = radii
-            single_flag = False
+            radii = [float(r) for r in radii]
         elif isinstance(radii, float):
             radii = [radii]
-            single_flag = True
         elif isinstance(radii, int):
             radii = [float(radii)]
-            single_flag = True
         else:
-            print('FAILED: Please provide valid radii for generation of nanoparticles')
-            return None, None
+            raise ValueError('FAILED: Please provide valid radii for generation of nanoparticles')
 
         # DEV: Override device
         device = 'cpu' if _override_device else self.device
@@ -479,9 +607,6 @@ class DebyeCalculator:
                     nanoparticle_size = max(nanoparticle_size, center_dists[i] * 2)
                     incl_mask[i] = True
     
-            # Append size
-            nanoparticle_sizes.append(nanoparticle_size.item())
-    
             # Extract the nanoparticle from the supercell
             np_cell = cell[incl_mask.cpu()]
 
@@ -493,13 +618,13 @@ class DebyeCalculator:
     
             # Append nanoparticle
             nanoparticle_list.append(np_cell)
+            # Append size
+            nanoparticle_sizes.append(nanoparticle_size.item())
+
             pbar.update(1)
         pbar.close()
     
-        if single_flag:
-            return nanoparticle_list[0], nanoparticle_sizes[0]
-        else:
-            return nanoparticle_list, nanoparticle_sizes
+        return nanoparticle_list, nanoparticle_sizes
 
     def _is_notebook(
         self,
@@ -527,6 +652,7 @@ class DebyeCalculator:
         structure_path: Union[str, None] = None,
         _cont_updates: bool = False,
     ) -> None:
+
         """
         Initiates an interactive visualization and data analysis tool within a Jupyter Notebook or Google Colab environment.
 
@@ -745,7 +871,7 @@ class DebyeCalculator:
                 
             except Exception as e:
                 #raise(e)
-                print('WARNING: Data not available', end="\r")
+                print('FAILED: Data not available', end="\r")
                   
         # Download buttons
         download_button = widgets.Button(description="Download Data")
@@ -762,7 +888,7 @@ class DebyeCalculator:
         # Define a function to update the scattering patterns based on the selected parameters
         def update_options(change):
             folder = change.new
-            paths = sorted(glob(os.path.join(folder, '*.xyz')))
+            paths = sorted(glob(os.path.join(folder, '*.xyz')) + glob(os.path.join(folder, '*.cif')))
             if len(paths):
                 select_file.options = ['Select data file'] + paths #[path.split('/')[-1] for path in paths]
                 select_file.value = 'Select data file'
@@ -841,7 +967,7 @@ class DebyeCalculator:
                     fig.suptitle("XYZ file: " + path.split('/')[-1].split('.')[0])
                     fig.tight_layout()
                 except:
-                    print(f'WARNING: Could not load data file: {path}', end='\r')
+                    print(f'FAILED: Could not load data file: {path}', end='\r')
            
     
         # Create an interactive function that triggers when the user-defined parameters changes
