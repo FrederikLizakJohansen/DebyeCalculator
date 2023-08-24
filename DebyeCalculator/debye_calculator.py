@@ -1,20 +1,24 @@
 import os
 import sys
-import yaml
-import torch
-from datetime import datetime
-import numpy as np
-from typing import Union, Tuple, Any, List
-import pkg_resources
-from ase import Atoms
-from torch.nn.functional import pdist
-from profiling import Profiler
 import base64
+import yaml
+import pkg_resources
+from glob import glob
+from datetime import datetime
+from typing import Union, Tuple, Any, List
+
+import torch
+from torch.nn.functional import pdist
+
+import numpy as np
+import matplotlib.pyplot as plt
+
+from ase import Atoms
+from profiling import Profiler
+
 import ipywidgets as widgets
 from IPython.display import display, HTML
 from ipywidgets import interact, interact_manual
-from glob import glob
-import matplotlib.pyplot as plt
 
 class DebyeCalculator:
     """
@@ -389,7 +393,7 @@ class DebyeCalculator:
         radii: Union[List[float], float],
         sort_atoms: bool = True,
         _override_device: bool = True,
-    ):
+    ) -> Tuple[Union[List[Atoms], Atoms, None], Union[List[float], float, None]]:
         """
         Generate nanoparticles from a given structure and list of radii.
     
@@ -411,7 +415,7 @@ class DebyeCalculator:
             single_flag = True
         else:
             print('FAILED: Please provide valid radii for generation of nanoparticles')
-            return
+            return None, None
 
         # DEV: Override device
         device = 'cpu' if _override_device else device = self.device
