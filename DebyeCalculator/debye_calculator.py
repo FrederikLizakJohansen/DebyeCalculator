@@ -144,6 +144,7 @@ class DebyeCalculator:
         self,
         structure_path: str,
         radii: Union[List[float], float, None] = None,
+        disable_pbar: bool = False,
     ) -> None:
 
         """
@@ -165,7 +166,7 @@ class DebyeCalculator:
         # If cif, check for radii and generate particles
         if structure_ext == 'cif':
             if radii is not None:
-                ase_structures, _ = self.generate_nanoparticles(structure_path, radii)
+                ase_structures, _ = self.generate_nanoparticles(structure_path, radii, disable_pbar=disable_pbar)
                 self.num_structures = len(ase_structures)
             else:
                 raise ValueError('FAILED: When providing .cif data file, please provide radii (Union[List[float], float]) to generate from.')
@@ -254,7 +255,7 @@ class DebyeCalculator:
         """
 
         # Initialise structure
-        self._initialise_structures(structure_path, radii)
+        self._initialise_structures(structure_path, radii, disable_pbar = True)
 
         if self.profile:
             self.profiler.time('Setup structures and form factors')
@@ -464,7 +465,7 @@ class DebyeCalculator:
         """
 
         # Initialise structure
-        self._initialise_structures(structure_path, radii)
+        self._initialise_structures(structure_path, radii, disable_pbar = True)
 
         # Calculate I(Q) for all initialised structures
         iq_output = []
@@ -476,12 +477,12 @@ class DebyeCalculator:
             # Calculate distances and batch
             if self.batch_size is None:
                 self.batch_size = self._max_batch_size
-            dists = pdist(self.struc_xyz).split(self.batch_size)
-            indices = self.triu_indices.split(self.batch_size, dim=1)
-            inverse_indices = self.unique_inverse.split(self.batch_size, dim=1)
+            dists = pdist(self.struc_xyz[i]).split(self.batch_size)
+            indices = self.triu_indices[i].split(self.batch_size, dim=1)
+            inverse_indices = self.unique_inverse[i].split(self.batch_size, dim=1)
 
             # Calculate scattering using Debye Equation
-            _, iq = torch.zeros((len(self.q))).to(device=self.device, dtype=torch.float32)
+            iq = torch.zeros((len(self.q))).to(device=self.device, dtype=torch.float32)
             for d, inv_idx, idx in zip(dists, inverse_indices, indices):
                 mask = d >= self.rthres
                 occ_product = self.struc_occupancy[i][idx[0]] * self.struc_occupancy[i][idx[1]]
@@ -528,6 +529,7 @@ class DebyeCalculator:
         structure_path: str,
         radii: Union[List[float], float],
         sort_atoms: bool = True,
+        disable_pbar: bool = False,
         _override_device: bool = True,
     ) -> Tuple[Union[List[Atoms], Atoms], Union[List[float], float]]:
 
@@ -585,7 +587,7 @@ class DebyeCalculator:
         # Initialize nanoparticle lists and progress bar
         nanoparticle_list = []
         nanoparticle_sizes = []
-        pbar = tqdm(desc=f'Generating nanoparticles in range: [{radii[0]},{radii[-1]}]', leave=False, total=len(radii))
+        pbar = tqdm(desc=f'Generating nanoparticles in range: [{radii[0]},{radii[-1]}]', leave=False, total=len(radii), disable=disable_pbar)
     
         # Generate nanoparticles for each radius
         for r in radii:
@@ -696,8 +698,17 @@ class DebyeCalculator:
         path_btn = widgets.Text(
             value='',
             placeholder="",
-            description='Data directory',
+            description='Data Dir:',
             disabled = disable_input,
+        )
+        
+        select_radius = widgets.FloatText(
+            min = 0,
+            max = 50,
+            step=0.01,
+            value=5,
+            description='Radius (.cif):',
+            disabled = True,
         )
         
         # Device button
@@ -713,8 +724,7 @@ class DebyeCalculator:
             min = 100,
             max = 10000,
             value=batch_size,
-            description='Hardware batch-size',
-            style = {'description_width': 'initial'},
+            description='Batch Size:',
         )
 
         # Q value min/max slider
@@ -797,8 +807,7 @@ class DebyeCalculator:
         # Lorch modification button
         lorch_mod_btn = widgets.Checkbox(
             value=lorch_mod,
-            description='Lorch modification',
-            style = {'description_width': 'initial'},
+            description='Lorch mod.:',
         )
 
         # Scale type button
@@ -878,7 +887,7 @@ class DebyeCalculator:
         download_button.on_click(on_download_button_click)
     
         # Create a color dropdown widget
-        folder = widgets.Text(description='Data directory:', placeholder='Provide data directory', disabled=disable_input)
+        folder = widgets.Text(description='Data Dir.:', placeholder='Provide data directory', disabled=disable_input)
     
         # Create a dropdown menu widget for selection of XYZ file and an output area
         standard_msg = ''
@@ -900,11 +909,22 @@ class DebyeCalculator:
     
         # Link the update function to the dropdown widget's value change event
         folder.observe(update_options, names='value')
+        
+        def update_options_radius(change):
+            #select_radius = change.new
+            selected_ext = select_file.value.split('.')[-1]
+            if selected_ext == 'xyz':
+                select_radius.disabled = True
+            elif selected_ext == 'cif':
+                select_radius.disabled = False
+
+        select_file.observe(update_options_radius, names='value')
     
         # Create a function to update the output area
         def update_output(
             folder,
             path,
+            radius,
             device,
             batch_size,
             radtype,
@@ -933,7 +953,7 @@ class DebyeCalculator:
                                                  rmin=rminmax[0], rmax=rminmax[1], rstep=rstep, rthres=rthres, biso=biso,
                                                  lorch_mod=lorch_mod)
     
-                    r, q, iq_values, sq_values, fq_values, gr_values = calculator._get_all(path)
+                    r, q, iq_values, sq_values, fq_values, gr_values = calculator._get_all(path, radius)
     
                     fig, axs = plt.subplots(2, 2, figsize=(12, 8), dpi=75)
                     axs = axs.flatten()
@@ -966,15 +986,17 @@ class DebyeCalculator:
     
                     fig.suptitle("XYZ file: " + path.split('/')[-1].split('.')[0])
                     fig.tight_layout()
-                except:
+
+                except Exception as e:
+                    raise(e)
                     print(f'FAILED: Could not load data file: {path}', end='\r')
-           
     
         # Create an interactive function that triggers when the user-defined parameters changes
         interact(
             update_output, 
             folder = folder,
             path = select_file,
+            radius = select_radius,
             batch_size = batch_size_btn,
             device = device_btn,
             radtype = radtype_btn,
