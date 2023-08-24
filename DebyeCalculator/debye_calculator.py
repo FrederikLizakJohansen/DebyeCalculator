@@ -379,9 +379,9 @@ class DebyeCalculator:
         iq *= 2
 
         if keep_on_device:
-            return self.r.squeeze(-1), self.q.squeeze(-1), iq_out, sq, fq, gr
+            return self.r.squeeze(-1), self.q.squeeze(-1), iq, sq, fq, gr
         else:
-            return self.r.squeeze(-1).cpu().numpy(), self.q.squeeze(-1).cpu().numpy(), iq_out.cpu().numpy(), sq.cpu().numpy(), fq.cpu().numpy(), gr.cpu().numpy()
+            return self.r.squeeze(-1).cpu().numpy(), self.q.squeeze(-1).cpu().numpy(), iq.cpu().numpy(), sq.cpu().numpy(), fq.cpu().numpy(), gr.cpu().numpy()
 
     def _is_notebook(
         self,
