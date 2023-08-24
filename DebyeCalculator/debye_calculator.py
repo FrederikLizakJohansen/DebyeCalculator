@@ -8,17 +8,23 @@ from datetime import datetime
 from typing import Union, Tuple, Any, List
 
 import torch
+from torch import cdist
 from torch.nn.functional import pdist
 
 import numpy as np
 import matplotlib.pyplot as plt
 
 from ase import Atoms
+from ase.io import read, write
+from ase.build import make_supercell
+from ase.build.tools import sort as ase_sort
+
 from profiling import Profiler
 
 import ipywidgets as widgets
 from IPython.display import display, HTML
 from ipywidgets import interact, interact_manual
+from tqdm.auto import tqdm
 
 class DebyeCalculator:
     """
@@ -401,6 +407,7 @@ class DebyeCalculator:
             structure_path (str): Path to the input structure file.
             radii (Union[List[float], float]): List of floats or float of radii for nanoparticles to be generated.
             sort_atoms (bool, optional): Whether to sort atoms in the nanoparticle. Defaults to True.
+            _override_device (bool): Ignore object device and run in CPU
     
         Returns:
             list: List of ASE Atoms objects representing the generated nanoparticles.
@@ -413,12 +420,15 @@ class DebyeCalculator:
         elif isinstance(radii, float):
             radii = [radii]
             single_flag = True
+        elif isinstance(radii, int):
+            radii = [float(radii)]
+            single_flag = True
         else:
             print('FAILED: Please provide valid radii for generation of nanoparticles')
             return None, None
 
         # DEV: Override device
-        device = 'cpu' if _override_device else device = self.device
+        device = 'cpu' if _override_device else self.device
 
         # Read the input unit cell structure
         unit_cell = read(structure_path)
@@ -436,6 +446,7 @@ class DebyeCalculator:
         # Find all metals and center around the nearest metal
         ligands = ['O', 'Cl', 'H'] # Placeholder
         metal_filter = torch.BoolTensor([a not in ligands for a in cell.get_chemical_symbols()]).to(device = device)
+        center_dists = torch.norm(positions, dim=1)
         positions -= positions[metal_filter][torch.argmin(center_dists[metal_filter])]
         center_dists = torch.norm(positions, dim=1)
         min_metal_dist = torch.min(pdist(positions[metal_filter]))
@@ -469,7 +480,7 @@ class DebyeCalculator:
                     incl_mask[i] = True
     
             # Append size
-            nanoparticle_sizes.append(nanoparticle_size)
+            nanoparticle_sizes.append(nanoparticle_size.item())
     
             # Extract the nanoparticle from the supercell
             np_cell = cell[incl_mask.cpu()]
@@ -483,6 +494,7 @@ class DebyeCalculator:
             # Append nanoparticle
             nanoparticle_list.append(np_cell)
             pbar.update(1)
+        pbar.close()
     
         if single_flag:
             return nanoparticle_list[0], nanoparticle_sizes[0]
