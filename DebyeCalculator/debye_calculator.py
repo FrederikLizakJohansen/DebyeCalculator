@@ -651,7 +651,6 @@ class DebyeCalculator:
 
     def interact(
         self,
-        structure_path: Union[str, None] = None,
         _cont_updates: bool = False,
     ) -> None:
 
@@ -666,9 +665,6 @@ class DebyeCalculator:
         if not self._is_notebook():
             print("FAILED: Interactive mode is exlusive to Jupyter Notebook or Google Colab")
             return
-
-        # Check if path is given else Default
-        disable_input = False if structure_path is None else True
 
         qmin = self.qmin
         qmax = self.qmax
@@ -699,7 +695,7 @@ class DebyeCalculator:
             value='',
             placeholder="",
             description='Data Dir:',
-            disabled = disable_input,
+            disabled = False,
         )
         
         select_radius = widgets.FloatText(
@@ -855,6 +851,38 @@ class DebyeCalculator:
             href = f'<a href="data:text/csv;base64,{b64}" download="{filename}">Download {filename} (Created: {hours}:{minutes}:{seconds})</a>'
             return href
 
+        def create_structure_download_link(filename_prefix, ase_atoms):
+            
+            # Get atomic properties
+            positions = ase_atoms.get_positions()
+            elements = ase_atoms.get_chemical_symbols()
+            num_atoms = len(ase_atoms)
+
+            # Header
+            header = str(num_atoms) + "\n\n"
+
+            # Content 
+            content = header + "\n".join([el + '\t' + "\t".join(map(str,np.around(row, 3))) for row, el in zip(positions, elements)]) # TODO Occupancy
+            
+            # Encode as base64
+            b64 = base64.b64encode(content.encode()).decode()
+            
+            # Add Time
+            t = datetime.now()
+            year = f'{t.year}'[-2:]
+            month = f'{t.month}'.zfill(2)
+            day = f'{t.day}'.zfill(2)
+            hours = f'{t.hour}'.zfill(2)
+            minutes = f'{t.minute}'.zfill(2)
+            seconds = f'{t.second}'.zfill(2)
+
+            # Filename
+            filename = filename_prefix + '_' + select_file.value.split('/')[-1].split('.')[0] + str(select_radius.value) + '_' + month + day + year + '_' + hours + minutes + seconds + '.xyz'
+
+            # Make href and return
+            href = f'<a href="data:text/xyz;base64,{b64}" download="{filename}">Download {filename} (Created: {hours}:{minutes}:{seconds})</a>'
+            return href
+
         def on_download_button_click(button):
             # Try to compile all the data and create html link to download files
             try:
@@ -876,10 +904,15 @@ class DebyeCalculator:
                 display(HTML(create_download_link('fq', fq_data, "q,F(Q)")))
                 display(HTML(create_download_link('gr', gr_data, "r,G(r)")))
 
+                if not select_radius.disabled:
+                    ase_atoms, _ = DebyeCalculator().generate_nanoparticles(select_file.value, select_radius.value)
+                    
+                    display(HTML(create_structure_download_link('structure', ase_atoms[0])))
+
                 print('=' * 10)
                 
             except Exception as e:
-                #raise(e)
+                raise(e)
                 print('FAILED: Data not available', end="\r")
                   
         # Download buttons
@@ -887,11 +920,11 @@ class DebyeCalculator:
         download_button.on_click(on_download_button_click)
     
         # Create a color dropdown widget
-        folder = widgets.Text(description='Data Dir.:', placeholder='Provide data directory', disabled=disable_input)
+        folder = widgets.Text(description='Data Dir.:', placeholder='Provide data directory', disabled=False)
     
         # Create a dropdown menu widget for selection of XYZ file and an output area
         standard_msg = ''
-        option_values = standard_msg# if structure_path is None else structure_path
+        option_values = standard_msg
         select_file = widgets.Dropdown(description='Select File:', options=[option_values], value=standard_msg, disabled=True)
     
         # Define a function to update the scattering patterns based on the selected parameters
