@@ -4,7 +4,7 @@ import yaml
 import torch
 from datetime import datetime
 import numpy as np
-from typing import Union, Tuple, Any
+from typing import Union, Tuple, Any, List
 import pkg_resources
 from ase import Atoms
 from torch.nn.functional import pdist
@@ -402,6 +402,16 @@ class DebyeCalculator:
             list: List of ASE Atoms objects representing the generated nanoparticles.
             list: List of nanoparticle sizes (diameter) corresponding to each radius.
         """
+        # Fix radii type
+        if isinstance(radii, list):
+            radii = radii
+            single_flag = False
+        elif isinstance(radii, float):
+            radii = [radii]
+            single_flag = True
+        else:
+            print('FAILED: Please provide valid radii for generation of nanoparticles')
+            return
 
         # DEV: Override device
         device = 'cpu' if _override_device else device = self.device
@@ -435,6 +445,7 @@ class DebyeCalculator:
         pbar = tqdm(desc=f'Generating nanoparticles in range: [{radii[0]},{radii[-1]}]', leave=False, total=len(radii))
     
         # Generate nanoparticles for each radius
+        if radii
         for r in radii:
 
             # Mask all atoms within radius
@@ -448,23 +459,32 @@ class DebyeCalculator:
             for i in range(interface_dists.shape[0]):
                 # Interface mask: all atoms within the min metal distance from the interface that is not a metal
                 interface_mask = (interface_dists[i] <= min_metal_dist) & ~metal_filter[i]
+
+                # If any interface atoms that should be included
                 if torch.any(interface_mask):
                     nanoparticle_size = max(nanoparticle_size, center_dists[i] * 2)
                     incl_mask[i] = True
     
+            # Append size
             nanoparticle_sizes.append(nanoparticle_size)
     
             # Extract the nanoparticle from the supercell
             np_cell = cell[incl_mask.cpu()]
+
+            # Sort the atoms
             if sort_atoms:
                 np_cell = ase_sort(np_cell)
                 if np_cell.get_chemical_symbols()[0] in ligands:
                     np_cell = np_cell[::-1]
     
+            # Append nanoparticle
             nanoparticle_list.append(np_cell)
             pbar.update(1)
     
-        return nanoparticle_list, nanoparticle_sizes
+        if single_flag:
+            return nanoparticle_list[0], nanoparticle_sizes[0]
+        else:
+            return nanoparticle_list, nanoparticle_sizes
 
     def _is_notebook(
         self,
