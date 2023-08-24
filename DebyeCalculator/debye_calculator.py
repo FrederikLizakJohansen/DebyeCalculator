@@ -379,9 +379,92 @@ class DebyeCalculator:
         iq *= 2
 
         if keep_on_device:
-            return self.r.squeeze(-1), self.q.squeeze(-1), iq_out, sq, fq, gr
+            return self.r.squeeze(-1), self.q.squeeze(-1), iq, sq, fq, gr
         else:
-            return self.r.squeeze(-1).cpu().numpy(), self.q.squeeze(-1).cpu().numpy(), iq_out.cpu().numpy(), sq.cpu().numpy(), fq.cpu().numpy(), gr.cpu().numpy()
+            return self.r.squeeze(-1).cpu().numpy(), self.q.squeeze(-1).cpu().numpy(), iq.cpu().numpy(), sq.cpu().numpy(), fq.cpu().numpy(), gr.cpu().numpy()
+
+    def generate_nanoparticles(
+        self,
+        structure_path: str,
+        radii: Union[List[float], float],
+        sort_atoms: bool = True,
+        _override_device: bool = True,
+    ):
+        """
+        Generate nanoparticles from a given structure and list of radii.
+    
+        Args:
+            structure_path (str): Path to the input structure file.
+            radii (Union[List[float], float]): List of floats or float of radii for nanoparticles to be generated.
+            sort_atoms (bool, optional): Whether to sort atoms in the nanoparticle. Defaults to True.
+    
+        Returns:
+            list: List of ASE Atoms objects representing the generated nanoparticles.
+            list: List of nanoparticle sizes (diameter) corresponding to each radius.
+        """
+
+        # DEV: Override device
+        device = 'cpu' if _override_device else device = self.device
+
+        # Read the input unit cell structure
+        unit_cell = read(structure_path)
+        cell_dims = np.array(unit_cell.cell.cellpar()[:3])
+        r_max = np.amax(radii)
+    
+        # Create a supercell to encompass the entire range of nanoparticles and center it
+        supercell_matrix = np.diag((np.ceil(r_max / cell_dims)) * 2)
+        cell = make_supercell(prim=unit_cell, P=supercell_matrix)
+        cell.center(about=0.)
+    
+        # Convert positions to torch and send to device
+        positions = torch.from_numpy(cell.get_positions()).to(dtype = torch.float32, device = device)
+
+        # Find all metals and center around the nearest metal
+        ligands = ['O', 'Cl', 'H'] # Placeholder
+        metal_filter = torch.BoolTensor([a not in ligands for a in cell.get_chemical_symbols()]).to(device = device)
+        positions -= positions[metal_filter][torch.argmin(center_dists[metal_filter])]
+        center_dists = torch.norm(positions, dim=1)
+        min_metal_dist = torch.min(pdist(positions[metal_filter]))
+
+        # Update the cell positions
+        cell.positions = positions.cpu()
+    
+        # Initialize nanoparticle lists and progress bar
+        nanoparticle_list = []
+        nanoparticle_sizes = []
+        pbar = tqdm(desc=f'Generating nanoparticles in range: [{radii[0]},{radii[-1]}]', leave=False, total=len(radii))
+    
+        # Generate nanoparticles for each radius
+        for r in radii:
+
+            # Mask all atoms within radius
+            incl_mask = (center_dists <= r)
+
+            # Find interdistances from all included atoms and all atoms
+            interface_dists = cdist(positions, positions[incl_mask])
+    
+            # Find interface atoms and determine nanoparticle size
+            nanoparticle_size = 0
+            for i in range(interface_dists.shape[0]):
+                # Interface mask: all atoms within the min metal distance from the interface that is not a metal
+                interface_mask = (interface_dists[i] <= min_metal_dist) & ~metal_filter[i]
+                if torch.any(interface_mask):
+                    nanoparticle_size = max(nanoparticle_size, center_dists[i] * 2)
+                    incl_mask[i] = True
+    
+            nanoparticle_sizes.append(nanoparticle_size)
+    
+            # Extract the nanoparticle from the supercell
+            np_cell = cell[incl_mask.cpu()]
+            if sort_atoms:
+                np_cell = ase_sort(np_cell)
+                if np_cell.get_chemical_symbols()[0] in ligands:
+                    np_cell = np_cell[::-1]
+    
+            nanoparticle_list.append(np_cell)
+            pbar.update(1)
+    
+        return nanoparticle_list, nanoparticle_sizes
 
     def _is_notebook(
         self,
@@ -399,8 +482,6 @@ class DebyeCalculator:
                 return True # Jupyter notebook or qtconsole
             elif shell == 'google.colab._shell':
                 return True # Google Colab
-            elif shell == 'TerminalInteractiveShell':
-                return False # Ipython through console
             else:
                 return False # Other cases
         except NameError:
@@ -417,9 +498,10 @@ class DebyeCalculator:
         Args:
             _cont_updates (bool, optional): If True, enables continuous updates for interactive widgets. Defaults to False.
         """
+
         # Check if interaction is valid
-        if not self._is_notebook:
-            print("FAILED: Interactive mode is exlusive to Jupyter Notebook, Google Colab or QTConsole")
+        if not self._is_notebook():
+            print("FAILED: Interactive mode is exlusive to Jupyter Notebook or Google Colab")
             return
 
         # Check if path is given else Default
@@ -444,8 +526,7 @@ class DebyeCalculator:
         radtype_btn = widgets.ToggleButtons(
             options=['xray', 'neutron'],
             value=radiation_type,
-            description='Rad. type:',
-            #style = {'description_width': 'initial'},
+            description='Rad. type',
             layout = widgets.Layout(width='900px'),
             button_style='info'
         )
@@ -453,8 +534,8 @@ class DebyeCalculator:
         # Path button
         path_btn = widgets.Text(
             value='',
-            placeholder="some/path/to/data/..",
-            description='Data Folder:',
+            placeholder="",
+            description='Data directory',
             disabled = disable_input,
         )
         
@@ -463,7 +544,6 @@ class DebyeCalculator:
             options=['cpu', 'cuda'],
             value=device,
             description='Hardware:',
-            #style = {'description_width': 'initial'},
             button_style='info',
         )
     
@@ -551,7 +631,6 @@ class DebyeCalculator:
             step=0.001,
             value=rthres,
             description='rthres:',
-            #style = {'description_width': 'initial'},
         )
         
         # Lorch modification button
@@ -566,65 +645,92 @@ class DebyeCalculator:
             options=['linear', 'logarithmic'],
             value='linear',
             description='Axes scaling:',
-            #style = {'description_width': 'initial'},
             button_style='info'
         )
         
         # Download options
-        def create_download_link(filename, data, header=None):
+        def create_download_link(filename_prefix, data, header=None):
+
+            # Collect Metadata
             metadata = str({'qmin': qslider.value[0], 'qmax': qslider.value[1], 'qdamp': qdamp_slider.value, 'qstep': qstep_btn.value,
                           'rmin': rslider.value[0], 'rmax': rslider.value[1], 'rstep': rstep_btn.value, 'rthres': rthres_btn.value,
                           'biso': biso_slider.value, 'device': device_btn.value, 'batch_size': batch_size_btn.value, 'lorch_mod': lorch_mod_btn.value,
                           'radiation_type': radtype_btn.value}) + "\n"
+
+            # Content
             content = "\n".join([",".join(map(str, row)) for row in data])
+
+            # Add Header
             if header:
                 content = metadata + "\n" + header + "\n" + content
+            else:
+                content = metadata + "\n" + content
+
+            # Encode as base64
             b64 = base64.b64encode(content.encode()).decode()
+
+            # Add Time
             t = datetime.now()
+            year = f'{t.year}'[-2:]
+            month = f'{t.month}'.zfill(2)
+            day = f'{t.day}'.zfill(2)
             hours = f'{t.hour}'.zfill(2)
             minutes = f'{t.minute}'.zfill(2)
             seconds = f'{t.second}'.zfill(2)
+            
+            # Filename
+            filename = filename_prefix + '_' + select_file.value.split('/')[-1].split('.')[0] + '_' + month + day + year + '_' + hours + minutes + seconds + '.csv'
+    
+            # Make href and return
             href = f'<a href="data:text/csv;base64,{b64}" download="{filename}">Download {filename} (Created: {hours}:{minutes}:{seconds})</a>'
             return href
 
         def on_download_button_click(button):
+            # Try to compile all the data and create html link to download files
             try:
+                # Data
                 iq_data = np.column_stack([q, iq_values])
                 sq_data = np.column_stack([q, sq_values])
                 fq_data = np.column_stack([q, fq_values])
                 gr_data = np.column_stack([r, gr_values])
             
+                # Clear warning message
                 sys.stdout.write('\x1b[1A')
                 sys.stdout.write('\x1b[1A')
                 sys.stdout.write('\x1b[1A')
                 sys.stdout.write('\x1b[2K')
     
-                display(HTML(create_download_link("iq_data.csv", iq_data, "q,I(Q)")))
-                display(HTML(create_download_link("sq_data.csv", sq_data, "q,S(Q)")))
-                display(HTML(create_download_link("fq_data.csv", fq_data, "q,F(Q)")))
-                display(HTML(create_download_link("gr_data.csv", gr_data, "r,G(r)")))
+                # Display download links
+                display(HTML(create_download_link('iq', iq_data, "q,I(Q)")))
+                display(HTML(create_download_link('sq', sq_data, "q,S(Q)")))
+                display(HTML(create_download_link('fq', fq_data, "q,F(Q)")))
+                display(HTML(create_download_link('gr', gr_data, "r,G(r)")))
+
+                print('=' * 10)
                 
             except Exception as e:
-                print('No data is loaded', end="\r")
+                #raise(e)
+                print('WARNING: Data not available', end="\r")
                   
         # Download buttons
         download_button = widgets.Button(description="Download Data")
         download_button.on_click(on_download_button_click)
     
         # Create a color dropdown widget
-        folder = widgets.Text(description='Data Folder:', placeholder='path/to/data/folder', disabled=disable_input)
+        folder = widgets.Text(description='Data directory:', placeholder='Provide data directory', disabled=disable_input)
     
         # Create a dropdown menu widget for selection of XYZ file and an output area
-        standard_msg = 'Provide valid data folder'
-        value = standard_msg if structure_path is None else structure_path
-        select_file = widgets.Dropdown(description='Select File:', options=[value], value=value, disabled=True)
+        standard_msg = ''
+        option_values = standard_msg# if structure_path is None else structure_path
+        select_file = widgets.Dropdown(description='Select File:', options=[option_values], value=standard_msg, disabled=True)
     
         # Define a function to update the scattering patterns based on the selected parameters
         def update_options(change):
             folder = change.new
             paths = sorted(glob(os.path.join(folder, '*.xyz')))
             if len(paths):
-                select_file.options = paths #[path.split('/')[-1] for path in paths]
+                select_file.options = ['Select data file'] + paths #[path.split('/')[-1] for path in paths]
+                select_file.value = 'Select data file'
                 select_file.disabled = False
             else:
                 select_file.options = [standard_msg]
@@ -653,46 +759,54 @@ class DebyeCalculator:
         ):
             global q, r, iq_values, sq_values, fq_values, gr_values  # Declare these variables as global
 
-            if (path is not None) and path != standard_msg:
+            try:
+                path_ext = path.split('.')[-1]
+            except:
+                return
+
+            if (path is not None) and path != standard_msg and path_ext in ['xyz', 'cif']:
+
+                try:
+                    calculator = DebyeCalculator(device=device, batch_size=batch_size, radiation_type=radtype,
+                                                 qmin=qminmax[0], qmax=qminmax[1], qstep=qstep, qdamp=qdamp,
+                                                 rmin=rminmax[0], rmax=rminmax[1], rstep=rstep, rthres=rthres, biso=biso,
+                                                 lorch_mod=lorch_mod)
     
-                calculator = DebyeCalculator(device=device, batch_size=batch_size, radiation_type=radtype,
-                                             qmin=qminmax[0], qmax=qminmax[1], qstep=qstep, qdamp=qdamp,
-                                             rmin=rminmax[0], rmax=rminmax[1], rstep=rstep, rthres=rthres, biso=biso,
-                                             lorch_mod=lorch_mod)
+                    r, q, iq_values, sq_values, fq_values, gr_values = calculator._get_all(path)
     
-                r, q, iq_values, sq_values, fq_values, gr_values = calculator._return_scattering(path)
+                    fig, axs = plt.subplots(2, 2, figsize=(12, 8), dpi=75)
+                    axs = axs.flatten()
     
-                fig, axs = plt.subplots(2, 2, figsize=(12, 8), dpi=300)
-                axs = axs.flatten()
+                    if scale_type == 'logarithmic':
+                        axs[0].set_xscale('log')
+                        axs[0].set_yscale('log')
     
-                if scale_type == 'logarithmic':
-                    axs[0].set_xscale('log')
-                    axs[0].set_yscale('log')
+                    axs[0].plot(q, iq_values, lw=None)
+                    axs[0].set(xlabel='$Q$ [$\AA^{-1}$]', ylabel='$I(Q)$ [counts]')
+                    axs[1].axhline(1, alpha=0.5, ls='--', c='g')
+                    axs[1].plot(q, sq_values+1, lw=None)
+                    axs[1].set(xlabel='$Q$ [$\AA^{-1}$]', ylabel='$S(Q)$')
+                    axs[2].axhline(0, alpha=0.5, ls='--', c='g')
+                    axs[2].plot(q, fq_values, lw=None)
+                    axs[2].set(xlabel='$Q$ [$\AA^{-1}$]', ylabel='$F(Q)$')
+                    axs[3].plot(r, gr_values, lw=None)
+                    axs[3].set(xlabel='$r$ [$\AA$]', ylabel='$G_r(r)$')
     
-                axs[0].plot(q, iq_values, lw=None)
-                axs[0].set(xlabel='$Q$ [$\AA^{-1}$]', ylabel='$I(Q)$ [counts]')
-                axs[1].axhline(1, alpha=0.5, ls='--', c='g')
-                axs[1].plot(q, sq_values+1, lw=None)
-                axs[1].set(xlabel='$Q$ [$\AA^{-1}$]', ylabel='$S(Q)$')
-                axs[2].axhline(0, alpha=0.5, ls='--', c='g')
-                axs[2].plot(q, fq_values, lw=None)
-                axs[2].set(xlabel='$Q$ [$\AA^{-1}$]', ylabel='$F(Q)$')
-                axs[3].plot(r, gr_values, lw=None)
-                axs[3].set(xlabel='$r$ [$\AA$]', ylabel='$G_r(r)$')
+                    labels = ['Scattering Intensity, I(Q)',
+                              'Structure Function, S(Q)',
+                              'Reduced Structure Function, F(Q)',
+                              'Reduced Pair Distribution Function, G(r)']
     
-                labels = ['Scattering Intensity, I(Q)',
-                          'Structure Function, S(Q)',
-                          'Reduced Structure Function, F(Q)',
-                          'Reduced Pair Distribution Function, G(r)']
+                    for ax, label in zip(axs, labels):
+                        ax.relim()
+                        ax.autoscale_view()
+                        ax.set_title(label)
+                        ax.grid(alpha=0.2)
     
-                for ax, label in zip(axs, labels):
-                    ax.relim()
-                    ax.autoscale_view()
-                    ax.set_title(label)
-                    ax.grid(alpha=0.2)
-    
-                fig.suptitle("XYZ file: " + path.split('/')[-1].split('.')[0])
-                fig.tight_layout()
+                    fig.suptitle("XYZ file: " + path.split('/')[-1].split('.')[0])
+                    fig.tight_layout()
+                except:
+                    print(f'WARNING: Could not load data file: {path}', end='\r')
            
     
         # Create an interactive function that triggers when the user-defined parameters changes
