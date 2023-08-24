@@ -449,7 +449,6 @@ class DebyeCalculator:
         pbar = tqdm(desc=f'Generating nanoparticles in range: [{radii[0]},{radii[-1]}]', leave=False, total=len(radii))
     
         # Generate nanoparticles for each radius
-        if radii
         for r in radii:
 
             # Mask all atoms within radius
