@@ -8,7 +8,7 @@ from typing import Union, Tuple, Any
 import pkg_resources
 from ase import Atoms
 from torch.nn.functional import pdist
-from profiling import Profiler
+from DebyeCalculator.profiling import Profiler
 import base64
 import ipywidgets as widgets
 from IPython.display import display, HTML
