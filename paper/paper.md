@@ -1,4 +1,3 @@
-![image](https://github.com/FrederikLizakJohansen/DebyeCalculator/assets/41198747/61191ad2-f17c-4682-ad95-c63c9794e0b8)---
 title: 'A GPU-Accelerated Open-Source Python Package for Rapid Calculation of the Debye Scattering Equation: Applications in Small-Angle Scattering, Powder Scattering, and Total Scattering with Pair Distribution Function Analysis'
 tags:
   - Python
@@ -53,7 +52,7 @@ bibliography: paper.bib
 The Debye scattering equation, derived in 1915 by Peter Debye, is used to calculate the scattering intensities considering the position of each atom in the structure:[@debye:1915; @scardi:2016]
 
 \begin{equation}\label{eq:Debye}
-I(Q) = \sum_{ν=1}^{N} \sum_{j=1}^{N} f_νf_j \frac{\sin(Qr_{νj})}{Qr_{νj}}
+I(Q) = \sum_{{\nu=1}}^N \sum_{{\mu=1}}^N b_\nu b_\mu \frac{{\sin(Qr_{\nu\mu})}}{{Qr_{\nu\mu}}}
 \end{equation}
 
 In this equation Q is the momentum transfer of the scattered radiation, N is the number of atoms and r~νμ~ is the distance between atoms ν and μ. For X-ray radiation, the atomic scattering factor, b, depends strongly on Q and is usually denoted as f(Q), but for neutrons b is independent of Q.
