@@ -1,4 +1,4 @@
----
+![image](https://github.com/FrederikLizakJohansen/DebyeCalculator/assets/41198747/61191ad2-f17c-4682-ad95-c63c9794e0b8)---
 title: 'A GPU-Accelerated Open-Source Python Package for Rapid Calculation of the Debye Scattering Equation: Applications in Small-Angle Scattering, Powder Scattering, and Total Scattering with Pair Distribution Function Analysis'
 tags:
   - Python
@@ -53,8 +53,10 @@ bibliography: paper.bib
 The Debye scattering equation, derived in 1915 by Peter Debye, is used to calculate the scattering intensities considering the position of each atom in the structure:[@debye:1915; @scardi:2016]
 
 \begin{equation}\label{eq:Debye}
-I(Q) = \sum_{\( \nu \)=1}^{N} \sum_{j=1}^{N} f_\( \nu \)f_j \frac{\sin(Qr_{\( \nu \)j})}{Qr_{\( \nu \)j}}
+I(Q) = \sum_{ν=1}^{N} \sum_{j=1}^{N} f_νf_j \frac{\sin(Qr_{νj})}{Qr_{νj}}
 \end{equation}
+
+In this equation Q is the momentum transfer of the scattered radiation, N is the number of atoms and r~νμ~ is the distance between atoms ν and μ. For X-ray radiation, the atomic scattering factor, b, depends strongly on Q and is usually denoted as f(Q), but for neutrons b is independent of Q.
 
 In this equation, Q is the scattering vector, r~ij~ is the distance between atom-pair, \( \nu \) and j, and f is the atomic scattering factor. The Debye scattering equation can be used to compute the scattering pattern of any atomic structure and is commonly used to study both crystalline and non-crystalline materials with a range of scattering techniques like powder diffraction (PD), total scattering (TS) with pair distribution function (PDF) and small-angle scattering (SAS).[@scardi:2016] Although the Debye scattering equation is extremely versatile, its applicability has been limited by the double sum of the atoms in the structure which makes the equation computationally expensive to calculate. 
 With the advancement in computing technology,[@schaller1997moore] new horizons have opened up for applying the Debye scattering equation to larger materials. Modern central processing Units (CPUs), ranging from tenths to hundreds of cores, offer an opportunity to parallelise the computation, significantly enhancing computational efficiency. This parallel architecture allows for the distribution of the double sum calculations across multiple cores. Graphics processing units (GPUs) further expand computational possibilities, consisting of hundreds or even thousands of smaller, more efficient cores designed for parallel processing.[@garland2008parallel] Unlike traditional CPUs, GPUs are ideally suited for calculations like the Debye scattering equation, where many computations can be performed simultaneously. By leveraging GPU acceleration, computational speeds that are orders of magnitude faster than even the most advanced multi-core CPUs are obtained.
