@@ -142,7 +142,7 @@ class DebyeCalculator:
 
     def _initialise_structures(
         self,
-        structure_path: str,
+        structure_path: Union[str, Atoms, List[Atoms]],
         radii: Union[List[float], float, None] = None,
         disable_pbar: bool = False,
     ) -> None:
@@ -151,17 +151,19 @@ class DebyeCalculator:
         Initialise atomic structures and unique elements form factors from an input file.
 
         Parameters:
-            structure_path (str): Path to the atomic structure file in XYZ/CIF format.
+            structure_path (Union[str, Atoms, List[Atoms]]): Path to the atomic structure file in XYZ/CIF format or stored ASE Atoms objects.
             radii (Union[List[float], float, None]): List/float of radii/radius of particle(s) to generate with parsed CIF
         """
-
-        # Check file and extention
-        try:
+        # Check if input is a file or ASE Atoms object
+        if isinstance(structure_path, str):
+            # Check file and extention
             structure_ext = structure_path.split('.')[-1]
             if structure_ext not in ['xyz', 'cif']:
-                raise FileNotFoundError('FAILED: Invalid file/file-extention, accepts only .xyz or .cif data file')
-        except:
-            raise FileNotFoundError('FAILED: Invalid file/file-extention, accepts only .xyz or .cif data file')
+                raise TypeError('FAILED: Invalid file/file-extention, accepts only .xyz or .cif data files')
+        elif isinstance(structure_path, Atoms) or all(isinstance(lst_elm, Atoms) for lst_elm in structure_path):
+            structure_ext = 'ase'
+        else:
+            raise TypeError('FAILED: Invalid structure format, accepts only .xyz, .cif data files or ASE Atoms objects')
 
         # If cif, check for radii and generate particles
         if structure_ext == 'cif':
@@ -201,8 +203,31 @@ class DebyeCalculator:
             else:
                 self.struc_occupancy = [torch.ones((self.struc_size[0]), dtype=torch.float32).to(device=self.device)]
                 self.struc_xyz = [torch.tensor(struc[:,1:].astype('float')).to(device=self.device, dtype=torch.float32)]
+        elif structure_ext == 'ase':
+            if isinstance(structure_path, Atoms):
+                ase_structures = [structure_path]
+            else:
+                ase_structures = structure_path
+            
+            self.num_structures = len(ase_structures)
+            
+            self.struc_elements = []
+            self.struc_size = []
+            self.struc_occupancy = []
+            self.struc_xyz = []
+            
+            for structure in ase_structures:
+                elements = structure.get_chemical_symbols()
+                size = len(elements)
+                occupancy = torch.ones((size), dtype=torch.float32).to(device=self.device)
+                xyz = torch.tensor(np.array(structure.get_positions())).to(device=self.device, dtype=torch.float32)
+
+                self.struc_elements.append(elements)
+                self.struc_size.append(size)
+                self.struc_occupancy.append(occupancy)
+                self.struc_xyz.append(xyz)
         else:
-            raise FileNotFoundError('FAILED: Invalid file/file-extention, accepts only .xyz or .cif data file')
+            raise TypeError('FAILED: Invalid structure format, accepts only .xyz, .cif data files or ASE Atoms objects')
 
         # Unique elements and their counts
         self.triu_indices = []
@@ -235,7 +260,7 @@ class DebyeCalculator:
 
     def iq(
         self,
-        structure_path: str,
+        structure_path: Union[str, Atoms, List[Atoms]],
         radii: Union[List[float], float, None] = None,
         keep_on_device: bool = False,
         _total_scattering: bool = False,
@@ -245,7 +270,7 @@ class DebyeCalculator:
         Calculate the scattering intensity I(Q) for the given atomic structure.
 
         Parameters:
-            structure_path (str): Path to the atomic structure file in XYZ format.
+            structure_path (Union[str, Atoms, List[Atoms]]): Path to the atomic structure file in XYZ/CIF format or stored ASE Atoms objects.
             radii (Union[List[float], float, None]): List/float of radii/radius of particle(s) to generate with parsed CIF
             keep_on_device (bool): Flag to keep the results on the class device. Default is False.
             _total_scattering (bool): Flag to return the scattering intensity I(Q) without the self-scattering contribution. Default is False.
@@ -320,7 +345,7 @@ class DebyeCalculator:
 
     def sq(
         self,
-        structure_path: str,
+        structure_path: Union[str, Atoms, List[Atoms]],
         radii: Union[List[float], float, None] = None,
         keep_on_device: bool = False,
     ) -> Union[Tuple[np.float32, Union[List[np.float32], np.float32]], Tuple[torch.FloatTensor, Union[List[torch.FloatTensor], torch.FloatTensor]]]:
@@ -329,7 +354,7 @@ class DebyeCalculator:
         Calculate the structure function S(Q) for the given atomic structure.
 
         Parameters:
-            structure (str): Path to the atomic structure file in XYZ format.
+            structure_path (Union[str, Atoms, List[Atoms]]): Path to the atomic structure file in XYZ/CIF format or stored ASE Atoms objects.
             keep_on_device (bool): Flag to keep the results on the class device. Default is False.
 
         Returns:
@@ -357,7 +382,7 @@ class DebyeCalculator:
     
     def fq(
         self,
-        structure_path: str,
+        structure_path: Union[str, Atoms, List[Atoms]],
         radii: Union[List[float], float, None] = None,
         keep_on_device: bool = False,
     ) -> Union[Tuple[np.float32, Union[List[np.float32], np.float32]], Tuple[torch.FloatTensor, Union[List[torch.FloatTensor], torch.FloatTensor]]]:
@@ -365,7 +390,7 @@ class DebyeCalculator:
         Calculate the reduced structure function F(Q) for the given atomic structure.
 
         Parameters:
-            structure (str): Path to the atomic structure file in XYZ format.
+            structure_path (Union[str, Atoms, List[Atoms]]): Path to the atomic structure file in XYZ/CIF format or stored ASE Atoms objects.
             keep_on_device (bool): Flag to keep the results on the class device. Default is False.
 
         Returns:
@@ -393,7 +418,7 @@ class DebyeCalculator:
 
     def gr(
         self,
-        structure_path: str,
+        structure_path: Union[str, Atoms, List[Atoms]],
         radii: Union[List[float], float, None] = None,
         keep_on_device: bool = False,
     ) -> Union[Tuple[np.float32, Union[List[np.float32], np.float32]], Tuple[torch.FloatTensor, Union[List[torch.FloatTensor], torch.FloatTensor]]]:
@@ -402,7 +427,7 @@ class DebyeCalculator:
         Calculate the reduced pair distribution function G(r) for the given atomic structure.
 
         Parameters:
-            structure (str): Path to the atomic structure file in XYZ format.
+            structure_path (Union[str, Atoms, List[Atoms]]): Path to the atomic structure file in XYZ/CIF format or stored ASE Atoms objects.
             keep_on_device (bool): Flag to keep the results on the class device. Default is False.
 
         Returns:
@@ -447,7 +472,7 @@ class DebyeCalculator:
 
     def _get_all(
         self,
-        structure_path: str,
+        structure_path: Union[str, Atoms, List[Atoms]],
         radii: Union[List[float], float, None] = None,
         keep_on_device: bool = False,
     ) -> Union[Tuple[np.float32,np.float32,Union[List[np.float32], np.float32],Union[List[np.float32],np.float32], Union[List[np.float32],np.float32], Union[List[np.float32], np.float32]],
@@ -457,7 +482,7 @@ class DebyeCalculator:
         Calculate I(Q), S(Q), F(Q) and G(r) for the given atomic structure and return all.
 
         Parameters:
-            structure (str): Path to the atomic structure file in XYZ format.
+            structure_path (Union[str, Atoms, List[Atoms]]): Path to the atomic structure file in XYZ/CIF format or stored ASE Atoms objects.
             keep_on_device (bool): Flag to keep the results on the class device. Default is False.
 
         Returns:
