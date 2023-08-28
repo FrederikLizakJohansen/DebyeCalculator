@@ -547,7 +547,7 @@ class DebyeCalculator:
             if self.num_structures == 1:
                 return self.r.squeeze(-1).cpu().numpy(), self.q.squeeze(-1).cpu().numpy(), iq_output[0].cpu().numpy(), sq_output[0].cpu().numpy(), fq_output[0].cpu().numpy(), gr_output[0].cpu().numpy()
             else:
-                return self.r.squeeze(-1).cpu().numpy(), self.q.squeeze(-1).cpu().numpy(), [iq.cpu.numpy() for iq in iq_output], [sq.cpu.numpy() for sq in sq_output], [fq.cpu.numpy() for fq in fq_output], [gr.cpu.numpy() for gr in gr_output]
+                return self.r.squeeze(-1).cpu().numpy(), self.q.squeeze(-1).cpu().numpy(), [iq.cpu().numpy() for iq in iq_output], [sq.cpu().numpy() for sq in sq_output], [fq.cpu().numpy() for fq in fq_output], [gr.cpu().numpy() for gr in gr_output]
 
     def generate_nanoparticles(
         self,
