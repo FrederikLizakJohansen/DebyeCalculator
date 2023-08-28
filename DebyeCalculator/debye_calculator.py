@@ -19,7 +19,7 @@ from ase.io import read, write
 from ase.build import make_supercell
 from ase.build.tools import sort as ase_sort
 
-from DebyeCalculator.profiling import Profiler
+from profiling import Profiler
 
 import ipywidgets as widgets
 from IPython.display import display, HTML
