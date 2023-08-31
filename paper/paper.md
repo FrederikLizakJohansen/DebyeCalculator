@@ -1,5 +1,5 @@
 ---
-title: 'A GPU-Accelerated Open-Source Python Package for Rapid Calculation of the Debye Scattering Equation: Applications in Small-Angle Scattering, Powder Scattering, and Total Scattering with Pair Distribution Function Analysis'
+title: 'A GPU-Accelerated Open-Source Python Package for the Debye Scattering Equation Calculation: Applications in Small-Angle, Powder, and Total Scattering with Pair Distribution Function Analysis'
 tags:
   - Python
   - Scattering
