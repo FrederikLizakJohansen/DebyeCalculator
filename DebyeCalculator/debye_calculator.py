@@ -89,8 +89,8 @@ class DebyeCalculator:
         self.biso = biso
 
         # Initialise ranges
-        self.q = torch.arange(self.qmin, self.qmax, self.qstep).unsqueeze(-1).to(device=self.device)
-        self.r = torch.arange(self.rmin, self.rmax, self.rstep).unsqueeze(-1).to(device=self.device)
+        self.q = torch.linspace(self.qmin, self.qmax, int((self.qmax+self.qstep) / self.qstep)).unsqueeze(-1).to(device=self.device)
+        self.r = torch.linspace(self.rmin, self.rmax, int((self.rmax+self.rstep) / self.rstep)).unsqueeze(-1).to(device=self.device)
 
         # Form factor coefficients
         with open(pkg_resources.resource_filename(__name__, 'form_factor_coef.yaml'), 'r') as yaml_file:
@@ -137,8 +137,8 @@ class DebyeCalculator:
             
         # Re-initialise ranges
         if np.any([k in ['qmin','qmax','qstep','rmin', 'rmax', 'rstep'] for k in kwargs.keys()]):
-            self.q = torch.arange(self.qmin, self.qmax, self.qstep).unsqueeze(-1).to(device=self.device, dtype=torch.float32)
-            self.r = torch.arange(self.rmin, self.rmax, self.rstep).unsqueeze(-1).to(device=self.device, dtype=torch.float32)
+            self.q = torch.linspace(self.qmin, self.qmax, int((self.qmax+self.qstep) / self.qstep)).unsqueeze(-1).to(device=self.device)
+            self.r = torch.linspace(self.rmin, self.rmax, int((self.rmax+self.rstep) / self.rstep)).unsqueeze(-1).to(device=self.device)
 
     def _initialise_structures(
         self,
@@ -690,6 +690,10 @@ class DebyeCalculator:
         if not self._is_notebook():
             print("FAILED: Interactive mode is exlusive to Jupyter Notebook or Google Colab")
             return
+        
+#         # Run Interaction window
+#         run_interact(_cont_updates)
+        
 
         qmin = self.qmin
         qmax = self.qmax
@@ -908,6 +912,10 @@ class DebyeCalculator:
             href = f'<a href="data:text/xyz;base64,{b64}" download="{filename}">Download {filename} (Created: {hours}:{minutes}:{seconds})</a>'
             return href
 
+        # Download buttons
+        download_button = widgets.Button(description="Download Data")
+        
+        @download_button.on_click
         def on_download_button_click(button):
             # Try to compile all the data and create html link to download files
             try:
@@ -937,12 +945,7 @@ class DebyeCalculator:
                 print('=' * 10)
                 
             except Exception as e:
-                raise(e)
-                print('FAILED: Data not available', end="\r")
-                  
-        # Download buttons
-        download_button = widgets.Button(description="Download Data")
-        download_button.on_click(on_download_button_click)
+                print('FAILED: No data has been selected', end="\r")
     
         # Create a color dropdown widget
         folder = widgets.Text(description='Data Dir.:', placeholder='Provide data directory', disabled=False)
@@ -957,7 +960,7 @@ class DebyeCalculator:
             folder = change.new
             paths = sorted(glob(os.path.join(folder, '*.xyz')) + glob(os.path.join(folder, '*.cif')))
             if len(paths):
-                select_file.options = ['Select data file'] + paths #[path.split('/')[-1] for path in paths]
+                select_file.options = ['Select data file'] + paths
                 select_file.value = 'Select data file'
                 select_file.disabled = False
             else:
@@ -980,21 +983,9 @@ class DebyeCalculator:
     
         # Create a function to update the output area
         def update_output(
-            folder,
-            path,
-            radius,
-            device,
-            batch_size,
-            radtype,
-            scale_type,
-            qminmax,
-            rminmax,
-            qdamp,
-            biso,
-            qstep,
-            rstep,
-            rthres,
-            lorch_mod,
+            folder, path, radius, device, batch_size,
+            radtype, scale_type, qminmax, rminmax,
+            qdamp, biso, qstep, rstep, rthres, lorch_mod
         ):
             global q, r, iq_values, sq_values, fq_values, gr_values  # Declare these variables as global
 
