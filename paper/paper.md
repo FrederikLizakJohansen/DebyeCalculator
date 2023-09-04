@@ -6,7 +6,7 @@ tags:
   - Debye Scattering Equation
   - GPU-accelerated
   - Nanoparticles
-  - Pair Distribution Analysis
+  - Pair Distribution Function Analysis
 authors:
   - name: Frederik L. Johansen
     orcid: 0000-0002-8049-8624
