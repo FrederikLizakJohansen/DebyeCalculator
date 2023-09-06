@@ -806,8 +806,28 @@ class DebyeCalculator:
         scale_type_button = widgets.ToggleButtons(
             options=['linear', 'logarithmic'],
             value='linear',
-            description='Axes scaling',
+            description='I(Q) scale',
             button_style='info'
+        )
+        plot_iq_button = widgets.Checkbox(
+            value = True,
+            description = 'Show I(Q)',
+            disabled = False,
+        )
+        plot_sq_button = widgets.Checkbox(
+            value = True,
+            description = 'Show S(Q)',
+            disabled = False,
+        )
+        plot_fq_button = widgets.Checkbox(
+            value = True,
+            description = 'Show F(Q)',
+            disabled = False,
+        )
+        plot_gr_button = widgets.Checkbox(
+            value = True,
+            description = 'Show G(r)',
+            disabled = False,
         )
         
         # Download options
@@ -965,38 +985,94 @@ class DebyeCalculator:
         )
         
         def update_figure(r, q, iq, sq, fq, gr, _unity_sq=True):
-            
-            fig, axs = plt.subplots(2, 2, figsize=(12, 8), dpi=75)
-            axs = axs.flatten()
+
+            xseries, yseries = [], []
+            xlabels, ylabels = [], []
+            scales, labels = [], []
+            if plot_iq_button.value:
+                xseries.append(q)
+                yseries.append(iq)
+                xlabels.append('$Q$ [$\AA^{-1}$]')
+                ylabels.append('$I(Q)$ [counts]')
+                if scale_type_button.value == 'logarithmic':
+                    scales.append('log')
+                else:
+                    scales.append('linear')
+                scale = scale_type_button.value
+                labels.append('Scattering Intensity, I(Q)')
+            if plot_sq_button.value:
+                xseries.append(q)
+                yseries.append(sq)
+                xlabels.append('$Q$ [$\AA^{-1}$]')
+                ylabels.append('$S(Q)$')
+                scales.append('linear')
+                labels.append('Structure Function, S(Q)')
+            if plot_fq_button.value:
+                xseries.append(q)
+                yseries.append(fq)
+                xlabels.append('$Q$ [$\AA^{-1}$]')
+                ylabels.append('$F(Q)$')
+                scales.append('linear')
+                labels.append('Reduced Structure Function, F(Q)')
+            if plot_gr_button.value:
+                xseries.append(r)
+                yseries.append(gr)
+                xlabels.append('$r$ [$\AA$]')
+                ylabels.append('$G(r)$ [counts]')
+                scales.append('linear')
+                labels.append('Reduced Pair Distribution Function, G(r)')
+
+            num_plots = len(yseries)
+            if num_plots == 4:
+                fig, axs = plt.subplots(2,2,figsize=(12, 8), dpi=75)
+                axs = axs.ravel()
+            elif num_plots == 3:
+                fig, axs = plt.subplots(3,1,figsize=(12,8), dpi=75)
+            elif num_plots == 2:
+                fig, axs = plt.subplots(2,1,figsize=(12,8), dpi=75)
+            elif num_plots == 1:
+                fig, axs = plt.subplots(figsize=(12,8), dpi=75)
+                axs = [axs]
+            else:
+                return
+
+            for i,(x,y,xl,yl,s,l) in enumerate(zip(xseries, yseries, xlabels, ylabels, scales, labels)):
+                axs[i].set_xscale(s)
+                axs[i].set_yscale(s)
+                axs[i].plot(x,y)
+                axs[i].set(xlabel=xl, ylabel=yl, title=l)
+                axs[i].relim()
+                axs[i].autoscale_view()
+                axs[i].grid(alpha=0.2)
+
+            #if scale_type_button.value == 'logarithmic':
+            #    axs[0].set_xscale('log')
+            #    axs[0].set_yscale('log')
         
-            if scale_type_button.value == 'logarithmic':
-                axs[0].set_xscale('log')
-                axs[0].set_yscale('log')
+            #axs[0].plot(q, iq)
+            #axs[0].set(xlabel='$Q$ [$\AA^{-1}$]', ylabel='$I(Q)$ [counts]')
+            #
+            #axs[1].axhline(1, alpha=0.5, ls='--', c='g')
+            #axs[1].plot(q, sq+int(_unity_sq))
+            #axs[1].set(xlabel='$Q$ [$\AA^{-1}$]', ylabel='$S(Q)$')
+            #
+            #axs[2].axhline(0, alpha=0.5, ls='--', c='g')
+            #axs[2].plot(q, fq)
+            #axs[2].set(xlabel='$Q$ [$\AA^{-1}$]', ylabel='$F(Q)$')
+            #
+            #axs[3].plot(r, gr)
+            #axs[3].set(xlabel='$r$ [$\AA$]', ylabel='$G_r(r)$')
         
-            axs[0].plot(q, iq)
-            axs[0].set(xlabel='$Q$ [$\AA^{-1}$]', ylabel='$I(Q)$ [counts]')
-            
-            axs[1].axhline(1, alpha=0.5, ls='--', c='g')
-            axs[1].plot(q, sq+int(_unity_sq))
-            axs[1].set(xlabel='$Q$ [$\AA^{-1}$]', ylabel='$S(Q)$')
-            
-            axs[2].axhline(0, alpha=0.5, ls='--', c='g')
-            axs[2].plot(q, fq)
-            axs[2].set(xlabel='$Q$ [$\AA^{-1}$]', ylabel='$F(Q)$')
-            
-            axs[3].plot(r, gr)
-            axs[3].set(xlabel='$r$ [$\AA$]', ylabel='$G_r(r)$')
+            #labels = ['Scattering Intensity, I(Q)',
+            #          'Structure Function, S(Q)',
+            #          'Reduced Structure Function, F(Q)',
+            #          'Reduced Pair Distribution Function, G(r)']
         
-            labels = ['Scattering Intensity, I(Q)',
-                      'Structure Function, S(Q)',
-                      'Reduced Structure Function, F(Q)',
-                      'Reduced Pair Distribution Function, G(r)']
-        
-            for ax, label in zip(axs, labels):
-                ax.relim()
-                ax.autoscale_view()
-                ax.set_title(label)
-                ax.grid(alpha=0.2)
+            #for ax, label in zip(axs, labels):
+            #    ax.relim()
+            #    ax.autoscale_view()
+            #    ax.set_title(label)
+            #    ax.grid(alpha=0.2)
         
             fig.suptitle("XYZ file: " + select_file.value.split('/')[-1].split('.')[0])
             fig.tight_layout()
@@ -1071,9 +1147,11 @@ class DebyeCalculator:
     
         # Make Plotting Tab
         plotting_tab = VBox(children = [
+            HBox(children=[plot_iq_button, plot_sq_button]),
+            HBox(children=[plot_fq_button, plot_gr_button]),
             scale_type_button,
         ])
-    
+
         # Make Hardware Tab
         hardware_tab = VBox(children = [
             device_button,
