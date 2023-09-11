@@ -1,5 +1,5 @@
 ---
-title: 'A GPU-Accelerated Open-Source Python Package for Calculating the Debye Scattering Equation: Applications in Powder Diffraction, Small-Angle, and Total Scattering'
+title: 'A GPU-Accelerated Open-Source Python Package for Calculating the Debye Scattering Equation: Applications in Powder Diffraction, Small-Angle-, and Total Scattering'
 tags:
   - Python
   - Scattering
