@@ -605,7 +605,7 @@ class DebyeCalculator:
         positions -= positions[metal_filter][torch.argmin(center_dists[metal_filter])]
         center_dists = torch.norm(positions, dim=1)
         min_metal_dist = torch.min(pdist(positions[metal_filter]))
-
+        min_bond_dist = torch.amin(cdist(positions[metal_filter], positions[~metal_filter]))
         # Update the cell positions
         cell.positions = positions.cpu()
     
@@ -630,7 +630,7 @@ class DebyeCalculator:
             interface_dists = cdist(positions, positions).fill_diagonal_(min_metal_dist*2)
     
             # Remove floating atoms
-            interaction_mask = torch.amin(interface_dists, dim=0) < min_metal_dist*0.8
+            interaction_mask = torch.amin(interface_dists, dim=0) < min_bond_dist*1.2
             
             # Modify objects based on mask
             cell = cell[interaction_mask.cpu()]
