@@ -591,7 +591,7 @@ class DebyeCalculator:
         r_max = np.amax(radii)
     
         # Create a supercell to encompass the entire range of nanoparticles and center it
-        supercell_matrix = np.diag((np.ceil(r_max / cell_dims)) * 2)
+        supercell_matrix = np.diag((np.ceil(r_max / cell_dims)) * 2 + 2)
         cell = make_supercell(prim=unit_cell, P=supercell_matrix)
         cell.center(about=0.)
     
@@ -612,30 +612,34 @@ class DebyeCalculator:
         # Initialize nanoparticle lists and progress bar
         nanoparticle_list = []
         nanoparticle_sizes = []
-        pbar = tqdm(desc=f'Generating nanoparticles in range: [{radii[0]},{radii[-1]}]', leave=False, total=len(radii), disable=disable_pbar)
+        pbar = tqdm(desc=f'Generating nanoparticles in range: [{np.amin(radii)},{np.amax(radii)}]', leave=False, total=len(radii), disable=disable_pbar)
     
         # Generate nanoparticles for each radius
-        for r in radii:
+        for r in sorted(radii, reverse=True):
 
             # Mask all atoms within radius
-            incl_mask = (center_dists <= r)
+            incl_mask = (center_dists <= r) | ((center_dists <= r + min_metal_dist) & ~metal_filter)
 
-            # Find interdistances from all included atoms and all atoms
-            interface_dists = cdist(positions, positions[incl_mask])
+            # Modify objects based on mask
+            cell = cell[incl_mask.cpu()]
+            center_dists = center_dists[incl_mask]
+            metal_filter = metal_filter[incl_mask]
+            positions = positions[incl_mask]
+            
+            # Find interdistances from all included atoms and remove 0's from diagonal
+            interface_dists = cdist(positions, positions).fill_diagonal_(min_metal_dist*2)
     
-            # Find interface atoms and determine nanoparticle size
-            nanoparticle_size = 0
-            for i in range(interface_dists.shape[0]):
-                # Interface mask: all atoms within the min metal distance from the interface that is not a metal
-                interface_mask = (interface_dists[i] <= min_metal_dist) & ~metal_filter[i]
-
-                # If any interface atoms that should be included
-                if torch.any(interface_mask):
-                    nanoparticle_size = max(nanoparticle_size, center_dists[i] * 2)
-                    incl_mask[i] = True
-    
-            # Extract the nanoparticle from the supercell
-            np_cell = cell[incl_mask.cpu()]
+            # Remove floating atoms
+            interaction_mask = torch.amin(interface_dists, dim=0) < min_metal_dist*0.8
+            
+            # Modify objects based on mask
+            cell = cell[interaction_mask.cpu()]
+            center_dists = center_dists[interaction_mask]
+            metal_filter = metal_filter[interaction_mask]
+            positions = positions[interaction_mask]
+            
+            # Determine NP size
+            nanoparticle_size = torch.amax(center_dists) * 2
 
             # Sort the atoms
             if sort_atoms:
