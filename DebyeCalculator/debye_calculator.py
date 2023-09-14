@@ -3,6 +3,7 @@ import sys
 import base64
 import yaml
 import pkg_resources
+import warnings
 from glob import glob
 from datetime import datetime
 from typing import Union, Tuple, Any, List
@@ -22,9 +23,12 @@ from ase.build.tools import sort as ase_sort
 from profiling import Profiler
 
 import ipywidgets as widgets
-from IPython.display import display, HTML, clear_output
+from IPython.display import display, HTML, clear_output, Math
 from ipywidgets import interact, interact_manual, HBox, VBox, Layout
 from tqdm.auto import tqdm
+
+import collections
+import timeit
 
 class DebyeCalculator:
     """
@@ -60,7 +64,7 @@ class DebyeCalculator:
         rthres: float = 0.0,
         biso: float = 0.3,
         device: str = 'cpu',
-        batch_size: Union[int, None] = 1000,
+        batch_size: Union[int, None] = 10000,
         lorch_mod: bool = False,
         radiation_type: str = 'xray',
         profile: bool = False,
@@ -586,7 +590,9 @@ class DebyeCalculator:
         device = 'cpu' if _override_device else self.device
 
         # Read the input unit cell structure
-        unit_cell = read(structure_path)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            unit_cell = read(structure_path)
         cell_dims = np.array(unit_cell.cell.cellpar()[:3])
         r_max = np.amax(radii)
     
@@ -669,6 +675,8 @@ class DebyeCalculator:
                 return True # Jupyter notebook or qtconsole
             elif shell == 'google.colab._shell':
                 return True # Google Colab
+            elif shell == 'Shell':
+                return True # Apparently also Colab?
             else:
                 return False # Other cases
         except NameError:
@@ -691,6 +699,7 @@ class DebyeCalculator:
             print("FAILED: Interactive mode is exlusive to Jupyter Notebook or Google Colab")
             return
 
+        # Scattering parameters
         qmin = self.qmin
         qmax = self.qmax
         qstep = self.qstep
@@ -700,138 +709,427 @@ class DebyeCalculator:
         rstep = self.rstep
         rthres = self.rthres
         biso = self.biso
-        device = self.device
+        device = 'cuda' if torch.cuda.is_available() else self.device
         batch_size = self.batch_size
         lorch_mod = self.lorch_mod
         radiation_type = self.radiation_type
         profile = False
+
+        with open('images/choose_hardware.png', 'rb') as f:
+            choose_hardware_img = f.read()
+        with open('images/batch_size.png', 'rb') as f:
+            batch_size_img = f.read()
         
-        # Buttons
-        radtype_button = widgets.ToggleButtons(options=['xray', 'neutron'],
+        """ Utility widgets """
+
+        # Spacing widget
+        spacing_10px = widgets.Text(description='', layout=Layout(visibility='hidden', height='10px'), disabled=True)
+        spacing_5px = widgets.Text(description='', layout=Layout(visibility='hidden', height='5px'), disabled=True)
+
+        """ File Selection Tab """
+        
+        # Load diplay images
+        with open('images/enter_path.png', 'rb') as f:
+            enter_path_img = f.read()
+        with open('images/select_files.png', 'rb') as f:
+            select_files_img = f.read()
+        with open('images/radius_a.png', 'rb') as f:
+            radius_a_img = f.read()
+        with open('images/file_1.png', 'rb') as f:
+            file_1_img = f.read()
+        with open('images/file_2.png', 'rb') as f:
+            file_2_img = f.read()
+
+        # Layout
+        file_tab_layout = Layout(
+            display='flex',
+            flex_flow='column',
+            align_items='stretch',
+            order='solid',
+            width='90%',
+        )
+
+        # File selection sizes
+        header_widths = [105*1.8, 130*1.8]
+        header_widths = [str(i)+'px' for i in header_widths]
+
+        # Folder selection
+        folder = widgets.Text(description='', placeholder='Enter data directory', disabled=False, layout=Layout(width='650px'))
+        
+        # Dropdown file sections
+        DEFAULT_MSGS = ['No valid files in entered directory', 'Select data file']
+        select_file_1 = widgets.Dropdown(options=DEFAULT_MSGS, value=DEFAULT_MSGS[0], disabled=True, layout=Layout(width='650px'))
+        select_file_2 = widgets.Dropdown(options=DEFAULT_MSGS, value=DEFAULT_MSGS[0], disabled=True, layout=Layout(width='650px'))
+        
+        # File 1
+        select_file_desc_1 = HBox([widgets.Image(value=file_1_img, format='png', layout=Layout(object_fit='contain', object_position='20px', width='32px'))], layout=Layout(width='88px'))
+        select_radius_desc_1 = HBox([widgets.Image(value=radius_a_img, format='png', layout=Layout(object_fit='contain', object_position='20px', width='60px', visibility='hidden'))], layout=Layout(width='88px'))
+        select_radius_1 = widgets.FloatText(min = 0, max = 50, step=0.01, value=5, disabled = False, layout = Layout(width='50px', visibility='hidden'))
+        cif_text_1 = widgets.Text(
+            value='Given radius, generate spherical nanoparticles (NP) from crystallographic information files (CIFs)', 
+            disabled=True,
+            layout=Layout(width='595px', visibility='hidden')
+        )
+
+        # File 2
+        select_file_desc_2 = HBox([widgets.Image(value=file_2_img, format='png', layout=Layout(object_fit='contain', object_position='20px', width='32px'))], layout=Layout(width='88px'))
+        select_radius_desc_2 = HBox([widgets.Image(value=radius_a_img, format='png', layout=Layout(object_fit='contain', object_position='20px', width='60px', visibility='hidden'))], layout=Layout(width='88px'))
+        select_radius_2 = widgets.FloatText(min = 0, max = 50, step=0.01, value=5, disabled = False, layout = Layout(width='50px', visibility='hidden'))
+        cif_text_2 = widgets.Text(
+            value='Given radius, generate spherical nanoparticles (NP) from crystallographic information files (CIFs)', 
+            disabled=True,
+            layout=Layout(width='595px', visibility='hidden')
+        )
+
+        # File selection Tab
+        file_tab = VBox([
+            # Enter path
+            widgets.Image(value=enter_path_img, format='png', layout=Layout(object_fit='contain', width=header_widths[0])),
+            folder,
+
+            spacing_10px,
+            
+            # Select file(s)
+            widgets.Image(value=select_files_img, format='png', layout=Layout(object_fit='contain', width=header_widths[1])),
+
+            # Select file 1
+            HBox([select_file_desc_1, select_file_1]),
+
+            # if CIF, radius options
+            HBox([select_radius_desc_1, select_radius_1, cif_text_1]),
+
+            spacing_10px,
+
+            # Select file 2
+            HBox([select_file_desc_2, select_file_2]),
+
+            # If CIF, radius options
+            HBox([select_radius_desc_2, select_radius_2, cif_text_2]),
+        ], layout = file_tab_layout)
+        
+        """ Scattering Options Tab """
+
+        # Load images
+        with open('images/qslider.png', 'rb') as f:
+            qslider_img = f.read()
+        with open('images/rslider.png', 'rb') as f:
+            rslider_img = f.read()
+        with open('images/qdamp.png', 'rb') as f:
+            qdamp_img = f.read()
+        with open('images/global_biso.png', 'rb') as f:
+            global_biso_img = f.read()
+        with open('images/a.png', 'rb') as f:
+            a_img = f.read()
+        with open('images/a_inv.png', 'rb') as f:
+            a_inv_img = f.read()
+        with open('images/a_sq.png', 'rb') as f:
+            a_sq_img = f.read()
+        with open('images/qstep.png', 'rb') as f:
+            qstep_img = f.read()
+        with open('images/rstep.png', 'rb') as f:
+            rstep_img = f.read()
+        with open('images/rthres.png', 'rb') as f:
+            rthres_img = f.read()
+        with open('images/radiation_type.png', 'rb') as f:
+            radiation_type_img = f.read()
+        with open('images/scattering_parameters.png', 'rb') as f:
+            scattering_parameters_img = f.read()
+
+        # Radiation 
+        radtype_button = widgets.ToggleButtons(
+            options=['xray', 'neutron'],
             value=radiation_type,
-            description='Rad. type',
-            layout = widgets.Layout(width='900px'),
+            layout = Layout(width='800px'),
             button_style='info'
         )
-        select_radius = widgets.FloatText(
-            min = 0,
-            max = 50,
-            step=0.01,
-            value=5,
-            description='NP radius',
-            disabled = True,
-            layout = Layout(width='20%'),
-        )
-        device_button = widgets.ToggleButtons(
-            options=['cpu', 'cuda'],
-            value=device,
-            description='Hardware',
-            button_style='info',
-        )
-        batch_size_button = widgets.IntText(
-            min = 100,
-            max = 10000,
-            value=batch_size,
-            description='Batch Size',
-        )
+
+        # Q value slider
         qslider = widgets.FloatRangeSlider(
             value=[qmin, qmax],
-            min=0.0,
-            max=50.0,
-            step=0.01,
-            description='Qmin/Qmax',
-            continuous_update=_cont_updates,
+            min=0.0, max=50.0, step=0.01,
             orientation='horizontal',
             readout=True,
-            style={'font_weight':'bold', 'slider_color': 'white'},
-            layout = widgets.Layout(width='900px'),
+            style={'font_weight':'bold', 'slider_color': 'white', 'description_width': '100px'},
+            layout = widgets.Layout(width='700px'),
         )
+
+        # r value slider
         rslider = widgets.FloatRangeSlider(
             value=[rmin, rmax],
-            min=0,
-            max=100.0,
-            step=rstep,
-            description='rmin/rmax',
-            continuous_update=_cont_updates,
+            min=0, max=100.0, step=rstep,
             orientation='horizontal',
             readout=True,
-            style={'font_weight':'bold', 'slider_color': 'white'},
-            layout = widgets.Layout(width='900px'),
+            style={'font_weight':'bold', 'slider_color': 'white', 'description_width': '100px'},
+            layout = widgets.Layout(width='700px'),
         )
+
+        # Qdamp slider
         qdamp_slider = widgets.FloatSlider(
-            min=0.00,
-            max=0.10,
             value=qdamp, 
-            step=0.01,
-            description='Qdamp',
-            layout = widgets.Layout(width='900px'),
-            continuous_update=_cont_updates,
+            min=0.00,max=0.10, step=0.01,
+            layout = widgets.Layout(width='700px'),
         )
+
+        # B iso slider
         biso_slider = widgets.FloatSlider(
-            min=0.00,
-            max=1.00,
             value=biso,
-            step=0.01,
-            description='B-iso',
-            continuous_update=_cont_updates,
-            layout = widgets.Layout(width='900px'),
+            min=0.00, max=1.00, step=0.01,
+            layout = widgets.Layout(width='700px'),
         )
+
+        # Qstep box
         qstep_box = widgets.FloatText(
-            min = 0.001,
-            max = 1,
-            step=0.001,
+            min = 0.001, max = 1, step=0.001,
             value=qstep,
-            description='Qstep',
+            layout=Layout(width='200px'),
         )
+
+        # rstep box
         rstep_box = widgets.FloatText(
-            min = 0.001,
-            max = 1,
-            step=0.001,
+            min = 0.001, max = 1, step=0.001,
             value=rstep,
-            description='rstep',
+            layout=Layout(width='200px'),
         )
+
+        # rthreshold box
         rthres_box = widgets.FloatText(
-            min = 0.001,
-            max = 1,
-            step=0.001,
+            min = 0.001, max = 1, step=0.001,
             value=rthres,
-            description='rthres',
+            layout=Layout(width='200px'),
         )
+
+        # Lorch modification button
         lorch_mod_button = widgets.ToggleButton(
             value=lorch_mod,
             description='Lorch mod.',
-            layout=Layout(width='37%'),
+            layout=Layout(width='250px'),
             button_style='info',
         )
-        scale_type_button = widgets.ToggleButtons(
-            options=['linear', 'logarithmic'],
-            value='linear',
-            description='I(Q) scale',
-            button_style='info'
-        )
-        plot_iq_button = widgets.Checkbox(
-            value = True,
-            description = 'Show I(Q)',
-            disabled = False,
-        )
-        plot_sq_button = widgets.Checkbox(
-            value = True,
-            description = 'Show S(Q)',
-            disabled = False,
-        )
-        plot_fq_button = widgets.Checkbox(
-            value = True,
-            description = 'Show F(Q)',
-            disabled = False,
-        )
-        plot_gr_button = widgets.Checkbox(
-            value = True,
-            description = 'Show G(r)',
-            disabled = False,
-        )
+
+        # Scattering Tab sizes
+        header_widths = [90*1.15, 135*1.15]
+        header_widths = [str(i)+'px' for i in header_widths]
+        a_inv_width = '27px'
+        a_width = '12px'
+        a_sq_width = '19px'
+        
+        # Scattering tab
+        scattering_tab = VBox([
+            # Radiation button
+            widgets.Image(value=radiation_type_img, format='png', layout=Layout(object_fit='contain', width=header_widths[0])),
+            radtype_button,
+
+            spacing_10px,
+
+            # Scattering parameters
+            widgets.Image(value=scattering_parameters_img, format='png', layout=Layout(object_fit='contain', width=header_widths[1])),
+
+            # Q slider
+            HBox([
+                # Q slider img
+                HBox([widgets.Image(value=qslider_img, format='png', layout=Layout(object_fit='contain', width='90px'))], layout=Layout(width='200px')),
+                # Q slider
+                qslider,
+                # Unit
+                HBox([widgets.Image(value=a_inv_img, format='png', layout=Layout(object_fit='contain', width=a_inv_width))], layout=Layout(width='50px')),
+                # Qstep img
+                HBox([widgets.Image(value=qstep_img, format='png', layout=Layout(object_fit='contain', object_position='80px 5px', width='40px'))], layout=Layout(width='200px')),
+                # Qstep box
+                qstep_box, 
+                # Unit
+                HBox([widgets.Image(value=a_inv_img, format='png', layout=Layout(object_fit='contain', width=a_inv_width))], layout=Layout(width='50px')),
+            ]),
+
+            spacing_5px,
+
+            # r slider
+            HBox([
+                # r slider img
+                HBox([widgets.Image(value=rslider_img, format='png', layout=Layout(object_fit='contain', width='85px'))], layout=Layout(width='200px')),
+                # r slider
+                rslider, 
+                # Unit
+                HBox([widgets.Image(value=a_img, format='png', layout=Layout(object_fit='contain', width=a_width))], layout=Layout(width='50px')),
+                # r step img
+                HBox([widgets.Image(value=rstep_img, format='png', layout=Layout(object_fit='contain', object_position='80px 5px', width='35px'))], layout=Layout(width='200px')),
+                # r step box
+                rstep_box,
+                # Unit
+                HBox([widgets.Image(value=a_img, format='png', layout=Layout(object_fit='contain', width=a_width))], layout=Layout(width='50px')),
+            ]),
+
+            spacing_5px,
+
+            # Q damp
+            HBox([
+                # Q damp img
+                HBox([widgets.Image(value=qdamp_img, format='png', layout=Layout(object_fit='contain', width='40px'))], layout=Layout(width='200px')),
+                # Q damp slider
+                qdamp_slider,
+                # Unit
+                HBox([widgets.Image(value=a_inv_img, format='png', layout=Layout(object_fit='contain', width=a_inv_width))], layout=Layout(width='50px')),
+                # r thres img
+                HBox([widgets.Image(value=rthres_img, format='png', layout=Layout(object_fit='contain', object_position='80px 5px', width='40px'))], layout=Layout(width='200px')),
+                # r thres
+                rthres_box,
+                # Unit
+                HBox([widgets.Image(value=a_img, format='png', layout=Layout(object_fit='contain', width=a_width))], layout=Layout(width='50px')),
+            ]),
+            
+            spacing_5px,
+
+            # Global B iso
+            HBox([
+                # Global B iso img
+                HBox([widgets.Image(value=global_biso_img, format='png', layout=Layout(object_fit='contain', width='80px'))], layout=Layout(width='200px')),
+                # Global B iso slider
+                biso_slider, 
+                # Unit
+                HBox([widgets.Image(value=a_sq_img, format='png', layout=Layout(object_fit='contain', width=a_sq_width))], layout=Layout(width='50px')),
+                # r hres (hidden)
+                HBox([widgets.Image(value=rthres_img, format='png', layout=Layout(object_fit='contain', object_position='80px 5px', width='40px', visibility='hidden'))], layout=Layout(width='200px')),
+                # Lorch mod button
+                lorch_mod_button, 
+                # Unit
+                HBox([widgets.Image(value=a_img, format='png', layout=Layout(object_fit='contain', width=a_width, visibility='hidden'))], layout=Layout(width='50px')),
+            ]),
+        ])
+
+        """ Plotting Options """
+
+        # Load display images
+        with open('images/iq_scaling.png', 'rb') as f:
+            iq_scaling_img = f.read()
+        with open('images/show_hide.png', 'rb') as f:
+            show_hide_img = f.read()
+        with open('images/max_norm.png', 'rb') as f:
+            max_norm_img = f.read()
+        with open('images/iq.png', 'rb') as f:
+            iq_img = f.read()
+        with open('images/sq.png', 'rb') as f:
+            sq_img = f.read()
+        with open('images/fq.png', 'rb') as f:
+            fq_img = f.read()
+        with open('images/gr.png', 'rb') as f:
+            gr_img = f.read()
+        
+        # Y-axis I(Q) scale button
+        scale_type_button = widgets.ToggleButtons( options=['linear', 'logarithmic'], value='linear', button_style='info')
+
+        # Show/Hide buttons
+        show_iq_button = widgets.Checkbox(value = True)
+        show_sq_button = widgets.Checkbox(value = True)
+        show_fq_button = widgets.Checkbox(value = True)
+        show_gr_button = widgets.Checkbox(value = True)
+
+        # Max normalize buttons
+        normalize_iq = widgets.Checkbox(value = False)
+        normalize_sq = widgets.Checkbox(value = False)
+        normalize_fq = widgets.Checkbox(value = False)
+        normalize_gr = widgets.Checkbox(value = False)
+        
+        # Plotting tab sizes
+        function_offset = '-90px 3px'
+        function_size = 35
+        header_scale = 0.95
+        header_widths = [130, 120, 147]
+        header_widths = [str(i * header_scale)+'px' for i in header_widths]
+
+        # Plotting tab 
+        plotting_tab = VBox([
+            # I(Q) scaling img
+            widgets.Image(value=iq_scaling_img, format='png', layout=Layout(object_fit='contain', width=header_widths[0])),
+            
+            # Scale button
+            scale_type_button,
+
+            spacing_10px,
+            
+            # Show / Hide img
+            widgets.Image(value=show_hide_img, format='png', layout=Layout(object_fit='contain', width=header_widths[1])),
+            
+            # Options
+            HBox([
+                HBox([show_iq_button, widgets.Image(value=iq_img, format='png', width=function_size, layout=Layout(object_fit='contain', object_position=function_offset))]),
+                HBox([show_sq_button, widgets.Image(value=sq_img, format='png', width=function_size, layout=Layout(object_fit='contain', object_position=function_offset))]),
+                HBox([show_fq_button, widgets.Image(value=fq_img, format='png', width=function_size, layout=Layout(object_fit='contain', object_position=function_offset))]),
+                HBox([show_gr_button, widgets.Image(value=gr_img, format='png', width=function_size, layout=Layout(object_fit='contain', object_position=function_offset))]),
+            ]),
+
+            spacing_10px,
+
+            # Max normalization img
+            widgets.Image(value=max_norm_img, format='png', layout=Layout(object_fit='contain', width=header_widths[2])),
+
+            # Options
+            HBox([
+                HBox([normalize_iq, widgets.Image(value=iq_img, format='png', width=function_size, layout=Layout(object_fit='contain', object_position=function_offset))]),
+                HBox([normalize_sq, widgets.Image(value=sq_img, format='png', width=function_size, layout=Layout(object_fit='contain', object_position=function_offset))]),
+                HBox([normalize_fq, widgets.Image(value=fq_img, format='png', width=function_size, layout=Layout(object_fit='contain', object_position=function_offset))]),
+                HBox([normalize_gr, widgets.Image(value=gr_img, format='png', width=function_size, layout=Layout(object_fit='contain', object_position=function_offset))]),
+            ]),
+        ])
+
+
+        """ Hardware Options Tab """
+
+        # Hardware button
+        hardware_button = widgets.ToggleButtons(options=['cpu', 'cuda'], value=device, button_style='info')
+
+        # Distance batch-size box
+        batch_size_box = widgets.IntText(min = 100, max = 10000, value=batch_size)
+        
+        # Hardware tab sizes
+        header_scale = 1
+        header_widths = [120, 175]
+        header_widths = [str(i * header_scale)+'px' for i in header_widths]
+
+        # Hardware tab
+        hardware_tab = VBox([
+            # Choose hardware img
+            widgets.Image(value=choose_hardware_img, format='png', layout=Layout(object_fit='contain', width=header_widths[0])),
+
+            # Hardware box
+            hardware_button,
+
+            spacing_10px,
+
+            # Distance batch_size img
+            widgets.Image(value=batch_size_img, format='png', layout=Layout(object_fit='contain', width=header_widths[1])),
+
+            # Distance batch size box
+            batch_size_box,
+        ])
+
+
+        """ Display tabs """
+    
+        # Display Tabs
+        tabs = widgets.Tab([
+            file_tab,
+            scattering_tab,
+            plotting_tab,
+            hardware_tab,
+        ])
+    
+        # Set tab titles
+        tabs.set_title(0, 'File Selection')
+        tabs.set_title(1, 'Scattering Options')
+        tabs.set_title(2, 'Plotting Options')
+        tabs.set_title(3, 'Hardware Options')
+        
+        # Plot button and Download buttons
+        plot_button = widgets.Button(description='Plot data', layout=Layout(width='50%', height='90%'), button_style='info')
+        download_button = widgets.Button(description="Download- and plot data", layout=Layout(width='50%', height='90%'), button_style='danger')
+        
+        def display_tabs():
+            display(VBox([tabs, HBox([plot_button, download_button], layout=Layout(width='100%', height='50px'))]))
+
+
+        """ Download utility """
         
         # Download options
-        def create_download_link(filename_prefix, data, header=None):
+        def create_download_link(select_file, select_radius, filename_prefix, data, header=None):
         
             # Collect Metadata
             metadata ={
@@ -844,8 +1142,8 @@ class DebyeCalculator:
                 'rstep': rstep_box.value, 
                 'rthres': rthres_box.value,
                 'biso': biso_slider.value,
-                'device': device_button.value,
-                'batch_size': batch_size_button.value, 
+                'device': hardware_button.value,
+                'batch_size': batch_size_box.value, 
                 'lorch_mod': lorch_mod_button.value,
                 'radiation_type': radtype_button.value
             }
@@ -873,13 +1171,16 @@ class DebyeCalculator:
             seconds = f'{t.second}'.zfill(2)
             
             # Make filename
-            filename = filename_prefix + '_' + select_file.value.split('/')[-1].split('.')[0] + '_' + month + day + year + '_' + hours + minutes + seconds + '.csv'
+            if select_radius is not None:
+                filename = filename_prefix + '_' + select_file.value.split('/')[-1].split('.')[0] + '_radius' + str(select_radius.value) + '_' + month + day + year + '_' + hours + minutes + seconds + '.csv'
+            else:
+                filename = filename_prefix + '_' + select_file.value.split('/')[-1].split('.')[0] + '_' + month + day + year + '_' + hours + minutes + seconds + '.csv'
         
             # Make href and return
-            href = f'<a href="data:text/csv;base64,{b64}" download="{filename}">Download {filename}</a>'
+            href = filename_prefix + ':\t' + f'<a href="data:text/csv;base64,{b64}" download="{filename}">{filename}</a>'
             return href
         
-        def create_structure_download_link(filename_prefix, ase_atoms):
+        def create_structure_download_link(select_file, select_radius, filename_prefix, ase_atoms):
             
             # Get atomic properties
             positions = ase_atoms.get_positions()
@@ -905,124 +1206,228 @@ class DebyeCalculator:
             seconds = f'{t.second}'.zfill(2)
         
             # Make ilename
-            filename = filename_prefix + '_' + select_file.value.split('/')[-1].split('.')[0] + str(select_radius.value) + '_' + month + day + year + '_' + hours + minutes + seconds + '.xyz'
+            filename = filename_prefix + '_' + select_file.value.split('/')[-1].split('.')[0] + '_radius' + str(select_radius.value) + '_' + month + day + year + '_' + hours + minutes + seconds + '.xyz'
         
             # Make href and return
-            href = f'<a href="data:text/xyz;base64,{b64}" download="{filename}">Download {filename}</a>'
+            href = filename_prefix + ':\t' + f'<a href="data:text/xyz;base64,{b64}" download="{filename}">{filename}</a>'
             return href
         
-        # Download buttons
-        download_button = widgets.Button(description="Download Data")
-        
+
         @download_button.on_click
         def on_download_button_click(button):
+            global debye_outputs
             # Try to compile all the data and create html link to download files
             try:
-                # Data
-                iq_data = np.column_stack([q, iq])
-                sq_data = np.column_stack([q, sq])
-                fq_data = np.column_stack([q, fq])
-                gr_data = np.column_stack([r, gr])
-            
-                # Clear warning message
-                sys.stdout.write('\x1b[1A')
-                sys.stdout.write('\x1b[1A')
-                sys.stdout.write('\x1b[1A')
-                sys.stdout.write('\x1b[2K')
-        
-                # Display download links
-                display(HTML(create_download_link('iq', iq_data, "q,I(Q)")))
-                display(HTML(create_download_link('sq', sq_data, "q,S(Q)")))
-                display(HTML(create_download_link('fq', fq_data, "q,F(Q)")))
-                display(HTML(create_download_link('gr', gr_data, "r,G(r)")))
-        
-                if not select_radius.disabled:
-                    ase_atoms, _ = DebyeCalculator().generate_nanoparticles(select_file.value, select_radius.value)
+                # clear and display
+                clear_output(wait=True)
+                display_tabs()
+
+                debye_outputs = []
+                for select_file, select_radius in zip([select_file_1, select_file_2], [select_radius_1, select_radius_2]):
+                    try:
+                        path_ext = select_file.value.split('.')[-1]
+                    except Exception as e:
+                        return
+                    if (select_file.value is not None) and (select_file.value not in DEFAULT_MSGS) and (path_ext in ['xyz', 'cif']):
+                        try:
+                            debye_calc = DebyeCalculator(
+                                device=hardware_button.value, 
+                                batch_size=batch_size_box.value,
+                                radiation_type=radtype_button.value,
+                                qmin=qslider.value[0], 
+                                qmax=qslider.value[1], 
+                                qstep=qstep_box.value, 
+                                qdamp=qdamp_slider.value,
+                                rmin=rslider.value[0],
+                                rmax=rslider.value[1], 
+                                rstep=rstep_box.value, 
+                                rthres=rthres_box.value, 
+                                biso=biso_slider.value,
+                                lorch_mod=lorch_mod_button.value
+                            )
+                            if not select_radius.disabled and select_radius.value > 8:
+                                print(f'Generating nanoparticle of radius {select_radius.value} using {select_file.value.split("/")[-1]} ...')
+                            debye_outputs.append(debye_calc._get_all(select_file.value, select_radius.value))
+                        except Exception as e:
+                            print(f'FAILED: Could not load data file: {path}', end='\r')
+                
+                if len(debye_outputs) < 1:
+                    print('FAILED: Please select data file(s)', end="\r")
+                    return
+
+                i = 0
+                for select_file, select_radius in zip([select_file_1, select_file_2], [select_radius_1, select_radius_2]):
                     
-                    display(HTML(create_structure_download_link('structure', ase_atoms[0])))
+                    # Display download links
+                    if select_file.value not in DEFAULT_MSGS:
+
+                        # Print
+                        print('Download links for '  + select_file.value.split('/')[-1] + ':')
+                            
+                        r, q, iq, sq, fq, gr = debye_outputs[i]
+
+                        iq_data = np.column_stack([q, iq])
+                        sq_data = np.column_stack([q, sq])
+                        fq_data = np.column_stack([q, fq])
+                        gr_data = np.column_stack([r, gr])
+
+                        if select_radius.layout.visibility == 'visible':
+                            ase_atoms, _ = DebyeCalculator().generate_nanoparticles(select_file.value, select_radius.value)
+                            display(HTML(create_structure_download_link(select_file, select_radius, f'structure', ase_atoms[0])))
+                            display(HTML(create_download_link(select_file, select_radius, 'iq', iq_data, "q,I(Q)")))
+                            display(HTML(create_download_link(select_file, select_radius, 'sq', sq_data, "q,S(Q)")))
+                            display(HTML(create_download_link(select_file, select_radius, 'fq', fq_data, "q,F(Q)")))
+                            display(HTML(create_download_link(select_file, select_radius, 'gr', gr_data, "r,G(r)")))
+                        else:
+                            display(HTML(create_download_link(select_file, None, 'iq', iq_data, "q,I(Q)")))
+                            display(HTML(create_download_link(select_file, None, 'sq', sq_data, "q,S(Q)")))
+                            display(HTML(create_download_link(select_file, None, 'fq', fq_data, "q,F(Q)")))
+                            display(HTML(create_download_link(select_file, None, 'gr', gr_data, "r,G(r)")))
+                        print('\n')
+                        i += 1
+                    
+                update_figure(debye_outputs)
         
             except Exception as e:
-                print('FAILED: Plot your data first', end="\r")
+                raise(e)
+                print('FAILED: Please select data file(s)', end="\r")
+
+        """ Observer utility """
                       
-        # Item layout
-        items_layout = Layout(width='90%')
-        
-        # Folder dropdown widget
-        folder = widgets.Text(description='Data dir.', placeholder='Enter data directory', disabled=False, layout=items_layout)
-        
-        # Create a dropdown menu widget for selection of XYZ file and an output area
-        DEFAULT_MSG = 'No valid files in entered directory'
-        select_file = widgets.Dropdown(description='Select file', options=[DEFAULT_MSG], value=DEFAULT_MSG, disabled=True, layout=items_layout)
-        
         # Define a function to update the scattering patterns based on the selected parameters
         def update_options(change):
             folder = change.new
             paths = sorted(glob(os.path.join(folder, '*.xyz')) + glob(os.path.join(folder, '*.cif')))
             if len(paths):
-                select_file.options = ['Select data file'] + paths
-                select_file.value = 'Select data file'
-                select_file.disabled = False
+                for select_file in [select_file_1, select_file_2]:
+                    select_file.options = ['Select data file'] + paths
+                    select_file.value = 'Select data file'
+                    select_file.disabled = False
             else:
-                select_file.options = [DEFAULT_MSG]
-                select_file.value = DEFAULT_MSG
-                select_file.disabled = True
+                for select_file in [select_file_1, select_file_2]:
+                    select_file.options = [DEFAULT_MSGS[0]]
+                    select_file.value = DEFAULT_MSGS[0]
+                    select_file.disabled = True
         
-        # Link the update function to the dropdown widget's value change event
-        folder.observe(update_options, names='value')
         
-        def update_options_radius(change):
+        def update_options_radius_1(change):
             #select_radius = change.new
-            selected_ext = select_file.value.split('.')[-1]
+            selected_ext = select_file_1.value.split('.')[-1]
             if selected_ext == 'xyz':
-                select_radius.disabled = True
+                select_radius_desc_1.children[0].layout.visibility = 'hidden'
+                select_radius_1.layout.visibility = 'hidden'
+                cif_text_1.layout.visibility = 'hidden'
             elif selected_ext == 'cif':
-                select_radius.disabled = False
+                select_radius_desc_1.children[0].layout.visibility = 'visible'
+                select_radius_1.layout.visibility = 'visible'
+                cif_text_1.layout.visibility = 'visible'
+            else:
+                select_radius_desc_1.children[0].layout.visibility = 'hidden'
+                select_radius_1.layout.visibility = 'hidden'
+                cif_text_1.layout.visibility = 'hidden'
         
-        select_file.observe(update_options_radius, names='value')
+        def update_options_radius_2(change):
+            #select_radius = change.new
+            selected_ext = select_file_2.value.split('.')[-1]
+            if selected_ext == 'xyz':
+                select_radius_desc_2.children[0].layout.visibility = 'hidden'
+                select_radius_2.layout.visibility = 'hidden'
+                cif_text_2.layout.visibility = 'hidden'
+            elif selected_ext == 'cif':
+                select_radius_desc_2.children[0].layout.visibility = 'visible'
+                select_radius_2.layout.visibility = 'visible'
+                cif_text_2.layout.visibility = 'visible'
+            else:
+                select_radius_desc_2.children[0].layout.visibility = 'hidden'
+                select_radius_2.layout.visibility = 'hidden'
+                cif_text_2.layout.visibility = 'hidden'
         
-        plot_button = widgets.Button(
-            description='Plot',
-        )
+        # Link the update functions to the dropdown widget's value change event
+        folder.observe(update_options, names='value')
+        select_file_1.observe(update_options_radius_1, names='value')
+        select_file_2.observe(update_options_radius_2, names='value')
         
-        def update_figure(r, q, iq, sq, fq, gr, _unity_sq=True):
+
+        """ Plotting utility """
+        
+        def update_figure(debye_outputs, _unity_sq=True):
 
             xseries, yseries = [], []
             xlabels, ylabels = [], []
-            scales, labels = [], []
-            if plot_iq_button.value:
-                xseries.append(q)
-                yseries.append(iq)
-                xlabels.append('$Q$ [$\AA^{-1}$]')
-                ylabels.append('$I(Q)$ [counts]')
-                if scale_type_button.value == 'logarithmic':
-                    scales.append('log')
-                else:
-                    scales.append('linear')
-                scale = scale_type_button.value
-                labels.append('Scattering Intensity, I(Q)')
-            if plot_sq_button.value:
-                xseries.append(q)
-                yseries.append(sq)
-                xlabels.append('$Q$ [$\AA^{-1}$]')
-                ylabels.append('$S(Q)$')
-                scales.append('linear')
-                labels.append('Structure Function, S(Q)')
-            if plot_fq_button.value:
-                xseries.append(q)
-                yseries.append(fq)
-                xlabels.append('$Q$ [$\AA^{-1}$]')
-                ylabels.append('$F(Q)$')
-                scales.append('linear')
-                labels.append('Reduced Structure Function, F(Q)')
-            if plot_gr_button.value:
-                xseries.append(r)
-                yseries.append(gr)
-                xlabels.append('$r$ [$\AA$]')
-                ylabels.append('$G(r)$ [counts]')
-                scales.append('linear')
-                labels.append('Reduced Pair Distribution Function, G(r)')
+            scales, titles = [], []
+            axis_ids = []
 
-            num_plots = len(yseries)
+            normalize_iq_text = ' [counts]' if not normalize_iq.value else ' [normalized]'
+            normalize_sq_text = '' if not normalize_iq.value else ' [normalized]'
+            normalize_fq_text = '' if not normalize_iq.value else ' [normalized]'
+            normalize_gr_text = '' if not normalize_iq.value else ' [normalized]'
+
+            for do in debye_outputs:
+                if show_iq_button.value:
+                    axis_ids.append(0)
+                    xseries.append(do[1]) # q
+                    iq_ = do[2] if not normalize_iq.value else do[2]/max(do[2]) 
+                    yseries.append(iq_) # iq
+                    xlabels.append('$Q$ [$\AA^{-1}$]')
+                    ylabels.append('$I(Q)$' + normalize_iq_text)
+                    if scale_type_button.value == 'logarithmic':
+                        scales.append('log')
+                    else:
+                        scales.append('linear')
+                    scale = scale_type_button.value
+                    titles.append('Scattering Intensity, I(Q)')
+                if show_sq_button.value:
+                    axis_ids.append(1)
+                    xseries.append(do[1]) # q
+                    sq_ = do[3] if not normalize_sq.value else do[3]/max(do[3]) 
+                    yseries.append(sq_) # sq
+                    xlabels.append('$Q$ [$\AA^{-1}$]')
+                    ylabels.append('$S(Q)$' + normalize_sq_text)
+                    scales.append('linear')
+                    titles.append('Structure Function, S(Q)')
+                if show_fq_button.value:
+                    axis_ids.append(2)
+                    xseries.append(do[1]) # q
+                    fq_ = do[4] if not normalize_fq.value else do[4]/max(do[4]) 
+                    yseries.append(fq_) # fq
+                    xlabels.append('$Q$ [$\AA^{-1}$]')
+                    ylabels.append('$F(Q)$'+ normalize_fq_text)
+                    scales.append('linear')
+                    titles.append('Reduced Structure Function, F(Q)')
+                if show_gr_button.value:
+                    axis_ids.append(3)
+                    xseries.append(do[0]) # r
+                    gr_ = do[5] if not normalize_gr.value else do[5]/max(do[5]) 
+                    yseries.append(gr_) # gr
+                    xlabels.append('$r$ [$\AA$]')
+                    ylabels.append('$G(r)$' + normalize_gr_text)
+                    scales.append('linear')
+                    titles.append('Reduced Pair Distribution Function, G(r)')
+
+            sup_title = []
+            labels = []
+            if select_file_1.value not in ['Select data file', 'No valid files in entered directory']:
+
+                sup_title.append(select_file_1.value.split('/')[-1])
+
+                if select_radius_1.layout.visibility == 'hidden':
+                    labels.append(sup_title[-1])
+                else:
+                    labels.append(sup_title[-1] + ', rad.: ' + str(select_radius_1.value) + ' Å')
+
+            if select_file_2.value not in ['Select data file', 'No valid files in entered directory']:
+
+                sup_title.append(select_file_2.value.split('/')[-1])
+
+                if select_radius_2.layout.visibility == 'hidden':
+                    labels.append(sup_title[-1])
+                else:
+                    labels.append(sup_title[-1] + ', rad.: ' + str(select_radius_2.value) + ' Å')
+
+            if len(labels) == 0:
+                return
+
+            num_plots = int(show_iq_button.value) + int(show_sq_button.value) + int(show_fq_button.value) + int(show_gr_button.value) 
             if num_plots == 4:
                 fig, axs = plt.subplots(2,2,figsize=(12, 8), dpi=75)
                 axs = axs.ravel()
@@ -1036,141 +1441,67 @@ class DebyeCalculator:
             else:
                 return
 
-            for i,(x,y,xl,yl,s,l) in enumerate(zip(xseries, yseries, xlabels, ylabels, scales, labels)):
-                axs[i].set_xscale(s)
-                axs[i].set_yscale(s)
-                axs[i].plot(x,y)
-                axs[i].set(xlabel=xl, ylabel=yl, title=l)
-                axs[i].relim()
-                axs[i].autoscale_view()
-                axs[i].grid(alpha=0.2)
+            for i,(x,y,xl,yl,s,t,l) in enumerate(zip(xseries, yseries, xlabels, ylabels, scales, titles, np.repeat(labels, num_plots))):
+                
+                ii = i % num_plots
+                axs[ii].set_xscale(s)
+                axs[ii].set_yscale(s)
+                axs[ii].plot(x,y, label=l)
+                axs[ii].set(xlabel=xl, ylabel=yl, title=t)
+                axs[ii].relim()
+                axs[ii].autoscale_view()
+                axs[ii].grid(alpha=0.2)
+                axs[ii].legend()
 
-            #if scale_type_button.value == 'logarithmic':
-            #    axs[0].set_xscale('log')
-            #    axs[0].set_yscale('log')
-        
-            #axs[0].plot(q, iq)
-            #axs[0].set(xlabel='$Q$ [$\AA^{-1}$]', ylabel='$I(Q)$ [counts]')
-            #
-            #axs[1].axhline(1, alpha=0.5, ls='--', c='g')
-            #axs[1].plot(q, sq+int(_unity_sq))
-            #axs[1].set(xlabel='$Q$ [$\AA^{-1}$]', ylabel='$S(Q)$')
-            #
-            #axs[2].axhline(0, alpha=0.5, ls='--', c='g')
-            #axs[2].plot(q, fq)
-            #axs[2].set(xlabel='$Q$ [$\AA^{-1}$]', ylabel='$F(Q)$')
-            #
-            #axs[3].plot(r, gr)
-            #axs[3].set(xlabel='$r$ [$\AA$]', ylabel='$G_r(r)$')
-        
-            #labels = ['Scattering Intensity, I(Q)',
-            #          'Structure Function, S(Q)',
-            #          'Reduced Structure Function, F(Q)',
-            #          'Reduced Pair Distribution Function, G(r)']
-        
-            #for ax, label in zip(axs, labels):
-            #    ax.relim()
-            #    ax.autoscale_view()
-            #    ax.set_title(label)
-            #    ax.grid(alpha=0.2)
-        
-            fig.suptitle("XYZ file: " + select_file.value.split('/')[-1].split('.')[0])
+            if len(sup_title) == 1:
+                title = f"Showing files: {sup_title[0]}"
+            else:
+                title = f"Showing files: {sup_title[0]} and {sup_title[1]}"
+            fig.suptitle(title)
             fig.tight_layout()
-        
+
         @plot_button.on_click
         def update_parameters(b=None):
-        
+            global debye_outputs
+
+            # Clear and display
             clear_output(wait=True)
             display_tabs()
-        
-            global r, q, iq, sq, fq, gr
-        
-            try:
-                path_ext = select_file.value.split('.')[-1]
-            except Exception as e:
-                return
-        
-            if (select_file.value is not None) and select_file.value != DEFAULT_MSG and path_ext in ['xyz', 'cif']:
-                try:
-                    debye_calc = DebyeCalculator(
-                        device=device_button.value, 
-                        batch_size=batch_size_button.value,
-                        radiation_type=radtype_button.value,
-                        qmin=qslider.value[0], 
-                        qmax=qslider.value[1], 
-                        qstep=qstep_box.value, 
-                        qdamp=qdamp_slider.value,
-                        rmin=rslider.value[0],
-                        rmax=rslider.value[1], 
-                        rstep=rstep_box.value, 
-                        rthres=rthres_box.value, 
-                        biso=biso_slider.value,
-                        lorch_mod=lorch_mod_button.value
-                    )
-                    if not select_radius.disabled and select_radius.value > 8:
-                        print('Generating...')
-                    r, q, iq, sq, fq, gr = debye_calc._get_all(select_file.value, select_radius.value)
-                    
-                    clear_output(wait=True)
-                    display_tabs()
-                    update_figure(r, q, iq, sq, fq, gr)
-                    
-                except Exception as e:
-                    raise(e)
-                    print(f'FAILED: Could not load data file: {path}', end='\r')
-                    
-        # File Tab Layout
-        file_layout = Layout(
-            display='flex',
-            flex_flow='column',
-            align_items='stretch',
-            order='solid',
-            width='90%',
-        )
-        
-        # Make File Tab
-        add_text = widgets.Text(value='Given radius, generate spherical nanoparticles (NP) from crystallographic information files (CIFs)', disabled=True, layout=Layout(width='70%'))
-        file_tab = VBox(children = [
-            folder,
-            select_file,
-            HBox(children=[select_radius, add_text]),
-        ], layout = file_layout)
-        
-        # Make Scattering Tab
-        scattering_tab = VBox(children = [
-            radtype_button,
-            HBox(children=[qslider, qstep_box]),
-            HBox(children=[rslider, rstep_box]),
-            HBox(children=[qdamp_slider, rthres_box]),
-            HBox(children=[biso_slider, lorch_mod_button]),
-        ])
-    
-        # Make Plotting Tab
-        plotting_tab = VBox(children = [
-            HBox(children=[plot_iq_button, plot_sq_button]),
-            HBox(children=[plot_fq_button, plot_gr_button]),
-            scale_type_button,
-        ])
 
-        # Make Hardware Tab
-        hardware_tab = VBox(children = [
-            device_button,
-            batch_size_button,
-        ])
-    
-        # Display Tabs
-        tabs = widgets.Tab(children=[
-            file_tab,
-            scattering_tab,
-            plotting_tab,
-            hardware_tab,
-        ])
-    
-        tabs.set_title(0, 'File Select')
-        tabs.set_title(1, 'Scattering Parameters')
-        tabs.set_title(2, 'Plotting Options')
-        tabs.set_title(3, 'Hardware Options')
-    
-        def display_tabs():
-            display(VBox(children=[tabs, HBox(children=[plot_button, download_button])]))
+            debye_outputs = []
+            for select_file, select_radius in zip([select_file_1, select_file_2], [select_radius_1, select_radius_2]):
+                try:
+                    path_ext = select_file.value.split('.')[-1]
+                except Exception as e:
+                    return
+                if (select_file.value is not None) and (select_file.value not in [DEFAULT_MSGS]) and (path_ext in ['xyz', 'cif']):
+                    try:
+                        debye_calc = DebyeCalculator(
+                            device=hardware_button.value, 
+                            batch_size=batch_size_box.value,
+                            radiation_type=radtype_button.value,
+                            qmin=qslider.value[0], 
+                            qmax=qslider.value[1], 
+                            qstep=qstep_box.value, 
+                            qdamp=qdamp_slider.value,
+                            rmin=rslider.value[0],
+                            rmax=rslider.value[1], 
+                            rstep=rstep_box.value, 
+                            rthres=rthres_box.value, 
+                            biso=biso_slider.value,
+                            lorch_mod=lorch_mod_button.value
+                        )
+                        if not select_radius.disabled and select_radius.value > 8:
+                            print(f'Generating nanoparticle of radius {select_radius.value} using {select_file.value.split("/")[-1]} ...')
+                        debye_outputs.append(debye_calc._get_all(select_file.value, select_radius.value))
+                    except Exception as e:
+                        print(f'FAILED: Could not load data file: {path}', end='\r')
+
+            if len(debye_outputs) < 1:
+                print('FAILED: Please select data file(s)', end="\r")
+                return
+
+            update_figure(debye_outputs)
+
+        # Display tabs when function is called
         display_tabs()
