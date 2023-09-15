@@ -649,12 +649,16 @@ class DebyeCalculator:
 
             # Sort the atoms
             if sort_atoms:
-                np_cell = ase_sort(np_cell)
-                if np_cell.get_chemical_symbols()[0] in ligands:
-                    np_cell = np_cell[::-1]
+                sorted_cell = ase_sort(cell)
+                if sorted_cell.get_chemical_symbols()[0] in ligands:
+                    sorted_cell = sorted_cell[::-1]
     
-            # Append nanoparticle
-            nanoparticle_list.append(np_cell)
+                # Append nanoparticle
+                nanoparticle_list.append(sorted_cell)
+            else:
+                # Append nanoparticle
+                nanoparticle_list.append(cell)
+
             # Append size
             nanoparticle_sizes.append(nanoparticle_size.item())
 
