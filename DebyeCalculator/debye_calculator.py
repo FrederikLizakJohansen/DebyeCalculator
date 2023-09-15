@@ -1253,7 +1253,7 @@ class DebyeCalculator:
                                 biso=biso_slider.value,
                                 lorch_mod=lorch_mod_button.value
                             )
-                            if not select_radius.disabled and select_radius.value > 8:
+                            if (select_radius.layout.visibility != 'hidden') and (select_radius.value > 8):
                                 print(f'Generating nanoparticle of radius {select_radius.value} using {select_file.value.split("/")[-1]} ...')
                             debye_outputs.append(debye_calc._get_all(select_file.value, select_radius.value))
                         except Exception as e:
