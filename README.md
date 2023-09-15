@@ -25,7 +25,7 @@ pip install .
 or
 python setup.py install
 ```
-
+<!---
 To verify that __DebyeCalculator__ have been installed properly, try calling the help argument.
 ```
 DebyeCalculator --help
@@ -63,7 +63,7 @@ POMFinder --data "Experimental_Data/DanMAX_AlphaKeggin.gr" --nyquist "no" --Qmin
 >>> The 3rd guess from the model is:  icsd_281447_0_1.0rscale.xyz
 >>> The 4th guess from the model is:  icsd_423775_0_0.9rscale.xyz
 >>> The 5th guess from the model is:  icsd_172542_0_1.1rscale.xyz
-
+ -->
 ```  
 # Authors
 __Frederik L. Johansen__<sup>1</sup><sup>, 2</sup>   
