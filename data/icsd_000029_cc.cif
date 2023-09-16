@@ -1,0 +1,111 @@
+data_2ICSD
+#Commerce on behalf of the United States.  All rights reserved.
+_database_code_ICSD                29
+_audit_creation_date               1980/01/01
+_audit_update_record               2008/02/01
+_chemical_name_systematic          'Niobium Oxide'
+_chemical_formula_structural       'Nb2 O5'
+_chemical_formula_sum              'Nb2 O5'
+_chemical_formula_weight           265.815
+_publ_section_title                'Structure refinement of h-Nb2 O5'
+loop_
+_citation_id
+_citation_journal_abbrev
+_citation_year
+_citation_journal_volume
+_citation_journal_issue
+_citation_page_first
+_citation_page_last
+_citation_journal_id_ASTM
+primary 'Acta Crystallographica B (24,19638,1982)' 1976 32 * 764 767 ACBCAR
+_publ_author_name                  'Kato, K.'
+_cell_length_a                     21.153(7)
+_cell_length_b                     3.8233(5)
+_cell_length_c                     19.3560(50)
+_cell_angle_alpha                  90.
+_cell_angle_beta                   119.80(2)
+_cell_angle_gamma                  90.
+_cell_volume                       1358.4
+_cell_formula_units_Z              14
+_symmetry_space_group_name_H-M     'P 1 2/m 1'
+_symmetry_Int_Tables_number        10
+_symmetry_cell_setting             monoclinic
+_refine_ls_R_factor_all            0.052
+loop_
+_symmetry_equiv_pos_site_id
+_symmetry_equiv_pos_as_xyz
+  1	'-x, y, -z'
+  2	'-x, -y, -z'
+  3	'x, -y, z'
+  4	'x, y, z'
+loop_
+_atom_type_symbol
+_atom_type_oxidation_number
+Nb	5
+O	-2
+loop_
+_atom_site_label
+_atom_site_type_symbol
+_atom_site_symmetry_multiplicity
+_atom_site_Wyckoff_symbol
+_atom_site_fract_x
+_atom_site_fract_y
+_atom_site_fract_z
+_atom_site_occupancy
+_atom_site_attached_hydrogens
+_atom_site_B_iso_or_equiv
+Nb1 Nb 2 i 0 0.2285(3) 0 0.5 0 0 
+Nb2 Nb 1 g 0.5 0 0.5 1. 0 0 
+Nb3 Nb 2 m 0.16430(3) 0 0.00353(3) 1. 0 0 
+Nb4 Nb 2 m 0.23623(3) 0 0.23134(3) 1. 0 0 
+Nb5 Nb 2 m 0.30284(3) 0 0.45456(3) 1. 0 0 
+Nb6 Nb 2 m 0.36087(3) 0 0.04553(3) 1. 0 0 
+Nb7 Nb 2 m 0.43325(3) 0 0.27741(4) 1. 0 0 
+Nb8 Nb 2 m 0.56270(3) 0 0.09346(3) 1. 0 0 
+Nb9 Nb 2 m 0.62943(3) 0 0.32219(3) 1. 0 0 
+Nb10 Nb 2 n 0.09353(3) 0.5 0.20187(3) 1. 0 0 
+Nb11 Nb 2 n 0.15921(3) 0.5 0.42410(3) 1. 0 0 
+Nb12 Nb 2 n 0.70330(3) 0.5 0.12414(3) 1. 0 0 
+Nb13 Nb 2 n 0.77056(3) 0.5 0.35151(3) 1. 0 0 
+Nb14 Nb 2 n 0.89895(3) 0.5 0.16353(3) 1. 0 0 
+Nb15 Nb 2 n 0.96461(3) 0.5 0.38928(4) 1. 0 0 
+O1 O 1 f 0 0.5 0.5 1. 0 1.16 
+O2 O 1 h 0.5 0.5 0.5 1. 0 1.26 
+O3 O 2 m 0.1180(2) 0 0.2012(2) 1. 0 0.56 
+O4 O 2 m 0.1867(2) 0 0.4314(2) 1. 0 0.45 
+O5 O 2 m 0.1931(2) 0 0.1067(3) 1. 0 0.7 
+O6 O 2 m 0.2639(2) 0 0.3395(3) 1. 0 0.75 
+O7 O 2 m 0.2619(2) 0 0.0139(3) 1. 0 0.73 
+O8 O 2 m 0.3257(3) 0 0.2417(3) 1. 0 0.92 
+O9 O 2 m 0.3971(3) 0 0.4790(3) 1. 0 0.93 
+O10 O 2 m 0.4032(2) 0 0.1497(3) 1. 0 0.74 
+O11 O 2 m 0.4624(3) 0 0.3833(3) 1. 0 1.07 
+O12 O 2 m 0.4611(2) 0 0.0382(2) 1. 0 0.4 
+O13 O 2 m 0.5344(2) 0 0.2954(3) 1. 0 0.85 
+O14 O 2 m 0.5898(2) 0 0.1959(2) 1. 0 0.63 
+O15 O 2 m 0.6701(2) 0 0.4306(2) 1. 0 0.65 
+O16 O 2 m 0.6707(2) 0 0.0961(2) 1. 0 0.36 
+O17 O 2 m 0.7411(2) 0 0.3357(2) 1. 0 0.46 
+O18 O 2 m 0.8858(2) 0 0.1341(2) 1. 0 0.49 
+O19 O 2 m 0.9412(2) 0 0.0303(2) 1. 0 0.68 
+O20 O 2 m 0.9638(3) 0 0.3798(3) 1. 0 0.97 
+O21 O 2 n 0.0608(2) 0.5 0.0837(3) 1. 0 0.91 
+O22 O 2 n 0.0668(2) 0.5 0.4051(3) 1. 0 0.89 
+O23 O 2 n 0.1327(2) 0.5 0.3122(2) 1. 0 0.67 
+O24 O 2 n 0.2062(2) 0.5 0.2184(2) 1. 0 0.45 
+O25 O 2 n 0.2764(2) 0.5 0.4504(2) 1. 0 0.44 
+O26 O 2 n 0.3551(2) 0.5 0.0113(2) 1. 0 0.44 
+O27 O 2 n 0.4275(3) 0.5 0.2616(3) 1. 0 0.87 
+O28 O 2 n 0.5855(2) 0.5 0.0884(2) 1. 0 0.44 
+O29 O 2 n 0.6535(2) 0.5 0.3176(2) 1. 0 0.39 
+O30 O 2 n 0.7263(2) 0.5 0.2257(3) 1. 0 0.69 
+O31 O 2 n 0.7987(2) 0.5 0.4577(3) 1. 0 0.78 
+O32 O 2 n 0.7917(2) 0.5 0.1318(3) 1. 0 0.73 
+O33 O 2 n 0.8613(3) 0.5 0.3614(3) 1. 0 0.95 
+O34 O 2 n 0.8474(2) 0.5 0.0283(2) 1. 0 0.46 
+O35 O 2 n 0.9280(2) 0.5 0.2664(3) 1. 0 0.83 
+O36 O 2 n -.0029(2) 0.5 0.1762(3) 1. 0 0.72 
+
+#End of data_2ICSD
+
+
