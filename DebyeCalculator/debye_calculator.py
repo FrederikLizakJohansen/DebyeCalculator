@@ -20,11 +20,11 @@ from ase.io import read, write
 from ase.build import make_supercell
 from ase.build.tools import sort as ase_sort
 
-from profiling import Profiler
+from utility.profiling import Profiler
 
 import ipywidgets as widgets
-from IPython.display import display, HTML, clear_output, Math
-from ipywidgets import interact, interact_manual, HBox, VBox, Layout
+from IPython.display import display, HTML, clear_output
+from ipywidgets import HBox, VBox, Layout
 from tqdm.auto import tqdm
 
 import collections
@@ -93,8 +93,6 @@ class DebyeCalculator:
         self.biso = biso
 
         # Initialise ranges
-        #self.q = torch.linspace(self.qmin, self.qmax-self.qstep, int((self.qmax+self.qstep) / self.qstep)).unsqueeze(-1).to(device=self.device)
-        #self.r = torch.linspace(self.rmin, self.rmax-self.rstep, int((self.rmax+self.rstep) / self.rstep)).unsqueeze(-1).to(device=self.device)
         self.q = torch.arange(self.qmin, self.qmax, self.qstep).unsqueeze(-1).to(device=self.device)
         self.r = torch.arange(self.rmin, self.rmax, self.rstep).unsqueeze(-1).to(device=self.device)
 
@@ -143,10 +141,6 @@ class DebyeCalculator:
             
         # Re-initialise ranges
         if np.any([k in ['qmin','qmax','qstep','rmin', 'rmax', 'rstep'] for k in kwargs.keys()]):
-            #self.q = torch.linspace(self.qmin, self.qmax-self.qstep, int(self.qmax / self.qstep)).unsqueeze(-1).to(device=self.device)
-            #self.r = torch.linspace(self.rmin, self.rmax-self.rstep, int(self.rmax / self.rstep)).unsqueeze(-1).to(device=self.device)
-            #self.q = torch.linspace(self.qmin, self.qmax-self.qstep, int((self.qmax+self.qstep) / self.qstep)).unsqueeze(-1).to(device=self.device)
-            #self.r = torch.linspace(self.rmin, self.rmax-self.rstep, int((self.rmax+self.rstep) / self.rstep)).unsqueeze(-1).to(device=self.device)
             self.q = torch.arange(self.qmin, self.qmax, self.qstep).unsqueeze(-1).to(device=self.device)
             self.r = torch.arange(self.rmin, self.rmax, self.rstep).unsqueeze(-1).to(device=self.device)
 
@@ -729,9 +723,9 @@ class DebyeCalculator:
         radiation_type = self.radiation_type
         profile = False
 
-        with open('images/choose_hardware.png', 'rb') as f:
+        with open('display_assets/choose_hardware.png', 'rb') as f:
             choose_hardware_img = f.read()
-        with open('images/batch_size.png', 'rb') as f:
+        with open('display_assets/batch_size.png', 'rb') as f:
             batch_size_img = f.read()
         
         """ Utility widgets """
@@ -742,16 +736,16 @@ class DebyeCalculator:
 
         """ File Selection Tab """
         
-        # Load diplay images
-        with open('images/enter_path.png', 'rb') as f:
+        # Load diplay display_assets
+        with open('display_assets/enter_path.png', 'rb') as f:
             enter_path_img = f.read()
-        with open('images/select_files.png', 'rb') as f:
+        with open('display_assets/select_files.png', 'rb') as f:
             select_files_img = f.read()
-        with open('images/radius_a.png', 'rb') as f:
+        with open('display_assets/radius_a.png', 'rb') as f:
             radius_a_img = f.read()
-        with open('images/file_1.png', 'rb') as f:
+        with open('display_assets/file_1.png', 'rb') as f:
             file_1_img = f.read()
-        with open('images/file_2.png', 'rb') as f:
+        with open('display_assets/file_2.png', 'rb') as f:
             file_2_img = f.read()
 
         # Layout
@@ -823,30 +817,30 @@ class DebyeCalculator:
         
         """ Scattering Options Tab """
 
-        # Load images
-        with open('images/qslider.png', 'rb') as f:
+        # Load display_assets
+        with open('display_assets/qslider.png', 'rb') as f:
             qslider_img = f.read()
-        with open('images/rslider.png', 'rb') as f:
+        with open('display_assets/rslider.png', 'rb') as f:
             rslider_img = f.read()
-        with open('images/qdamp.png', 'rb') as f:
+        with open('display_assets/qdamp.png', 'rb') as f:
             qdamp_img = f.read()
-        with open('images/global_biso.png', 'rb') as f:
+        with open('display_assets/global_biso.png', 'rb') as f:
             global_biso_img = f.read()
-        with open('images/a.png', 'rb') as f:
+        with open('display_assets/a.png', 'rb') as f:
             a_img = f.read()
-        with open('images/a_inv.png', 'rb') as f:
+        with open('display_assets/a_inv.png', 'rb') as f:
             a_inv_img = f.read()
-        with open('images/a_sq.png', 'rb') as f:
+        with open('display_assets/a_sq.png', 'rb') as f:
             a_sq_img = f.read()
-        with open('images/qstep.png', 'rb') as f:
+        with open('display_assets/qstep.png', 'rb') as f:
             qstep_img = f.read()
-        with open('images/rstep.png', 'rb') as f:
+        with open('display_assets/rstep.png', 'rb') as f:
             rstep_img = f.read()
-        with open('images/rthres.png', 'rb') as f:
+        with open('display_assets/rthres.png', 'rb') as f:
             rthres_img = f.read()
-        with open('images/radiation_type.png', 'rb') as f:
+        with open('display_assets/radiation_type.png', 'rb') as f:
             radiation_type_img = f.read()
-        with open('images/scattering_parameters.png', 'rb') as f:
+        with open('display_assets/scattering_parameters.png', 'rb') as f:
             scattering_parameters_img = f.read()
 
         # Radiation 
@@ -1011,20 +1005,20 @@ class DebyeCalculator:
 
         """ Plotting Options """
 
-        # Load display images
-        with open('images/iq_scaling.png', 'rb') as f:
+        # Load display display_assets
+        with open('display_assets/iq_scaling.png', 'rb') as f:
             iq_scaling_img = f.read()
-        with open('images/show_hide.png', 'rb') as f:
+        with open('display_assets/show_hide.png', 'rb') as f:
             show_hide_img = f.read()
-        with open('images/max_norm.png', 'rb') as f:
+        with open('display_assets/max_norm.png', 'rb') as f:
             max_norm_img = f.read()
-        with open('images/iq.png', 'rb') as f:
+        with open('display_assets/iq.png', 'rb') as f:
             iq_img = f.read()
-        with open('images/sq.png', 'rb') as f:
+        with open('display_assets/sq.png', 'rb') as f:
             sq_img = f.read()
-        with open('images/fq.png', 'rb') as f:
+        with open('display_assets/fq.png', 'rb') as f:
             fq_img = f.read()
-        with open('images/gr.png', 'rb') as f:
+        with open('display_assets/gr.png', 'rb') as f:
             gr_img = f.read()
         
         # Y-axis I(Q) scale button
