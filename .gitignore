@@ -4,5 +4,5 @@
 **/*output/
 
 figures/**/*.csv
-quickstart/**/*.csv
 
+*.psd

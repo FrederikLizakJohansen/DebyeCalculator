@@ -93,8 +93,10 @@ class DebyeCalculator:
         self.biso = biso
 
         # Initialise ranges
-        self.q = torch.linspace(self.qmin, self.qmax, int((self.qmax+self.qstep) / self.qstep)).unsqueeze(-1).to(device=self.device)
-        self.r = torch.linspace(self.rmin, self.rmax, int((self.rmax+self.rstep) / self.rstep)).unsqueeze(-1).to(device=self.device)
+        #self.q = torch.linspace(self.qmin, self.qmax-self.qstep, int((self.qmax+self.qstep) / self.qstep)).unsqueeze(-1).to(device=self.device)
+        #self.r = torch.linspace(self.rmin, self.rmax-self.rstep, int((self.rmax+self.rstep) / self.rstep)).unsqueeze(-1).to(device=self.device)
+        self.q = torch.arange(self.qmin, self.qmax, self.qstep).unsqueeze(-1).to(device=self.device)
+        self.r = torch.arange(self.rmin, self.rmax, self.rstep).unsqueeze(-1).to(device=self.device)
 
         # Form factor coefficients
         with open(pkg_resources.resource_filename(__name__, 'form_factor_coef.yaml'), 'r') as yaml_file:
@@ -141,8 +143,12 @@ class DebyeCalculator:
             
         # Re-initialise ranges
         if np.any([k in ['qmin','qmax','qstep','rmin', 'rmax', 'rstep'] for k in kwargs.keys()]):
-            self.q = torch.linspace(self.qmin, self.qmax, int((self.qmax+self.qstep) / self.qstep)).unsqueeze(-1).to(device=self.device)
-            self.r = torch.linspace(self.rmin, self.rmax, int((self.rmax+self.rstep) / self.rstep)).unsqueeze(-1).to(device=self.device)
+            #self.q = torch.linspace(self.qmin, self.qmax-self.qstep, int(self.qmax / self.qstep)).unsqueeze(-1).to(device=self.device)
+            #self.r = torch.linspace(self.rmin, self.rmax-self.rstep, int(self.rmax / self.rstep)).unsqueeze(-1).to(device=self.device)
+            #self.q = torch.linspace(self.qmin, self.qmax-self.qstep, int((self.qmax+self.qstep) / self.qstep)).unsqueeze(-1).to(device=self.device)
+            #self.r = torch.linspace(self.rmin, self.rmax-self.rstep, int((self.rmax+self.rstep) / self.rstep)).unsqueeze(-1).to(device=self.device)
+            self.q = torch.arange(self.qmin, self.qmax, self.qstep).unsqueeze(-1).to(device=self.device)
+            self.r = torch.arange(self.rmin, self.rmax, self.rstep).unsqueeze(-1).to(device=self.device)
 
     def _initialise_structures(
         self,
