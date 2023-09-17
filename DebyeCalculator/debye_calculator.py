@@ -1437,14 +1437,14 @@ class DebyeCalculator:
 
             num_plots = int(show_iq_button.value) + int(show_sq_button.value) + int(show_fq_button.value) + int(show_gr_button.value) 
             if num_plots == 4:
-                fig, axs = plt.subplots(2,2,figsize=(12, 8), dpi=75)
+                fig, axs = plt.subplots(2,2,figsize=(12*1.2, 8*1.2), dpi=75)
                 axs = axs.ravel()
             elif num_plots == 3:
-                fig, axs = plt.subplots(3,1,figsize=(12,8), dpi=75)
+                fig, axs = plt.subplots(3,1,figsize=(12*1.2,8*1.2), dpi=75)
             elif num_plots == 2:
-                fig, axs = plt.subplots(2,1,figsize=(12,8), dpi=75)
+                fig, axs = plt.subplots(2,1,figsize=(12*1.2,8*1.2), dpi=75)
             elif num_plots == 1:
-                fig, axs = plt.subplots(figsize=(12,8), dpi=75)
+                fig, axs = plt.subplots(figsize=(12*1.2,8*1.2), dpi=75)
                 axs = [axs]
             else:
                 return
