@@ -2,7 +2,5 @@
 **/.ipynb_checkpoints/
 **/__pycache__/
 **/*output/
-
-figures/**/*.csv
-
-*.psd
+local/
+tests/local_timings/
