@@ -103,6 +103,6 @@ This work is part of a project that has received funding from the European Resea
 
 # Supporting Information
 
-![Comparison of the calculated I(Q), SAXS, F(Q) and G(r) of DebyeCalculator and DiffPy-CMI[@juhas2015complex] on a synthetic crystallographic information file describing a CoO~2~ antifluorite crystal structure.[@CIF] Note that the scattering pattern simulated with DiffPy-CMI is hidden underneath the scattering pattern simulated with DebyeCalculator.\label{fig:figure_S1}](../figures/figure_S1.png)
+![Comparison of the calculated I(Q), SAXS, F(Q) and G(r) of DebyeCalculator and DiffPy-CMI[@juhas2015complex] on a discrete spherical cutout with 6 Å in radius from a V~0.985~Al~0.015O2~ crystal.[@GHEDIRA1977423].\label{fig:figure_S1}](../figures/figure_S1.png)
 
 # References

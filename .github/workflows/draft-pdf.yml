@@ -23,7 +23,7 @@ jobs:
           # paper.md
           path: paper/paper.pdf
       ### Cannot autosave PDF probably because it is a private rep. ###
-      #- name: save pdf to repo
-      #  uses: stefanzweifel/git-auto-commit-action@v4
-      #  with:
-      #    commit_message: Saved new PDF of paper
+      - name: save pdf to repo
+        uses: stefanzweifel/git-auto-commit-action@v4
+        with:
+          commit_message: Saved new PDF of paper
