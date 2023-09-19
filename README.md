@@ -1,7 +1,7 @@
 [ChemRxiv]  |  [Paper]
 
 # DebyeCalculator
-Welcome to DebyeCalculator! This is a simple tool for calculating the scattering intensity I(q) through the Debye scattering equation, the Total Scattering Structure Function S(q), the Reduced Total Scattering Function F(q), and the Reduced Atomic Pair Distribution Function G(r) from an atomic structure. 
+Welcome to `DebyeCalculator`! This is a simple tool for calculating the scattering intensity $I(Q)$ through the Debye scattering equation, the Total Scattering Structure Function $S(Q)$, the Reduced Total Scattering Function $F(Q)$, and the Reduced Atomic Pair Distribution Function $G(r)$ from an atomic structure. 
 The Debye scattering equation can be used to compute the scattering pattern of any atomic structure and is commonly used to study both crystalline and non-crystalline materials with a range of scattering techniques like powder diffraction (PD), total scattering (TS) with pair distribution function (PDF) and small-angle scattering (SAS). Although the Debye scattering equation is extremely versatile, its applicability has been limited to smaller atomic structures because of the computation of the double sum scales as O(n<sup>2</sup>) with the number of atoms.
 However, here we provide an optimised code for the calculation of the Debye scattering equation on Graphics processing units (GPUs) which accelerate the calculations with orders of magnitudes.
 
@@ -14,7 +14,8 @@ However, here we provide an optimised code for the calculation of the Debye scat
 
 # Usage
 
-## Google Colab
+## Interactive mode at Google Colab
+Follow the instructions in our [Interactive Colab notebook](https://github.com/FrederikLizakJohansen/DebyeCalculator/blob/main/InteractiveMode_Colab.ipynb) and try to play around. 
 
 ## Install locally
 
@@ -81,7 +82,7 @@ If you use our code or our results, please consider citing our paper. Thanks in 
 
 ```
 @article{Johansen_anker2023debye,
-title={A GPU-Accelerated Open-Source Python Package for Rapid Calculation of the Debye Scattering Equation: Applications in Small-Angle Scattering, Powder diffraction, and Total Scattering with Pair Distribution Function Analysis},
+title={A GPU-Accelerated Open-Source Python Package for Calculating the Debye Scattering Equation: Applications in Powder diffraction, Small-Angle-, and Total Scattering},
 author={Frederik L. Johansen, Andy S. Anker, Ulrik Friis-Jensen, Erik B. Dam, Kirsten M. Ø. Jensen, Raghavendra Selvan},
 journal={XXXX}
 year={2023}}
