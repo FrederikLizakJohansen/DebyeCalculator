@@ -2,11 +2,11 @@
 
 # DebyeCalculator
 Welcome to `DebyeCalculator`! This is a simple tool for calculating the scattering intensity $I(Q)$ through the Debye scattering equation, the Total Scattering Structure Function $S(Q)$, the Reduced Total Scattering Function $F(Q)$, and the Reduced Atomic Pair Distribution Function $G(r)$ from an atomic structure. 
-The Debye scattering equation can be used to compute the scattering pattern of any atomic structure and is commonly used to study both crystalline and non-crystalline materials with a range of scattering techniques like powder diffraction (PD), total scattering (TS) with pair distribution function (PDF) and small-angle scattering (SAS). Although the Debye scattering equation is extremely versatile, its applicability has been limited to smaller atomic structures because of the computation of the double sum scales as O(n<sup>2</sup>) with the number of atoms.
-However, here we provide an optimised code for the calculation of the Debye scattering equation on Graphics processing units (GPUs) which accelerate the calculations with orders of magnitudes.
+The Debye scattering equation can be used to compute the scattering pattern of any atomic structure and is commonly used to study both crystalline and non-crystalline materials with a range of scattering techniques like powder diffraction, total scattering with pair distribution function and small-angle scattering. Although the Debye scattering equation is extremely versatile, the computation of the double sum, which scales O(n<sup>2</sup>), has limited the practical use of the equation.
+Here, we provide an optimised code for the calculation of the Debye scattering equation on Graphics processing units (GPUs) which accelerate the calculations with orders of magnitudes.
 
 1. [Usage](#usage)
-    1. [Google Colab](#google-colab)
+    1. [Google Colab](#interactive-mode-at-google-colab)
     2. [Install locally](#install-locally)
 2. [Authors](#authors)
 3. [Cite](#cite)
@@ -15,7 +15,7 @@ However, here we provide an optimised code for the calculation of the Debye scat
 # Usage
 
 ## Interactive mode at Google Colab
-Follow the instructions in our [Interactive Colab notebook](https://github.com/FrederikLizakJohansen/DebyeCalculator/blob/main/InteractiveMode_Colab.ipynb) and try to play around. 
+Follow the instructions in our [Interactive Google Colab notebook](https://github.com/FrederikLizakJohansen/DebyeCalculator/blob/main/InteractiveMode_Colab.ipynb) and try to play around. 
 
 ## Install locally
 
