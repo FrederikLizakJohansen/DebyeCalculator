@@ -1472,10 +1472,6 @@ class DebyeCalculator:
         def update_parameters(b=None):
             global debye_outputs
 
-            # Clear and display
-            clear_output(wait=True)
-            display_tabs()
-
             debye_outputs = []
             for select_file, select_radius in zip([select_file_1, select_file_2], [select_radius_1, select_radius_2]):
                 try:
@@ -1484,6 +1480,7 @@ class DebyeCalculator:
                     return
                 if (select_file.value is not None) and (select_file.value not in [DEFAULT_MSGS]) and (path_ext in ['xyz', 'cif']):
                     try:
+                        # TODO if not changed, dont make new object
                         debye_calc = DebyeCalculator(
                             device=hardware_button.value, 
                             batch_size=batch_size_box.value,
@@ -1504,6 +1501,10 @@ class DebyeCalculator:
                         debye_outputs.append(debye_calc._get_all(select_file.value, select_radius.value))
                     except Exception as e:
                         print(f'FAILED: Could not load data file: {path}', end='\r')
+
+            # Clear and display
+            clear_output(wait=True)
+            display_tabs()
 
             if len(debye_outputs) < 1:
                 print('FAILED: Please select data file(s)', end="\r")
