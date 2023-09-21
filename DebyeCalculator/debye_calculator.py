@@ -63,7 +63,7 @@ class DebyeCalculator:
         rstep: float = 0.01,
         rthres: float = 0.0,
         biso: float = 0.3,
-        device: str = 'cpu',
+        device: str = 'cuda' if torch.cuda.is_available() else 'cpu',
         batch_size: Union[int, None] = 10000,
         lorch_mod: bool = False,
         radiation_type: str = 'xray',
