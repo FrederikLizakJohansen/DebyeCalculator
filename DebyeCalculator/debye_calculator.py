@@ -1001,6 +1001,7 @@ class DebyeCalculator:
                 # Unit
                 HBox([widgets.Image(value=a_img, format='png', layout=Layout(object_fit='contain', width=a_width, visibility='hidden'))], layout=Layout(width='50px')),
             ]),
+
         ])
 
         """ Plotting Options """
@@ -1008,6 +1009,8 @@ class DebyeCalculator:
         # Load display display_assets
         with open('display_assets/iq_scaling.png', 'rb') as f:
             iq_scaling_img = f.read()
+        with open('display_assets/sas_preset.png', 'rb') as f:
+            sas_preset_img = f.read()
         with open('display_assets/show_hide.png', 'rb') as f:
             show_hide_img = f.read()
         with open('display_assets/max_norm.png', 'rb') as f:
@@ -1022,7 +1025,14 @@ class DebyeCalculator:
             gr_img = f.read()
         
         # Y-axis I(Q) scale button
-        scale_type_button = widgets.ToggleButtons( options=['linear', 'logarithmic'], value='linear', button_style='info')
+        scale_type_button = widgets.ToggleButtons( options=['linear', 'logarithmic'], value='linear', button_style='info', layout=Layout(width='600'))
+        
+        # SAS preset button
+        sas_preset_button = widgets.Button(
+            description = 'SAS preset',
+            layout=Layout(width='300px'),
+            button_style='info',
+        )
 
         # Show/Hide buttons
         show_iq_button = widgets.Checkbox(value = True)
@@ -1040,21 +1050,24 @@ class DebyeCalculator:
         function_offset = '-90px 3px'
         function_size = 35
         header_scale = 0.95
-        header_widths = [130, 120, 147]
+        header_widths = [130, 85, 120, 147]
         header_widths = [str(i * header_scale)+'px' for i in header_widths]
 
         # Plotting tab 
         plotting_tab = VBox([
             # I(Q) scaling img
             widgets.Image(value=iq_scaling_img, format='png', layout=Layout(object_fit='contain', width=header_widths[0])),
-            
-            # Scale button
             scale_type_button,
+            
+            spacing_10px,
 
+            widgets.Image(value=sas_preset_img, format='png', layout=Layout(object_fit='contain', width=header_widths[1])),
+            sas_preset_button,
+            
             spacing_10px,
             
             # Show / Hide img
-            widgets.Image(value=show_hide_img, format='png', layout=Layout(object_fit='contain', width=header_widths[1])),
+            widgets.Image(value=show_hide_img, format='png', layout=Layout(object_fit='contain', width=header_widths[2])),
             
             # Options
             HBox([
@@ -1067,7 +1080,7 @@ class DebyeCalculator:
             spacing_10px,
 
             # Max normalization img
-            widgets.Image(value=max_norm_img, format='png', layout=Layout(object_fit='contain', width=header_widths[2])),
+            widgets.Image(value=max_norm_img, format='png', layout=Layout(object_fit='contain', width=header_widths[3])),
 
             # Options
             HBox([
@@ -1357,7 +1370,20 @@ class DebyeCalculator:
         
 
         """ Plotting utility """
-        
+
+        @sas_preset_button.on_click
+        def sas_preset(b=None):
+            # Change scale type
+            scale_type_button.value = 'logarithmic'
+
+            # Hide all but IQ
+            show_fq_button.value = False
+            show_sq_button.value = False
+            show_gr_button.value = False
+
+            # Set qmin and qmax
+            qslider.value = [0.0, 3.0]
+
         def update_figure(debye_outputs, _unity_sq=True):
 
             xseries, yseries = [], []
@@ -1437,14 +1463,14 @@ class DebyeCalculator:
 
             num_plots = int(show_iq_button.value) + int(show_sq_button.value) + int(show_fq_button.value) + int(show_gr_button.value) 
             if num_plots == 4:
-                fig, axs = plt.subplots(2,2,figsize=(12*1.2, 8*1.2), dpi=75)
+                fig, axs = plt.subplots(2,2,figsize=(12, 8), dpi=75)
                 axs = axs.ravel()
             elif num_plots == 3:
-                fig, axs = plt.subplots(3,1,figsize=(12*1.2,8*1.2), dpi=75)
+                fig, axs = plt.subplots(3,1,figsize=(12,8), dpi=75)
             elif num_plots == 2:
-                fig, axs = plt.subplots(2,1,figsize=(12*1.2,8*1.2), dpi=75)
+                fig, axs = plt.subplots(2,1,figsize=(12,8), dpi=75)
             elif num_plots == 1:
-                fig, axs = plt.subplots(figsize=(12*1.2,8*1.2), dpi=75)
+                fig, axs = plt.subplots(figsize=(12,6), dpi=75)
                 axs = [axs]
             else:
                 return
@@ -1458,7 +1484,7 @@ class DebyeCalculator:
                 axs[ii].set(xlabel=xl, ylabel=yl, title=t)
                 axs[ii].relim()
                 axs[ii].autoscale_view()
-                axs[ii].grid(alpha=0.2)
+                axs[ii].grid(alpha=0.2, which='both')
                 axs[ii].legend()
 
             if len(sup_title) == 1:
