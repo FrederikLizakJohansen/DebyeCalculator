@@ -850,7 +850,7 @@ class DebyeCalculator:
             options=['xray', 'neutron'],
             value=radiation_type,
             layout = Layout(width='800px'),
-            button_style='info'
+            button_style='primary'
         )
 
         # Q value slider
@@ -913,28 +913,28 @@ class DebyeCalculator:
             value=lorch_mod,
             description='Lorch mod.',
             layout=Layout(width='250px'),
-            button_style='info',
+            button_style='primary',
         )
         
         # SAS preset button
         sas_preset_button = widgets.Button(
             description = 'Small Angle Scattering preset',
             layout=Layout(width='300px'),
-            button_style='info',
+            button_style='primary',
         )
 
         # Powder diffraction preset
         pd_preset_button = widgets.Button(
             description = 'Powder Diffraction preset',
             layout=Layout(width='300px'),
-            button_style='info',
+            button_style='primary',
         )
         
         # Total scattering preset
         ts_preset_button = widgets.Button(
             description = 'Total Scattering preset',
             layout=Layout(width='300px'),
-            button_style='info',
+            button_style='primary',
         )
         
         # Total scattering preset
@@ -1036,10 +1036,7 @@ class DebyeCalculator:
 
             # Presets
             widgets.Image(value=presets_img, format='png', layout=Layout(object_fit='contain', width=header_widths[2])),
-            sas_preset_button,
-            pd_preset_button,
-            ts_preset_button,
-            reset_button,
+            HBox([sas_preset_button, pd_preset_button, ts_preset_button, reset_button]),
         ])
 
         """ Plotting Options """
@@ -1061,7 +1058,7 @@ class DebyeCalculator:
             gr_img = f.read()
         
         # Y-axis I(Q) scale button
-        scale_type_button = widgets.ToggleButtons( options=['linear', 'logarithmic'], value='linear', button_style='info', layout=Layout(width='600'))
+        scale_type_button = widgets.ToggleButtons( options=['linear', 'logarithmic'], value='linear', button_style='primary', layout=Layout(width='600'))
 
         # Show/Hide buttons
         show_iq_button = widgets.Checkbox(value = True)
@@ -1119,7 +1116,7 @@ class DebyeCalculator:
         """ Hardware Options Tab """
 
         # Hardware button
-        hardware_button = widgets.ToggleButtons(options=['cpu', 'cuda'], value=device, button_style='info')
+        hardware_button = widgets.ToggleButtons(options=['cpu', 'cuda'], value=device, button_style='primary')
 
         # Distance batch-size box
         batch_size_box = widgets.IntText(min = 100, max = 10000, value=batch_size)
@@ -1164,8 +1161,8 @@ class DebyeCalculator:
         tabs.set_title(3, 'Hardware Options')
         
         # Plot button and Download buttons
-        plot_button = widgets.Button(description='Plot data', layout=Layout(width='50%', height='90%'), button_style='info')
-        download_button = widgets.Button(description="Download- and plot data", layout=Layout(width='50%', height='90%'), button_style='danger')
+        plot_button = widgets.Button(description='Plot data', layout=Layout(width='50%', height='90%'), button_style='primary', icon='fa-pencil-square-o')
+        download_button = widgets.Button(description="Download- and plot data", layout=Layout(width='50%', height='90%'), button_style='success', icon='fa-download')
         
         def display_tabs():
             display(VBox([tabs, HBox([plot_button, download_button], layout=Layout(width='100%', height='50px'))]))
@@ -1423,7 +1420,7 @@ class DebyeCalculator:
 
             # Set qmin and qmax
             qslider.value = [1.0, 8.0]
-            qstep_box.valeu = 0.1
+            qstep_box.value = 0.1
         
         @ts_preset_button.on_click
         def ts_preset(b=None):
@@ -1431,8 +1428,8 @@ class DebyeCalculator:
             scale_type_button.value = 'linear'
 
             # Hide all but IQ
-            show_iq_button.value = False
-            show_fq_button.value = False
+            show_iq_button.value = True
+            show_fq_button.value = True
             show_sq_button.value = False
             show_gr_button.value = True
 
