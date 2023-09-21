@@ -6,7 +6,7 @@ The Debye scattering equation can be used to compute the scattering pattern of a
 Here, we provide an optimised code for the calculation of the Debye scattering equation on Graphics processing units (GPUs) which accelerate the calculations with orders of magnitudes.
 
 1. [Usage](#usage)
-    1. [Google Colab](#interactive-mode-at-google-colab)
+    1. [Interactive mode](#interactive-mode-at-google-colab)
     2. [Install locally](#install-locally)
 2. [Authors](#authors)
 3. [Cite](#cite)
@@ -26,46 +26,13 @@ pip install .
 or
 python setup.py install
 ```
-<!---
+
 To verify that __DebyeCalculator__ have been installed properly, try calling the help argument.
 ```
 DebyeCalculator --help
-
->>> usage: POMFinder [-h] -d DATA [-n NYQUIST] [-i QMIN] [-a QMAX] [-m QDAMP] [-f FILE_NAME]       
->>> 
->>> This is a package which takes a directory of PDF files 
->>> or a specific PDF file. It then determines the best structural 
->>> candidates based of a polyoxometalate catalog. Results can
->>> be fitted to the PDF. 
 ```  
-This should output a list of possible arguments for running __DebyeCalculator__ and indicates that it could find the package! 
+This should output a list of possible arguments for running __DebyeCalculator__ and indicate that it could find the package! 
 
-# Usage
-Now that __DebyeCalculator__ is installed and ready to use, let's discuss the possible arguments. The arguments are described in 
-greater detail at the end of this section.
-
-| Arg | Description | Default |  
-| --- | --- |  --- |  
-|  | __Required argument__ | | 
-| `-h` or `--help` | Prints help message. |    
-| `-n` or `--nyquist` | Is the data nyquist sampled. __bool__ | `-n True`
-| `-i` or `--Qmin` | Qmin value of the experimental PDF. __float__ | `-i 0.7` 
-| `-a` or `--Qmax` | Qmax value of the experimental PDF. __float__ | `-a 30` 
-| `-m` or `--Qdamp` | Qdamp value of the experimental PDF. __float__ | `-m 0.04`
-| `-f` or `--file_name` | Name of the output file. __str__ | `-o ''` 
-| `-d` or `--data` | A directory of PDFs or a specific PDF file. __str__ | `-d 5` 
-
-For example
-```  
-POMFinder --data "Experimental_Data/DanMAX_AlphaKeggin.gr" --nyquist "no" --Qmin 0.7 --Qmax 20 --Qdamp 0.02
-
->>> The 1st guess from the model is:  icsd_427457_1_0.9rscale.xyz
->>> The 2nd guess from the model is:  icsd_427379_0_0.9rscale.xyz
->>> The 3rd guess from the model is:  icsd_281447_0_1.0rscale.xyz
->>> The 4th guess from the model is:  icsd_423775_0_0.9rscale.xyz
->>> The 5th guess from the model is:  icsd_172542_0_1.1rscale.xyz
- -->
-```  
 # Authors
 __Frederik L. Johansen__<sup>1</sup><sup>, 2</sup>   
 __Andy S. Anker__<sup>1</sup>   
