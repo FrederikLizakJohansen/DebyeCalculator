@@ -860,7 +860,7 @@ class DebyeCalculator:
             orientation='horizontal',
             readout=True,
             style={'font_weight':'bold', 'slider_color': 'white', 'description_width': '100px'},
-            layout = widgets.Layout(width='700px'),
+            layout = widgets.Layout(width='80%'),
         )
 
         # r value slider
@@ -870,48 +870,48 @@ class DebyeCalculator:
             orientation='horizontal',
             readout=True,
             style={'font_weight':'bold', 'slider_color': 'white', 'description_width': '100px'},
-            layout = widgets.Layout(width='700px'),
+            layout = widgets.Layout(width='80%'),
         )
 
-        # Qdamp slider
-        qdamp_slider = widgets.FloatSlider(
-            value=qdamp, 
+        # Qdamp box
+        qdamp_box = widgets.FloatText(
             min=0.00,max=0.10, step=0.01,
-            layout = widgets.Layout(width='700px'),
+            value=qdamp, 
+            layout = widgets.Layout(width='50px'),
         )
 
-        # B iso slider
-        biso_slider = widgets.FloatSlider(
-            value=biso,
+        # B iso box
+        biso_box = widgets.FloatText(
             min=0.00, max=1.00, step=0.01,
-            layout = widgets.Layout(width='700px'),
+            value=biso,
+            layout = widgets.Layout(width='50px'),
         )
 
         # Qstep box
         qstep_box = widgets.FloatText(
             min = 0.001, max = 1, step=0.001,
             value=qstep,
-            layout=Layout(width='200px'),
+            layout=Layout(width='50px'),
         )
 
         # rstep box
         rstep_box = widgets.FloatText(
             min = 0.001, max = 1, step=0.001,
             value=rstep,
-            layout=Layout(width='200px'),
+            layout=Layout(width='50px'),
         )
 
         # rthreshold box
         rthres_box = widgets.FloatText(
             min = 0.001, max = 1, step=0.001,
             value=rthres,
-            layout=Layout(width='200px'),
+            layout=Layout(width='50px'),
         )
 
         # Lorch modification button
         lorch_mod_button = widgets.ToggleButton(
             value=lorch_mod,
-            description='Lorch mod.',
+            description='Lorch modification (OFF)',
             layout=Layout(width='250px'),
             button_style='primary',
         )
@@ -965,17 +965,11 @@ class DebyeCalculator:
             # Q slider
             HBox([
                 # Q slider img
-                HBox([widgets.Image(value=qslider_img, format='png', layout=Layout(object_fit='contain', width='90px'))], layout=Layout(width='200px')),
+                HBox([widgets.Image(value=qslider_img, format='png', layout=Layout(object_fit='contain', width='120px'))], layout=Layout(width='150px')),
                 # Q slider
                 qslider,
                 # Unit
-                HBox([widgets.Image(value=a_inv_img, format='png', layout=Layout(object_fit='contain', width=a_inv_width))], layout=Layout(width='50px')),
-                # Qstep img
-                HBox([widgets.Image(value=qstep_img, format='png', layout=Layout(object_fit='contain', object_position='80px 5px', width='40px'))], layout=Layout(width='200px')),
-                # Qstep box
-                qstep_box, 
-                # Unit
-                HBox([widgets.Image(value=a_inv_img, format='png', layout=Layout(object_fit='contain', width=a_inv_width))], layout=Layout(width='50px')),
+                #¤HBox([widgets.Image(value=a_inv_img, format='png', layout=Layout(object_fit='contain', width=a_inv_width))], layout=Layout(width='50px')),
             ]),
 
             spacing_5px,
@@ -983,49 +977,61 @@ class DebyeCalculator:
             # r slider
             HBox([
                 # r slider img
-                HBox([widgets.Image(value=rslider_img, format='png', layout=Layout(object_fit='contain', width='85px'))], layout=Layout(width='200px')),
+                HBox([widgets.Image(value=rslider_img, format='png', layout=Layout(object_fit='contain', width='110px'))], layout=Layout(width='150px')),
                 # r slider
                 rslider, 
                 # Unit
-                HBox([widgets.Image(value=a_img, format='png', layout=Layout(object_fit='contain', width=a_width))], layout=Layout(width='50px')),
-                # r step img
-                HBox([widgets.Image(value=rstep_img, format='png', layout=Layout(object_fit='contain', object_position='80px 5px', width='35px'))], layout=Layout(width='200px')),
-                # r step box
-                rstep_box,
-                # Unit
-                HBox([widgets.Image(value=a_img, format='png', layout=Layout(object_fit='contain', width=a_width))], layout=Layout(width='50px')),
+                #HBox([widgets.Image(value=a_img, format='png', layout=Layout(object_fit='contain', width=a_width))], layout=Layout(width='50px')),
             ]),
 
             spacing_5px,
 
-            # Q damp
+            # Other
             HBox([
-                # Q damp img
-                HBox([widgets.Image(value=qdamp_img, format='png', layout=Layout(object_fit='contain', width='40px'))], layout=Layout(width='200px')),
-                # Q damp slider
-                qdamp_slider,
+                # Qstep img
+                HBox([widgets.Image(value=qstep_img, format='png', layout=Layout(object_fit='contain', object_position='', width='65px'))], layout=Layout(width='75px')),
+                # Qstep box
+                qstep_box, 
                 # Unit
-                HBox([widgets.Image(value=a_inv_img, format='png', layout=Layout(object_fit='contain', width=a_inv_width))], layout=Layout(width='50px')),
+                #HBox([widgets.Image(value=a_inv_img, format='png', layout=Layout(object_fit='contain', width=a_inv_width))], layout=Layout(width='50px')),
+                
+                # r step img
+                widgets.Text(description='', layout=Layout(visibility='hidden', width='60px'), disabled=True),
+                HBox([widgets.Image(value=rstep_img, format='png', layout=Layout(object_fit='contain', object_position='', width='55px'))], layout=Layout(width='65px')),
+                # r step box
+                rstep_box,
+                # Unit
+                #HBox([widgets.Image(value=a_img, format='png', layout=Layout(object_fit='contain', width=a_width))], layout=Layout(width='50px')),
+
+                # Q damp img
+                widgets.Text(description='', layout=Layout(visibility='hidden', width='60px'), disabled=True),
+                HBox([widgets.Image(value=qdamp_img, format='png', layout=Layout(object_fit='contain', object_position='', width='75px'))], layout=Layout(width='85px')),
+                # Q damp box
+                qdamp_box,
+                # Unit
+                #HBox([widgets.Image(value=a_inv_img, format='png', layout=Layout(object_fit='contain', width=a_inv_width))], layout=Layout(width='80px')),
+
                 # r thres img
-                HBox([widgets.Image(value=rthres_img, format='png', layout=Layout(object_fit='contain', object_position='80px 5px', width='40px'))], layout=Layout(width='200px')),
+                widgets.Text(description='', layout=Layout(visibility='hidden', width='60px'), disabled=True),
+                HBox([widgets.Image(value=rthres_img, format='png', layout=Layout(object_fit='contain', object_position='', width='55px'))], layout=Layout(width='65px')),
                 # r thres
                 rthres_box,
                 # Unit
-                HBox([widgets.Image(value=a_img, format='png', layout=Layout(object_fit='contain', width=a_width))], layout=Layout(width='50px')),
+                #HBox([widgets.Image(value=a_img, format='png', layout=Layout(object_fit='contain', width=a_width))], layout=Layout(width='50px')),
+                
+                # Global B iso img
+                widgets.Text(description='', layout=Layout(visibility='hidden', width='60px'), disabled=True),
+                HBox([widgets.Image(value=global_biso_img, format='png', layout=Layout(object_fit='contain', object_position='', width='95px'))], layout=Layout(width='105px')),
+                # Global B iso box
+                biso_box,
+                # Unit
+                #HBox([widgets.Image(value=a_sq_img, format='png', layout=Layout(object_fit='contain', width=a_sq_width))], layout=Layout(width='50px')),
             ]),
             
             spacing_5px,
 
             # Global B iso
             HBox([
-                # Global B iso img
-                HBox([widgets.Image(value=global_biso_img, format='png', layout=Layout(object_fit='contain', width='80px'))], layout=Layout(width='200px')),
-                # Global B iso slider
-                biso_slider, 
-                # Unit
-                HBox([widgets.Image(value=a_sq_img, format='png', layout=Layout(object_fit='contain', width=a_sq_width))], layout=Layout(width='50px')),
-                # r hres (hidden)
-                HBox([widgets.Image(value=rthres_img, format='png', layout=Layout(object_fit='contain', object_position='80px 5px', width='40px', visibility='hidden'))], layout=Layout(width='200px')),
                 # Lorch mod button
                 lorch_mod_button, 
                 # Unit
@@ -1177,13 +1183,13 @@ class DebyeCalculator:
             metadata ={
                 'qmin': qslider.value[0],
                 'qmax': qslider.value[1],
-                'qdamp': qdamp_slider.value,
+                'qdamp': qdamp_box.value,
                 'qstep': qstep_box.value,
                 'rmin': rslider.value[0], 
                 'rmax': rslider.value[1],
                 'rstep': rstep_box.value, 
                 'rthres': rthres_box.value,
-                'biso': biso_slider.value,
+                'biso': biso_box.value,
                 'device': hardware_button.value,
                 'batch_size': batch_size_box.value, 
                 'lorch_mod': lorch_mod_button.value,
@@ -1279,12 +1285,12 @@ class DebyeCalculator:
                                 qmin=qslider.value[0], 
                                 qmax=qslider.value[1], 
                                 qstep=qstep_box.value, 
-                                qdamp=qdamp_slider.value,
+                                qdamp=qdamp_box.value,
                                 rmin=rslider.value[0],
                                 rmax=rslider.value[1], 
                                 rstep=rstep_box.value, 
                                 rthres=rthres_box.value, 
-                                biso=biso_slider.value,
+                                biso=biso_box.value,
                                 lorch_mod=lorch_mod_button.value
                             )
                             if (select_radius.layout.visibility != 'hidden') and (select_radius.value > 8):
@@ -1392,6 +1398,14 @@ class DebyeCalculator:
 
         """ Plotting utility """
 
+        def togglelorch(change):
+            if change['new']:
+                lorch_mod_button.description = 'Lorch modification (ON)'
+            else:
+                lorch_mod_button.description = 'Lorch modification (OFF)'
+
+        lorch_mod_button.observe(togglelorch, 'value')
+
         @sas_preset_button.on_click
         def sas_preset(b=None):
             # Change scale type
@@ -1453,8 +1467,8 @@ class DebyeCalculator:
             rslider.value = [0.0, 20.0]
             qstep_box.value = 0.1
             rstep_box.value = 0.01
-            biso_slider.value = 0.3
-            qdamp_slider.value = 0.04
+            biso_box.value = 0.3
+            qdamp_box.value = 0.04
             rthres_box.value = 0.0
 
         def update_figure(debye_outputs, _unity_sq=True):
@@ -1587,12 +1601,12 @@ class DebyeCalculator:
                             qmin=qslider.value[0], 
                             qmax=qslider.value[1], 
                             qstep=qstep_box.value, 
-                            qdamp=qdamp_slider.value,
+                            qdamp=qdamp_box.value,
                             rmin=rslider.value[0],
                             rmax=rslider.value[1], 
                             rstep=rstep_box.value, 
                             rthres=rthres_box.value, 
-                            biso=biso_slider.value,
+                            biso=biso_box.value,
                             lorch_mod=lorch_mod_button.value
                         )
                         if not select_radius.disabled and select_radius.value > 8:
