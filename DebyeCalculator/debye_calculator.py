@@ -918,7 +918,7 @@ class DebyeCalculator:
         
         # SAS preset button
         sas_preset_button = widgets.Button(
-            description = 'SAS preset',
+            description = 'Small Angle Scattering preset',
             layout=Layout(width='300px'),
             button_style='info',
         )
