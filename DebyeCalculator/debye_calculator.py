@@ -56,7 +56,7 @@ class DebyeCalculator:
         self,
         qmin: float = 1.0,
         qmax: float = 30.0,
-        qstep: float = 0.01,
+        qstep: float = 0.1,
         qdamp: float = 0.04,
         rmin: float = 0.0,
         rmax: float = 20.0,
@@ -842,6 +842,8 @@ class DebyeCalculator:
             radiation_type_img = f.read()
         with open('display_assets/scattering_parameters.png', 'rb') as f:
             scattering_parameters_img = f.read()
+        with open('display_assets/presets.png', 'rb') as f:
+            presets_img = f.read()
 
         # Radiation 
         radtype_button = widgets.ToggleButtons(
@@ -913,9 +915,37 @@ class DebyeCalculator:
             layout=Layout(width='250px'),
             button_style='info',
         )
+        
+        # SAS preset button
+        sas_preset_button = widgets.Button(
+            description = 'SAS preset',
+            layout=Layout(width='300px'),
+            button_style='info',
+        )
+
+        # Powder diffraction preset
+        pd_preset_button = widgets.Button(
+            description = 'Powder Diffraction preset',
+            layout=Layout(width='300px'),
+            button_style='info',
+        )
+        
+        # Total scattering preset
+        ts_preset_button = widgets.Button(
+            description = 'Total Scattering preset',
+            layout=Layout(width='300px'),
+            button_style='info',
+        )
+        
+        # Total scattering preset
+        reset_button = widgets.Button(
+            description = 'Reset scattering options',
+            layout=Layout(width='300px'),
+            button_style='danger',
+        )
 
         # Scattering Tab sizes
-        header_widths = [90*1.15, 135*1.15]
+        header_widths = [90*1.15, 135*1.15, 110*1.15]
         header_widths = [str(i)+'px' for i in header_widths]
         a_inv_width = '27px'
         a_width = '12px'
@@ -1002,6 +1032,14 @@ class DebyeCalculator:
                 HBox([widgets.Image(value=a_img, format='png', layout=Layout(object_fit='contain', width=a_width, visibility='hidden'))], layout=Layout(width='50px')),
             ]),
 
+            spacing_10px,
+
+            # Presets
+            widgets.Image(value=presets_img, format='png', layout=Layout(object_fit='contain', width=header_widths[2])),
+            sas_preset_button,
+            pd_preset_button,
+            ts_preset_button,
+            reset_button,
         ])
 
         """ Plotting Options """
@@ -1009,8 +1047,6 @@ class DebyeCalculator:
         # Load display display_assets
         with open('display_assets/iq_scaling.png', 'rb') as f:
             iq_scaling_img = f.read()
-        with open('display_assets/sas_preset.png', 'rb') as f:
-            sas_preset_img = f.read()
         with open('display_assets/show_hide.png', 'rb') as f:
             show_hide_img = f.read()
         with open('display_assets/max_norm.png', 'rb') as f:
@@ -1026,13 +1062,6 @@ class DebyeCalculator:
         
         # Y-axis I(Q) scale button
         scale_type_button = widgets.ToggleButtons( options=['linear', 'logarithmic'], value='linear', button_style='info', layout=Layout(width='600'))
-        
-        # SAS preset button
-        sas_preset_button = widgets.Button(
-            description = 'SAS preset',
-            layout=Layout(width='300px'),
-            button_style='info',
-        )
 
         # Show/Hide buttons
         show_iq_button = widgets.Checkbox(value = True)
@@ -1050,7 +1079,7 @@ class DebyeCalculator:
         function_offset = '-90px 3px'
         function_size = 35
         header_scale = 0.95
-        header_widths = [130, 85, 120, 147]
+        header_widths = [130, 120, 147]
         header_widths = [str(i * header_scale)+'px' for i in header_widths]
 
         # Plotting tab 
@@ -1060,14 +1089,9 @@ class DebyeCalculator:
             scale_type_button,
             
             spacing_10px,
-
-            widgets.Image(value=sas_preset_img, format='png', layout=Layout(object_fit='contain', width=header_widths[1])),
-            sas_preset_button,
-            
-            spacing_10px,
             
             # Show / Hide img
-            widgets.Image(value=show_hide_img, format='png', layout=Layout(object_fit='contain', width=header_widths[2])),
+            widgets.Image(value=show_hide_img, format='png', layout=Layout(object_fit='contain', width=header_widths[1])),
             
             # Options
             HBox([
@@ -1080,7 +1104,7 @@ class DebyeCalculator:
             spacing_10px,
 
             # Max normalization img
-            widgets.Image(value=max_norm_img, format='png', layout=Layout(object_fit='contain', width=header_widths[3])),
+            widgets.Image(value=max_norm_img, format='png', layout=Layout(object_fit='contain', width=header_widths[2])),
 
             # Options
             HBox([
@@ -1377,12 +1401,64 @@ class DebyeCalculator:
             scale_type_button.value = 'logarithmic'
 
             # Hide all but IQ
+            show_iq_button.value = True
             show_fq_button.value = False
             show_sq_button.value = False
             show_gr_button.value = False
 
             # Set qmin and qmax
             qslider.value = [0.0, 3.0]
+            qstep_box.value = 0.01
+        
+        @pd_preset_button.on_click
+        def pd_preset(b=None):
+            # Change scale type
+            scale_type_button.value = 'linear'
+
+            # Hide all but IQ
+            show_iq_button.value = True
+            show_fq_button.value = False
+            show_sq_button.value = False
+            show_gr_button.value = False
+
+            # Set qmin and qmax
+            qslider.value = [1.0, 8.0]
+            qstep_box.valeu = 0.1
+        
+        @ts_preset_button.on_click
+        def ts_preset(b=None):
+            # Change scale type
+            scale_type_button.value = 'linear'
+
+            # Hide all but IQ
+            show_iq_button.value = False
+            show_fq_button.value = False
+            show_sq_button.value = False
+            show_gr_button.value = True
+
+            # Set qmin and qmax
+            qslider.value = [1.0, 30.0]
+            qstep_box.value = 0.1
+        
+        @reset_button.on_click
+        def reset(b=None):
+            # Change scale type
+            scale_type_button.value = 'linear'
+
+            # Hide all but IQ
+            show_iq_button.value = True
+            show_fq_button.value = True
+            show_sq_button.value = True
+            show_gr_button.value = True
+
+            # Set qmin and qmax
+            qslider.value = [1.0, 30.0]
+            rslider.value = [0.0, 20.0]
+            qstep_box.value = 0.1
+            rstep_box.value = 0.01
+            biso_slider.value = 0.3
+            qdamp_slider.value = 0.04
+            rthres_box.value = 0.0
 
         def update_figure(debye_outputs, _unity_sq=True):
 
