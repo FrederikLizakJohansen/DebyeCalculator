@@ -37,21 +37,22 @@ class DebyeCalculator:
 
 
     Parameters:
-        qmin (float): Minimum q-value for the scattering calculation. Default is 0.0.
+        qmin (float): Minimum q-value for the scattering calculation. Default is 1.0.
         qmax (float): Maximum q-value for the scattering calculation. Default is 30.0.
         qstep (float): Step size for the q-values in the scattering calculation. Default is 0.1.
-        qdamp (float): Damping parameter for Debye-Waller isotropic atomic displacement. Default is 0.0.
+        qdamp (float): Damping parameter caused by the truncated Q-range of the Fourier transformation. Default is 0.04.
         rmin (float): Minimum r-value for the pair distribution function (PDF) calculation. Default is 0.0.
         rmax (float): Maximum r-value for the PDF calculation. Default is 20.0.
         rstep (float): Step size for the r-values in the PDF calculation. Default is 0.01.
         rthres (float): Threshold value for exclusion of distances below this value in the scattering calculation. Default is 0.0.
-        biso (float): Debye-Waller isotropic atomic displacement parameter. Default is 0.0.
-        device (str): Device to use for computation (e.g., 'cuda' for GPU or 'cpu' for CPU). Default is 'cuda'.
+        biso (float): Debye-Waller isotropic atomic displacement parameter. Default is 0.3.
+        device (str): Device to use for computation (e.g., 'cuda' for GPU or 'cpu' for CPU). Default is 'cuda' if the computer has a GPU.
         batch_size (int or None): Batch size for computation. If None, the batch size will be automatically set. Default is None.
         lorch_mod (bool): Flag to enable Lorch modification. Default is False.
         radiation_type (str): Type of radiation for form factor calculations ('xray' or 'neutron'). Default is 'xray'.
         profile (bool): Activate profiler. Default is False.
     """
+
     def __init__(
         self,
         qmin: float = 1.0,
@@ -282,7 +283,31 @@ class DebyeCalculator:
         Returns:
             Tuple of torch tensors containing Q-values and scattering intensity I(Q) if keep_on_device is True, otherwise, numpy arrays on CPU.
         """
-
+        
+        # Raises errors if wrong path or parameters
+        if not os.path.exists(structure_path):
+            raise FileNotFoundError(f"{structure_path} not found.")
+        if self.qmin < 0:
+            raise ValueError("qmin must be non-negative.")
+        if self.qmax < 0:
+            raise ValueError("qmax must be non-negative.")
+        if self.qstep < 0:
+            raise ValueError("qstep must be non-negative.")
+        if self.qdamp < 0:
+            raise ValueError("qdamp must be non-negative.")
+        if self.rmin < 0:
+            raise ValueError("rmin must be non-negative.")
+        if self.rmax < 0:
+            raise ValueError("rmax must be non-negative.")
+        if self.rstep < 0:
+            raise ValueError("rstep must be non-negative.")
+        if self.rthres < 0:
+            raise ValueError("rthres must be non-negative.")
+        if self.biso < 0:
+            raise ValueError("biso must be non-negative.")
+        if self.batch_size is not None and self.batch_size < 0:
+            raise ValueError("batch_size must be non-negative.")
+        
         # Initialise structure
         self._initialise_structures(structure_path, radii, disable_pbar = True)
 
