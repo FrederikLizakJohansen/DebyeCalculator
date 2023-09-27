@@ -7,7 +7,7 @@ setup(
     long_description=open('README.md').read(),
     long_description_content_type='text/markdown',
     author='Frederik L. Johansen and Andy S. Anker',
-    author_email='fljo@di.ku.dk and andy@chem.ku.dk',
+    author_email='frjo@di.ku.dk and andy@chem.ku.dk',
     install_requires=[
         'numpy',
         'pyyaml',
