@@ -8,6 +8,7 @@ Here, we provide an optimised code for the calculation of the Debye scattering e
 1. [Usage](#usage)
     1. [Interactive mode](#interactive-mode-at-google-colab)
     2. [Install locally](#install-locally)
+    3. [Example usage](#example-usage)
 2. [Authors](#authors)
 3. [Cite](#cite)
 4. [Contributing to the software](#contributing-to-the-software)
@@ -30,11 +31,23 @@ or
 python setup.py install
 ```
 
-To verify that __DebyeCalculator__ have been installed properly, try calling the help argument.
+## Example usage
+```python
+from DebyeCalculator.XXXX import DebyeCalculator
+
+calc = DebyeCalculator()
+
+# Change parameters
+calc.update_parameters(XXXXX)
+
+# Calculate Iq
+Q, I = calc.iq(XYZ_file)
+
+# Calculate Sq
+Q, S = calc.sq(XYZ_file)
+.....
+
 ```
-DebyeCalculator --help
-```  
-This should output a list of possible arguments for running __DebyeCalculator__ and indicate that it could find the package! 
 
 # Authors
 __Frederik L. Johansen__<sup>1</sup><sup>, 2</sup>   
