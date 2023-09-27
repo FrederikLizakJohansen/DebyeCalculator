@@ -10,7 +10,10 @@ Here, we provide an optimised code for the calculation of the Debye scattering e
     2. [Install locally](#install-locally)
 2. [Authors](#authors)
 3. [Cite](#cite)
-  
+4. [Contributing to the software](#contributing-to-the-software)
+    1. [Reporting issues](#reporting-issues)
+    2. [Seeking support](#seeking-support)
+
 
 # Usage
 
