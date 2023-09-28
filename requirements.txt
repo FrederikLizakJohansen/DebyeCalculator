@@ -5,3 +5,4 @@ torchaudio==2.0.2
 torchvision==0.15.2
 PyYAML==6.0.1
 ipywidgets==8.1.1
+tqdm==4.66.1
