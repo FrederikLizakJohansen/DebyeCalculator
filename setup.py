@@ -1,4 +1,11 @@
 from setuptools import setup, find_packages
+from pip.req import parse_requirements
+
+# parse requirements file
+install_reqs = parse_requirements('requirements.txt', session='hack')
+
+# get list of requirements
+reqs = [str(ir.req) for ir in install_reqs]
 
 setup(
     name='DebyeCalculator',
@@ -8,14 +15,7 @@ setup(
     long_description_content_type='text/markdown',
     author='Frederik L. Johansen and Andy S. Anker',
     author_email='frjo@di.ku.dk and andy@chem.ku.dk',
-    install_requires=[
-        'numpy',
-        'pyyaml',
-        'ase',
-        'torch',
-        'torchvision',
-        'torchaudio',
-    ],
+    install_requires=reqs,
     packages=find_packages(
         where='DebyeCalculator',
         exclude=[
