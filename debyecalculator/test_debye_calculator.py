@@ -21,12 +21,12 @@ def test_init_defaults():
 
 def test_iq():
     # Load the expected scattering intensity from a file
-    ph = np.loadtxt('DebyeCalculator/unittests_files/icsd_001504_cc_r6_lc_2.85_6_tetragonal_Iq.dat')
+    ph = np.loadtxt('debyecalculator/unittests_files/icsd_001504_cc_r6_lc_2.85_6_tetragonal_Iq.dat')
     Q_expected, Iq_expected = ph[:,0], ph[:,1]
 
     # Calculate the scattering intensity using the DebyeCalculator
     calc = DebyeCalculator()
-    Q, Iq = calc.iq('DebyeCalculator/unittests_files/icsd_001504_cc_r6_lc_2.85_6_tetragonal.xyz')
+    Q, Iq = calc.iq('debyecalculator/unittests_files/icsd_001504_cc_r6_lc_2.85_6_tetragonal.xyz')
 
     # Check that the calculated scattering intensity matches the expected value
     assert np.allclose(Q, Q_expected, rtol=1e-03), f"Expected Q to be {Q_expected}, but got {Q}"
@@ -34,12 +34,12 @@ def test_iq():
 
 def test_sq():
     # Load the expected structure factor from a file
-    ph = np.loadtxt('DebyeCalculator/unittests_files/icsd_001504_cc_r6_lc_2.85_6_tetragonal_Sq.dat')
+    ph = np.loadtxt('debyecalculator/unittests_files/icsd_001504_cc_r6_lc_2.85_6_tetragonal_Sq.dat')
     Q_expected, sq_expected = ph[:,0], ph[:,1]
 
     # Calculate the structure factor using the DebyeCalculator
     calc = DebyeCalculator()
-    Q, sq = calc.sq('DebyeCalculator/unittests_files/icsd_001504_cc_r6_lc_2.85_6_tetragonal.xyz')
+    Q, sq = calc.sq('debyecalculator/unittests_files/icsd_001504_cc_r6_lc_2.85_6_tetragonal.xyz')
 
     # Check that the calculated structure factor matches the expected value
     assert np.allclose(Q, Q_expected, rtol=1e-03), f"Expected Q to be {Q_expected}, but got {Q}"
@@ -47,12 +47,12 @@ def test_sq():
 
 def test_fq():
     # Load the expected atomic form factor from a file
-    ph = np.loadtxt('DebyeCalculator/unittests_files/icsd_001504_cc_r6_lc_2.85_6_tetragonal_Fq.dat')
+    ph = np.loadtxt('debyecalculator/unittests_files/icsd_001504_cc_r6_lc_2.85_6_tetragonal_Fq.dat')
     Q_expected, fq_expected = ph[:,0], ph[:,1]
 
     # Calculate the atomic form factor using the DebyeCalculator
     calc = DebyeCalculator()
-    Q, fq = calc.fq('DebyeCalculator/unittests_files/icsd_001504_cc_r6_lc_2.85_6_tetragonal.xyz')
+    Q, fq = calc.fq('debyecalculator/unittests_files/icsd_001504_cc_r6_lc_2.85_6_tetragonal.xyz')
 
     # Check that the calculated atomic form factor matches the expected value
     assert np.allclose(Q, Q_expected, rtol=1e-03), f"Expected Q to be {Q_expected}, but got {Q}"
@@ -60,12 +60,12 @@ def test_fq():
 
 def test_gr():
     # Load the expected radial distribution function from a file
-    ph = np.loadtxt('DebyeCalculator/unittests_files/icsd_001504_cc_r6_lc_2.85_6_tetragonal_Gr.dat')
+    ph = np.loadtxt('debyecalculator/unittests_files/icsd_001504_cc_r6_lc_2.85_6_tetragonal_Gr.dat')
     r_expected, gr_expected = ph[:,0], ph[:,1]
 
     # Calculate the radial distribution function using the DebyeCalculator
     calc = DebyeCalculator()
-    r, gr = calc.gr('DebyeCalculator/unittests_files/icsd_001504_cc_r6_lc_2.85_6_tetragonal.xyz')
+    r, gr = calc.gr('debyecalculator/unittests_files/icsd_001504_cc_r6_lc_2.85_6_tetragonal.xyz')
 
     # Check that the calculated radial distribution function matches the expected value
     assert np.allclose(r, r_expected, rtol=1e-03), f"Expected r to be {r_expected}, but got {r}"
@@ -74,28 +74,28 @@ def test_gr():
 def test_get_all():
     # Calculate Iq, Fq, Sq, and Gr using the DebyeCalculator
     calc = DebyeCalculator()
-    r, q, iq, sq, fq, gr = calc._get_all('DebyeCalculator/unittests_files/icsd_001504_cc_r6_lc_2.85_6_tetragonal.xyz')
+    r, q, iq, sq, fq, gr = calc._get_all('debyecalculator/unittests_files/icsd_001504_cc_r6_lc_2.85_6_tetragonal.xyz')
 
     # Check that the calculated Iq matches the expected value
-    ph = np.loadtxt('DebyeCalculator/unittests_files/icsd_001504_cc_r6_lc_2.85_6_tetragonal_Iq.dat')
+    ph = np.loadtxt('debyecalculator/unittests_files/icsd_001504_cc_r6_lc_2.85_6_tetragonal_Iq.dat')
     q_expected, iq_expected = ph[:,0], ph[:,1]
     assert np.allclose(q, q_expected, rtol=1e-03), f"Expected q to be {q_expected}, but got {q}"
     assert np.allclose(iq, iq_expected, rtol=1e-03), f"Expected Iq to be {iq_expected}, but got {iq}"
 
     # Check that the calculated Sq matches the expected value
-    ph = np.loadtxt('DebyeCalculator/unittests_files/icsd_001504_cc_r6_lc_2.85_6_tetragonal_Sq.dat')
+    ph = np.loadtxt('debyecalculator/unittests_files/icsd_001504_cc_r6_lc_2.85_6_tetragonal_Sq.dat')
     q_expected, sq_expected = ph[:,0], ph[:,1]
     assert np.allclose(q, q_expected, rtol=1e-03), f"Expected q to be {q_expected}, but got {q}"
     assert np.allclose(sq, sq_expected, rtol=1e-03), f"Expected Sq to be {sq_expected}, but got {sq}"
 
     # Check that the calculated Fq matches the expected value
-    ph = np.loadtxt('DebyeCalculator/unittests_files/icsd_001504_cc_r6_lc_2.85_6_tetragonal_Fq.dat')
+    ph = np.loadtxt('debyecalculator/unittests_files/icsd_001504_cc_r6_lc_2.85_6_tetragonal_Fq.dat')
     q_expected, fq_expected = ph[:,0], ph[:,1]
     assert np.allclose(q, q_expected, rtol=1e-03), f"Expected q to be {q_expected}, but got {q}"
     assert np.allclose(fq, fq_expected, rtol=1e-03), f"Expected Fq to be {fq_expected}, but got {fq}"
 
     # Check that the calculated Gr matches the expected value
-    ph = np.loadtxt('DebyeCalculator/unittests_files/icsd_001504_cc_r6_lc_2.85_6_tetragonal_Gr.dat')
+    ph = np.loadtxt('debyecalculator/unittests_files/icsd_001504_cc_r6_lc_2.85_6_tetragonal_Gr.dat')
     r_expected, gr_expected = ph[:,0], ph[:,1]
     assert np.allclose(gr, gr_expected, rtol=1e-03), f"Expected r to be {gr_expected}, but got {gr}"
     assert np.allclose(gr, gr_expected, rtol=1e-03), f"Expected Gr to be {gr_expected}, but got {gr}"
@@ -110,4 +110,4 @@ def test_invalid_input():
     with pytest.raises(ValueError):
         calc = DebyeCalculator()
         calc.update_parameters(qmin=-1.0)
-        calc.iq('DebyeCalculator/unittests_files/icsd_001504_cc_r6_lc_2.85_6_tetragonal.xyz')
+        calc.iq('debyecalculator/unittests_files/icsd_001504_cc_r6_lc_2.85_6_tetragonal.xyz')
