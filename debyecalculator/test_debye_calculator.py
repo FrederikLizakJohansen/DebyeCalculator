@@ -1,5 +1,5 @@
 import pytest, torch
-from DebyeCalculator.debye_calculator import DebyeCalculator
+from debyecalculator.debye_calculator import DebyeCalculator
 import numpy as np
 
 def test_init_defaults():
