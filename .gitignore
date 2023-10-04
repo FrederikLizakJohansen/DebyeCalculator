@@ -5,3 +5,4 @@
 local/
 tests/local_timings/
 dist/
+poetry.lock
