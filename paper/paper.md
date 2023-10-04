@@ -98,7 +98,7 @@ Several software packages already exist for simulating the Debye scattering equa
 
 # Acknowledgements
 
-This work is part of a project that has received funding from the European Research Council (ERC) under the European Union’s Horizon 2020 Research and Innovation Programme (grant agreement No. 804066).
+This work is part of a project that has received funding from the European Research Council (ERC) under the European Union’s Horizon 2020 Research and Innovation Programme (grant agreement No. 804066). We are grateful for funding from University of Copenhagen through the Data+ program.
 
 # Supporting Information
 
