@@ -748,9 +748,9 @@ class DebyeCalculator:
         radiation_type = self.radiation_type
         profile = False
 
-        with open('display_assets/choose_hardware.png', 'rb') as f:
+        with open(pkg_resources.resource_filename(__name__, 'display_assets/choose_hardware.png'), 'rb') as f:
             choose_hardware_img = f.read()
-        with open('display_assets/batch_size.png', 'rb') as f:
+        with open(pkg_resources.resource_filename(__name__, 'display_assets/batch_size.png'), 'rb') as f:
             batch_size_img = f.read()
         
         """ Utility widgets """
@@ -762,15 +762,15 @@ class DebyeCalculator:
         """ File Selection Tab """
         
         # Load diplay display_assets
-        with open('display_assets/enter_path.png', 'rb') as f:
+        with open(pkg_resources.resource_filename(__name__, 'display_assets/enter_path.png'), 'rb') as f:
             enter_path_img = f.read()
-        with open('display_assets/select_files.png', 'rb') as f:
+        with open(pkg_resources.resource_filename(__name__, 'display_assets/select_files.png'), 'rb') as f:
             select_files_img = f.read()
-        with open('display_assets/radius_a.png', 'rb') as f:
+        with open(pkg_resources.resource_filename(__name__, 'display_assets/radius_a.png'), 'rb') as f:
             radius_a_img = f.read()
-        with open('display_assets/file_1.png', 'rb') as f:
+        with open(pkg_resources.resource_filename(__name__, 'display_assets/file_1.png'), 'rb') as f:
             file_1_img = f.read()
-        with open('display_assets/file_2.png', 'rb') as f:
+        with open(pkg_resources.resource_filename(__name__, 'display_assets/file_2.png'), 'rb') as f:
             file_2_img = f.read()
 
         # Layout
@@ -843,31 +843,31 @@ class DebyeCalculator:
         """ Scattering Options Tab """
 
         # Load display_assets
-        with open('display_assets/qslider.png', 'rb') as f:
+        with open(pkg_resources.resource_filename(__name__, 'display_assets/qslider.png'), 'rb') as f:
             qslider_img = f.read()
-        with open('display_assets/rslider.png', 'rb') as f:
+        with open(pkg_resources.resource_filename(__name__, 'display_assets/rslider.png'), 'rb') as f:
             rslider_img = f.read()
-        with open('display_assets/qdamp.png', 'rb') as f:
+        with open(pkg_resources.resource_filename(__name__, 'display_assets/qdamp.png'), 'rb') as f:
             qdamp_img = f.read()
-        with open('display_assets/global_biso.png', 'rb') as f:
+        with open(pkg_resources.resource_filename(__name__, 'display_assets/global_biso.png'), 'rb') as f:
             global_biso_img = f.read()
-        with open('display_assets/a.png', 'rb') as f:
+        with open(pkg_resources.resource_filename(__name__, 'display_assets/a.png'), 'rb') as f:
             a_img = f.read()
-        with open('display_assets/a_inv.png', 'rb') as f:
+        with open(pkg_resources.resource_filename(__name__, 'display_assets/a_inv.png'), 'rb') as f:
             a_inv_img = f.read()
-        with open('display_assets/a_sq.png', 'rb') as f:
+        with open(pkg_resources.resource_filename(__name__, 'display_assets/a_sq.png'), 'rb') as f:
             a_sq_img = f.read()
-        with open('display_assets/qstep.png', 'rb') as f:
+        with open(pkg_resources.resource_filename(__name__, 'display_assets/qstep.png'), 'rb') as f:
             qstep_img = f.read()
-        with open('display_assets/rstep.png', 'rb') as f:
+        with open(pkg_resources.resource_filename(__name__, 'display_assets/rstep.png'), 'rb') as f:
             rstep_img = f.read()
-        with open('display_assets/rthres.png', 'rb') as f:
+        with open(pkg_resources.resource_filename(__name__, 'display_assets/rthres.png'), 'rb') as f:
             rthres_img = f.read()
-        with open('display_assets/radiation_type.png', 'rb') as f:
+        with open(pkg_resources.resource_filename(__name__, 'display_assets/radiation_type.png'), 'rb') as f:
             radiation_type_img = f.read()
-        with open('display_assets/scattering_parameters.png', 'rb') as f:
+        with open(pkg_resources.resource_filename(__name__, 'display_assets/scattering_parameters.png'), 'rb') as f:
             scattering_parameters_img = f.read()
-        with open('display_assets/presets.png', 'rb') as f:
+        with open(pkg_resources.resource_filename(__name__, 'display_assets/presets.png'), 'rb') as f:
             presets_img = f.read()
 
         # Radiation 
@@ -993,8 +993,6 @@ class DebyeCalculator:
                 HBox([widgets.Image(value=qslider_img, format='png', layout=Layout(object_fit='contain', width='120px'))], layout=Layout(width='150px')),
                 # Q slider
                 qslider,
-                # Unit
-                #¤HBox([widgets.Image(value=a_inv_img, format='png', layout=Layout(object_fit='contain', width=a_inv_width))], layout=Layout(width='50px')),
             ]),
 
             spacing_5px,
@@ -1005,8 +1003,6 @@ class DebyeCalculator:
                 HBox([widgets.Image(value=rslider_img, format='png', layout=Layout(object_fit='contain', width='110px'))], layout=Layout(width='150px')),
                 # r slider
                 rslider, 
-                # Unit
-                #HBox([widgets.Image(value=a_img, format='png', layout=Layout(object_fit='contain', width=a_width))], layout=Layout(width='50px')),
             ]),
 
             spacing_5px,
@@ -1017,40 +1013,30 @@ class DebyeCalculator:
                 HBox([widgets.Image(value=qstep_img, format='png', layout=Layout(object_fit='contain', object_position='', width='65px'))], layout=Layout(width='75px')),
                 # Qstep box
                 qstep_box, 
-                # Unit
-                #HBox([widgets.Image(value=a_inv_img, format='png', layout=Layout(object_fit='contain', width=a_inv_width))], layout=Layout(width='50px')),
                 
                 # r step img
                 widgets.Text(description='', layout=Layout(visibility='hidden', width='60px'), disabled=True),
                 HBox([widgets.Image(value=rstep_img, format='png', layout=Layout(object_fit='contain', object_position='', width='55px'))], layout=Layout(width='65px')),
                 # r step box
                 rstep_box,
-                # Unit
-                #HBox([widgets.Image(value=a_img, format='png', layout=Layout(object_fit='contain', width=a_width))], layout=Layout(width='50px')),
 
                 # Q damp img
                 widgets.Text(description='', layout=Layout(visibility='hidden', width='60px'), disabled=True),
                 HBox([widgets.Image(value=qdamp_img, format='png', layout=Layout(object_fit='contain', object_position='', width='75px'))], layout=Layout(width='85px')),
                 # Q damp box
                 qdamp_box,
-                # Unit
-                #HBox([widgets.Image(value=a_inv_img, format='png', layout=Layout(object_fit='contain', width=a_inv_width))], layout=Layout(width='80px')),
 
                 # r thres img
                 widgets.Text(description='', layout=Layout(visibility='hidden', width='60px'), disabled=True),
                 HBox([widgets.Image(value=rthres_img, format='png', layout=Layout(object_fit='contain', object_position='', width='55px'))], layout=Layout(width='65px')),
                 # r thres
                 rthres_box,
-                # Unit
-                #HBox([widgets.Image(value=a_img, format='png', layout=Layout(object_fit='contain', width=a_width))], layout=Layout(width='50px')),
                 
                 # Global B iso img
                 widgets.Text(description='', layout=Layout(visibility='hidden', width='60px'), disabled=True),
                 HBox([widgets.Image(value=global_biso_img, format='png', layout=Layout(object_fit='contain', object_position='', width='95px'))], layout=Layout(width='105px')),
                 # Global B iso box
                 biso_box,
-                # Unit
-                #HBox([widgets.Image(value=a_sq_img, format='png', layout=Layout(object_fit='contain', width=a_sq_width))], layout=Layout(width='50px')),
             ]),
             
             spacing_5px,
@@ -1073,19 +1059,19 @@ class DebyeCalculator:
         """ Plotting Options """
 
         # Load display display_assets
-        with open('display_assets/iq_scaling.png', 'rb') as f:
+        with open(pkg_resources.resource_filename(__name__, 'display_assets/iq_scaling.png'), 'rb') as f:
             iq_scaling_img = f.read()
-        with open('display_assets/show_hide.png', 'rb') as f:
+        with open(pkg_resources.resource_filename(__name__, 'display_assets/show_hide.png'), 'rb') as f:
             show_hide_img = f.read()
-        with open('display_assets/max_norm.png', 'rb') as f:
+        with open(pkg_resources.resource_filename(__name__, 'display_assets/max_norm.png'), 'rb') as f:
             max_norm_img = f.read()
-        with open('display_assets/iq.png', 'rb') as f:
+        with open(pkg_resources.resource_filename(__name__, 'display_assets/iq.png'), 'rb') as f:
             iq_img = f.read()
-        with open('display_assets/sq.png', 'rb') as f:
+        with open(pkg_resources.resource_filename(__name__, 'display_assets/sq.png'), 'rb') as f:
             sq_img = f.read()
-        with open('display_assets/fq.png', 'rb') as f:
+        with open(pkg_resources.resource_filename(__name__, 'display_assets/fq.png'), 'rb') as f:
             fq_img = f.read()
-        with open('display_assets/gr.png', 'rb') as f:
+        with open(pkg_resources.resource_filename(__name__, 'display_assets/gr.png'), 'rb') as f:
             gr_img = f.read()
         
         # Y-axis I(Q) scale button
