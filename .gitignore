@@ -4,3 +4,4 @@
 **/*output/
 local/
 tests/local_timings/
+dist/
