@@ -5,31 +5,40 @@ Welcome to `DebyeCalculator`! This is a simple tool for calculating the scatteri
 The Debye scattering equation can be used to compute the scattering pattern of any atomic structure and is commonly used to study both crystalline and non-crystalline materials with a range of scattering techniques like powder diffraction, total scattering with pair distribution function and small-angle scattering. Although the Debye scattering equation is extremely versatile, the computation of the double sum, which scales O(N<sup>2</sup>), has limited the practical use of the equation.
 Here, we provide an optimised code for the calculation of the Debye scattering equation on Graphics processing units (GPUs) which accelerate the calculations with orders of magnitudes.
 
-1. [Usage](#usage)
-    1. [Interactive mode](#interactive-mode-at-google-colab)
+1. [Installation](#installation)
+    1. [Install with pip](#install-with-pip)
     2. [Install locally](#install-locally)
+2. [Usage](#usage)
+    1. [Interactive mode](#interactive-mode-at-google-colab)
     3. [Example usage](#example-usage)
-2. [Authors](#authors)
-3. [Cite](#cite)
-4. [Contributing to the software](#contributing-to-the-software)
+3. [Authors](#authors)
+4. [Cite](#cite)
+5. [Contributing to the software](#contributing-to-the-software)
     1. [Reporting issues](#reporting-issues)
     2. [Seeking support](#seeking-support)
 
+# Installation
 
-# Usage
+## Install with pip
 
-## Interactive mode at Google Colab
-Follow the instructions in our [Interactive Google Colab notebook](https://github.com/FrederikLizakJohansen/DebyeCalculator/blob/main/InteractiveMode_Colab.ipynb) and try to play around. 
+Run the following command to install the __DebyeCalculator__ package.  
+```
+pip install DebyeCalculator
+```
 
 ## Install locally
 
-Currently __DebyeCalculator__ is not avaible through PyPI or conda so the package needs to be downloaded manually
 Run the following command to install the __DebyeCalculator__ package.  
 ```
 pip install .
 or
 python setup.py install
 ```
+
+# Usage
+
+## Interactive mode at Google Colab
+Follow the instructions in our [Interactive Google Colab notebook](https://github.com/FrederikLizakJohansen/DebyeCalculator/blob/main/InteractiveMode_Colab.ipynb) and try to play around. 
 
 ## Example usage
 ```python
