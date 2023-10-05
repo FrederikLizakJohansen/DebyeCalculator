@@ -40,7 +40,7 @@ affiliations:
    index: 2
  - name: Department of Neuroscience, University of Copenhagen, Denmark
    index: 3
-date: 2 August 2023
+date: 5 October 2023
 bibliography: paper.bib
 
 # Optional fields if submitting to a AAS journal too, see this blog post:
