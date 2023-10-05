@@ -33,18 +33,32 @@ python setup.py install
 
 ## Example usage
 ```python
-from DebyeCalculator.XXXX import DebyeCalculator
+from debyecalculator import DebyeCalculator
 
-calc = DebyeCalculator()
+# Initialise calculator object
+calc = DebyeCalculator(qmin=1.0, qmax=8.0, qstep=0.01)
 
-# Change parameters
-calc.update_parameters(XXXXX)
+# Define structure path
+XYZ_path = "some_path/some_file.xyz"
 
-# Calculate Iq
-Q, I = calc.iq(XYZ_file)
+# Print object to view all parameters
+print(calc)
+## [OUTPUT] DebyeCalculator{'qmin': 1.0, 'qmax': 8.0, 'qstep': 0.01, 'rmin': 0.0, 'rmax': 20.0, ...}
 
-# Calculate Sq
-Q, S = calc.sq(XYZ_file)
+# Calculate Powder (X-ray) Diffraction
+Q, I = calc.iq(structure_path=XYZ_path)
+
+# Update parameters for Small Angle (Neutron) Scattering
+calc.update_parameters(qmin=0.0, qmax=3.0, qstep=0.01, radiation_type="neutron")
+
+# Calculate Small Angle (Neutron) Scattering
+calc.iq(structure_path=XYZ_path)
+
+# Update parameters for Total Scattering with Pair Distribution Function analysis
+calc.update_parameters(qmin=1.0, qmax=30.0, qstep=0.1, radiation_type="xray")
+
+# Calculate Pair Distribution Function
+r, G = calc.gr(structure_path=XYZ_path)
 .....
 
 ```
