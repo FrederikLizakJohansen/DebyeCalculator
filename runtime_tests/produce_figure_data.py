@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 from ase.io import write
 from diffpy.structure import loadStructure
 from diffpy.srreal.pdfcalculator import DebyePDFCalculator
-from DebyeCalculator.debye_calculator import DebyeCalculator
+from debyecalculator import DebyeCalculator
 
 def time_methods(args):
     print('Generating data for timing')
