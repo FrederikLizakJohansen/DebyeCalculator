@@ -3,6 +3,6 @@
 **/__pycache__/
 **/*output/
 local/
-tests/local_timings/
+runtime_tests/local_timings/
 dist/
 poetry.lock
