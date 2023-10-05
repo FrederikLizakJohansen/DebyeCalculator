@@ -1,38 +1,30 @@
 #!/usr/bin/env python
-##############################################################################
-#
-# diffpy.srreal     by DANSE Diffraction group
-#                   Simon J. L. Billinge
-#                   (c) 2010 The Trustees of Columbia University
-#                   in the City of New York.  All rights reserved.
-#
-# File coded by:    Pavol Juhas
-#
-# See AUTHORS.txt for a list of people who contributed.
-# See LICENSE_DANSE.txt for license information.
-#
-##############################################################################
-
 
 """\
-Top-level classes for PDF calculation:
-    SASCalculator -- simulate small angle scattering from Debye summation
+Support for SAS calculation from Debye Scattering Equation.
 """
 
+import numpy
 
 from diffpy.srreal.pdfcalculator import DebyePDFCalculator
+from diffpy.srreal.sfaverage import SFAverage
 from diffpy.srfit.pdf.basepdfgenerator import BasePDFGenerator
 
 # ----------------------------------------------------------------------------
 
 class SASCalculator(DebyePDFCalculator):
 
+    _iqtot = None
+    sfavg = None
+
 
     def __init__(self, **kwargs):
         '''Create a new instance of SASCalculator.
         Keyword arguments can be used to configure the calculator properties,
         for example:
+
         sasc = SASCalculator(qmax=20, rmax=40)
+
         Raise ValueError for invalid keyword argument.
         '''
         # set SAS defaults for the qgrid here
@@ -42,15 +34,41 @@ class SASCalculator(DebyePDFCalculator):
         return
 
 
+    @property
+    def iqtot(self):
+        'Un-normalized intensities for SAS at the ggrid points.'
+        return self._iqtot
+
+    @property
+    def iq(self):
+        'Normalized intensities for SAS at the ggrid points.'
+        return self._iqtot / self.sfavg.count
+
+    @property
+    def sq(self):
+        'Unscaled S(Q) at the ggrid points.'
+        rv = (self.iq - self.sfavg.f2avg) / (self.sfavg.f1avg ** 2) + 1
+        return rv
+
+    @property
+    def fq(self):
+        'Unscaled F(Q) at the ggrid points.'
+        rv = (self.sq - 1) * self.qgrid
+        return rv
+
+
     def __call__(self, structure=None, **kwargs):
         '''Calculate SAS for the given structure as an (r, Itot) tuple.
         Keyword arguments can be used to configure calculator attributes,
         these override any properties that may be passed from the structure,
         such as spdiameter.
+
         structure    -- a structure object to be evaluated.  Reuse the last
                         structure when None.
         kwargs       -- optional parameter settings for this calculator
+
         Example:    sascalc(structure, qmax=2, rmax=50)
+
         Return a tuple of (qgrid, iqtot) numpy arrays.
         '''
         from diffpy.srreal.wraputils import setattrFromKeywordArguments
@@ -61,30 +79,22 @@ class SASCalculator(DebyePDFCalculator):
         return rv
 
 
-    @property
-    def iqtot(self):
-        '''Un-normalized intensities for SAS at the ggrid points.
+    def eval(self, structure=None):
+        '''Evaluate Debye Scattering Equation for the given or last structure.
         '''
-        import numpy
+        DebyePDFCalculator.eval(self, structure)
         qa = self.qgrid
         adpt = self.getStructure()
         tbl = self.scatteringfactortable
-        asf = {}
-        asftot = numpy.zeros_like(qa)
-        asf2tot = numpy.zeros_like(qa)
-        N = adpt.countSites()
-        for i in range(N):
-            smbl = adpt.siteAtomType(i)
-            if not smbl in asf:
-                asf[smbl] = numpy.array([tbl.lookup(smbl, x) for x in qa])
-            asftot += asf[smbl]
-            asf2tot += asf[smbl] ** 2
+        sfavg = SFAverage.fromStructure(adpt, tbl, qa)
         idxhi = (qa > 1e-8)
         idxlo = (~idxhi).nonzero()
-        rv = numpy.zeros_like(qa)
-        rv[idxlo] = asftot[idxlo] ** 2
-        rv[idxhi] = self.value[idxhi] / qa[idxhi] + asf2tot[idxhi]
-        return rv
+        iqtot = numpy.zeros_like(qa)
+        iqtot[idxlo] = sfavg.f1sum[idxlo] ** 2
+        iqtot[idxhi] = self.value[idxhi] / qa[idxhi] + sfavg.f2sum[idxhi]
+        self._iqtot = iqtot
+        self.sfavg = sfavg
+        return
 
 # End of class SASCalculator
 
@@ -92,7 +102,8 @@ class SASCalculator(DebyePDFCalculator):
 
 class DBSASGenerator(BasePDFGenerator):
 
-    _ignored_parnames = set('''
+    _useadp = True
+    _adpparnames = set('''
         B11 B12 B13 B21 B22 B23 B31 B32 B33 Biso
         U11 U12 U13 U21 U22 U23 U31 U32 U33 Uiso
         '''.split())
@@ -101,8 +112,6 @@ class DBSASGenerator(BasePDFGenerator):
     def __init__(self, name="dbsas"):
         BasePDFGenerator.__init__(self, name)
         sc = SASCalculator()
-        if _libdiffpy_version_number >= 1002048:
-            sc.evaluatortype = 'OPTIMIZED'
         self._setCalculator(sc)
         self.removeParameter(self.delta1)
         self.removeParameter(self.delta2)
@@ -111,9 +120,31 @@ class DBSASGenerator(BasePDFGenerator):
         return
 
 
-    def setDebyeSumRmax(self, rmax):
-        '''Set pair-distance limit for the Debye summation.'''
+    @property
+    def rmax(self):
+        "float : pair-distance upper bound for Debye summation."
+        return self._calc.rmax
+
+    @rmax.setter
+    def rmax(self, rmax):
         self._calc.rmax = rmax
+        return
+
+
+    @property
+    def useadp(self):
+        """bool : flag for recalculating the value when ADP parameters change.
+
+        Use ``False`` in SAS regime, when ADP parameters have little effect on
+        the generated profile.  The default is ``True``.
+        """
+        return self._useadp
+
+    @useadp.setter
+    def useadp(self, flag):
+        if bool(flag) is not self._useadp:
+            self._useadp = bool(flag)
+            self._flush(other=(self,))
         return
 
 
@@ -128,11 +159,10 @@ class DBSASGenerator(BasePDFGenerator):
 
 
     def _flush(self, other):
-        '''Ignore changes in the Debye-Waller values.
-        This works for srfit >= 1.0-19.
+        '''Ignore changes in ADP values when `useadp` is ``False``.
         '''
-        ignore = (isinstance(other, tuple) and len(other) > 1
-                and other[-1].name in self._ignored_parnames)
+        ignore = (not self.useadp and isinstance(other, tuple) and
+                  len(other) > 1 and other[-1].name in self._adpparnames)
         if not ignore:
             BasePDFGenerator._flush(self, other)
         return
@@ -140,21 +170,9 @@ class DBSASGenerator(BasePDFGenerator):
 
     def __call__(self, q):
         """Calculate the I(Q) intensity from SAS."""
-        # incorporate scale value from the SASCalculator
+        # SASCalculator ignores the scale, so we add it in here
         yout = BasePDFGenerator.__call__(self, q)
         yout *= self.scale.value
         return yout
 
 # End class DBSASGenerator
-
-
-# ----------------------------------------------------------------------------
-
-# fetch libdiffpy version to determined if OPTIMIZED evaluator can be used
-try:
-    from diffpy.srreal.version import get_libdiffpy_version_info
-    _libdiffpy_version_number = get_libdiffpy_version_info().version_number
-except ImportError:
-    _libdiffpy_version_number = 0
-
-# End of file
