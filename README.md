@@ -21,7 +21,7 @@ Here, we provide an optimised code for the calculation of the Debye scattering e
 
 ## Install with pip
 
-Run the following command to install the __DebyeCalculator__ package.  
+Run the following command to install the __DebyeCalculator__ package. (**Requires**: Python >=3.9, <3.12)
 ```
 pip install DebyeCalculator
 ```
