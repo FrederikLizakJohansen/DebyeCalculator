@@ -335,7 +335,7 @@ class DebyeCalculator:
                 occ_product = self.struc_occupancy[i][idx[0]] * self.struc_occupancy[i][idx[1]]
                 sinc = torch.sinc(d[mask] * self.q / torch.pi)
                 ffp = self.struc_unique_form_factors[i][inv_idx[0]] * self.struc_unique_form_factors[i][inv_idx[1]]
-                iq += torch.sum(occ_product.unsqueeze(-1) * ffp * sinc.permute(1,0), dim=0)
+                iq += torch.sum(occ_product.unsqueeze(-1)[mask] * ffp[mask] * sinc.permute(1,0), dim=0)
 
             # Apply Debye-Weller Isotropic Atomic Displacement
             if self.biso != 0.0:
@@ -542,7 +542,7 @@ class DebyeCalculator:
                 occ_product = self.struc_occupancy[i][idx[0]] * self.struc_occupancy[i][idx[1]]
                 sinc = torch.sinc(d[mask] * self.q / torch.pi)
                 ffp = self.struc_unique_form_factors[i][inv_idx[0]] * self.struc_unique_form_factors[i][inv_idx[1]]
-                iq += torch.sum(occ_product.unsqueeze(-1) * ffp * sinc.permute(1,0), dim=0)
+                iq += torch.sum(occ_product.unsqueeze(-1)[mask] * ffp[mask] * sinc.permute(1,0), dim=0)
 
             # Apply Debye-Weller Isotropic Atomic Displacement
             if self.biso != 0.0:
