@@ -54,8 +54,11 @@ XYZ_path = "some_path/some_file.xyz"
 print(calc)
 ## [OUTPUT] DebyeCalculator{'qmin': 1.0, 'qmax': 8.0, 'qstep': 0.01, 'rmin': 0.0, 'rmax': 20.0, ...}
 
-# Calculate Powder (X-ray) Diffraction
+# Calculate Powder (X-ray) Diffraction from XYZ-file
 Q, I = calc.iq(structure_path=XYZ_path)
+
+# Calculate Powder (X-ray) Diffraction from CIF
+Q, I = calc.iq(structure_path=CIF_path, radii=5) # radii is the radius of the particle in Å 
 
 # Update parameters for Small Angle (Neutron) Scattering
 calc.update_parameters(qmin=0.0, qmax=3.0, qstep=0.01, radiation_type="neutron")
