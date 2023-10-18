@@ -49,6 +49,7 @@ calc = DebyeCalculator(qmin=1.0, qmax=8.0, qstep=0.01)
 
 # Define structure path
 XYZ_path = "some_path/some_file.xyz"
+CIF_path = "some_path/some_file.cif"
 
 # Print object to view all parameters
 print(calc)
