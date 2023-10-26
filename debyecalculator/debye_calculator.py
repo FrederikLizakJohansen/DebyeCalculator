@@ -585,6 +585,7 @@ class DebyeCalculator:
         sort_atoms: bool = True,
         disable_pbar: bool = False,
         _override_device: bool = True,
+        _lightweight_mode: bool = False,
     ) -> Tuple[Union[List[Atoms], Atoms], Union[List[float], float]]:
 
         """
@@ -622,7 +623,11 @@ class DebyeCalculator:
         r_max = np.amax(radii)
     
         # Create a supercell to encompass the entire range of nanoparticles and center it
-        supercell_matrix = np.diag((np.ceil(r_max / cell_dims)) * 2 + 2)
+        if _lightweight_mode:
+            padding = 0
+        else:
+            padding = 2
+        supercell_matrix = np.diag((np.ceil(r_max / cell_dims)) * 2 + padding)
         cell = make_supercell(prim=unit_cell, P=supercell_matrix)
         cell.center(about=0.)
     
@@ -635,8 +640,9 @@ class DebyeCalculator:
         center_dists = torch.norm(positions, dim=1)
         positions -= positions[metal_filter][torch.argmin(center_dists[metal_filter])]
         center_dists = torch.norm(positions, dim=1)
-        min_metal_dist = torch.min(pdist(positions[metal_filter]))
-        min_bond_dist = torch.amin(cdist(positions[metal_filter], positions[~metal_filter]))
+        if not _lightweight_mode:
+            min_metal_dist = torch.min(pdist(positions[metal_filter]))
+            min_bond_dist = torch.amin(cdist(positions[metal_filter], positions[~metal_filter]))
         # Update the cell positions
         cell.positions = positions.cpu()
     
