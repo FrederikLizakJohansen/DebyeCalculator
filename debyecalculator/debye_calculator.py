@@ -634,17 +634,20 @@ class DebyeCalculator:
         # Convert positions to torch and send to device
         positions = torch.from_numpy(cell.get_positions()).to(dtype = torch.float32, device = device)
 
-        # Find all metals and center around the nearest metal
-        ligands = ['O', 'Cl', 'H'] # Placeholder
-        metal_filter = torch.BoolTensor([a not in ligands for a in cell.get_chemical_symbols()]).to(device = device)
-        center_dists = torch.norm(positions, dim=1)
-        positions -= positions[metal_filter][torch.argmin(center_dists[metal_filter])]
-        center_dists = torch.norm(positions, dim=1)
-        if not _lightweight_mode:
+        if _lightweight_mode:
+            ligands = ['O', 'Cl', 'H'] # Placeholder
+            center_dists = torch.norm(positions, dim=1)
+        else:
+            # Find all metals and center around the nearest metal
+            ligands = ['O', 'Cl', 'H'] # Placeholder
+            metal_filter = torch.BoolTensor([a not in ligands for a in cell.get_chemical_symbols()]).to(device = device)
+            center_dists = torch.norm(positions, dim=1)
+            positions -= positions[metal_filter][torch.argmin(center_dists[metal_filter])]
+            center_dists = torch.norm(positions, dim=1)
             min_metal_dist = torch.min(pdist(positions[metal_filter]))
             min_bond_dist = torch.amin(cdist(positions[metal_filter], positions[~metal_filter]))
-        # Update the cell positions
-        cell.positions = positions.cpu()
+            # Update the cell positions
+            cell.positions = positions.cpu()
     
         # Initialize nanoparticle lists and progress bar
         nanoparticle_list = []
@@ -653,27 +656,35 @@ class DebyeCalculator:
     
         # Generate nanoparticles for each radius
         for r in sorted(radii, reverse=True):
+            if _lightweight_mode:
+                # Mask all atoms within radius
+                incl_mask = (center_dists <= r)
+                
+                # Modify objects based on mask
+                cell = cell[incl_mask.cpu()]
+                center_dists = center_dists[incl_mask]
+                
+            else:
+                # Mask all atoms within radius
+                incl_mask = (center_dists <= r) | ((center_dists <= r + min_metal_dist) & ~metal_filter)
 
-            # Mask all atoms within radius
-            incl_mask = (center_dists <= r) | ((center_dists <= r + min_metal_dist) & ~metal_filter)
-
-            # Modify objects based on mask
-            cell = cell[incl_mask.cpu()]
-            center_dists = center_dists[incl_mask]
-            metal_filter = metal_filter[incl_mask]
-            positions = positions[incl_mask]
-            
-            # Find interdistances from all included atoms and remove 0's from diagonal
-            interface_dists = cdist(positions, positions).fill_diagonal_(min_metal_dist*2)
-    
-            # Remove floating atoms
-            interaction_mask = torch.amin(interface_dists, dim=0) < min_bond_dist*1.2
-            
-            # Modify objects based on mask
-            cell = cell[interaction_mask.cpu()]
-            center_dists = center_dists[interaction_mask]
-            metal_filter = metal_filter[interaction_mask]
-            positions = positions[interaction_mask]
+                # Modify objects based on mask
+                cell = cell[incl_mask.cpu()]
+                center_dists = center_dists[incl_mask]
+                metal_filter = metal_filter[incl_mask]
+                positions = positions[incl_mask]
+                
+                # Find interdistances from all included atoms and remove 0's from diagonal
+                interface_dists = cdist(positions, positions).fill_diagonal_(min_metal_dist*2)
+        
+                # Remove floating atoms
+                interaction_mask = torch.amin(interface_dists, dim=0) < min_bond_dist*1.2
+                
+                # Modify objects based on mask
+                cell = cell[interaction_mask.cpu()]
+                center_dists = center_dists[interaction_mask]
+                metal_filter = metal_filter[interaction_mask]
+                positions = positions[interaction_mask]
             
             # Determine NP size
             nanoparticle_size = torch.amax(center_dists) * 2
