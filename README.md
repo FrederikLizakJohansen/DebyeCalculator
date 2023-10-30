@@ -142,7 +142,7 @@ If you encounter any issues or problems with our software, please report them by
 
 If you need help using our software, please reach out to us on our GitHub repository. We'll do our best to assist you and answer any questions you have.
 
-## References
+# References
 <a id="1">[1]</a>
 Waasmaier, D., & Kirfel, A. (1995). New analytical scattering-factor functions for free atoms and ions. Acta Crystallographica Section A, 51(3), 416–431. https://doi.org/10.1107/S0108767394013292
 
