@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "DebyeCalculator"
-version = "1.0.0"
+version = "1.0.1"
 description = "A vectorized implementation of the Debye Equation on CPU and GPU"
 license = "Apache-2.0"
 authors = [
