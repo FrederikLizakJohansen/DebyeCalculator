@@ -11,9 +11,10 @@ Here, we provide an optimised code for the calculation of the Debye scattering e
 2. [Usage](#usage)
     1. [Interactive mode](#interactive-mode-at-google-colab)
     3. [Example usage](#example-usage)
-3. [Authors](#authors)
-4. [Cite](#cite)
-5. [Contributing to the software](#contributing-to-the-software)
+3. [High-level implementation details](#high-level-implementation-details)
+4. [Authors](#authors)
+5. [Cite](#cite)
+6. [Contributing to the software](#contributing-to-the-software)
     1. [Reporting issues](#reporting-issues)
     2. [Seeking support](#seeking-support)
 
@@ -76,6 +77,29 @@ r, G = calc.gr(structure_path=XYZ_path)
 
 ```
 
+# High-level implementation details
+The core functionality of ´DebyeCalculator´, represented in the following high-level outline, starts with an initialisation function that sets user-defined parameters or sets them to default. They include scattering parameters (such as Q-range, Q-step, PDF r-range and r-step, atomic vibrations, radiation type, and instrumental parameters) and hardware parameters. During this initialisation phase, the calculation of the atomic form factors (for X-ray) or scattering lengths (for neutrons) is prepared based on the radiation type. Once initialised, ´DebyeCalculator´ can compute various quantities: the scattering intensity $I(Q)$ through the Debye scattering equation, the Total Scattering Structure Function $S(Q)$, the Reduced Total Scattering Function $F(Q)$, and the Reduced Atomic Pair Distribution Function $G(r)$. In this section, we specifically outline the $G(r)$ calculation using X-ray scattering. This is because the process for calculating $G(r)$ inherently involves the calculations for $I(Q)$, S(Q), and F(Q). When calling the `gr` function, ´DebyeCalculator´ loads the structure and computes the atomic form factors[[1]](#1). Following this, it calculates the scattering intensity $I(Q)$ using the Debye scattering equation and subsequently determines the structure factor $S(Q)$ and $F(Q)$. Necessary modifications, such as dampening and Lorch modifications, are applied before computing the $G(r)$. ´DebyeCalculator´ outputs the calculated functions to the CPU by default to allow for immediate analysis of the results, but users have the flexibility to retain the output on the GPU. 
+It is worth noting that the majority of the compute time is spent on the double sum calculation in the Debye scattering equation. This is where GPU acceleration can enhance performance compared to single core CPUs. For all atom pairs, intermediate products of distances, form factors, and momentum transfers need to be calculated and stored temporarily. Calculating the intermediate products is computationally inexpensive but demands significant memory. This restricts the ability to apply the Debye scattering equation to structures with an increasing number of atoms. The batching schema in ´DebyeCalculator´ aims to mitigate these memory requirements by breaking down the calculations into smaller chunks that fit into the available GPU memory, thus enabling the calculation of scattering intensities for structures with a large number of atoms. The trade-off is a slight increase in computation time. Users with more substantial GPU memory can accommodate large structures while maintaining high computation speeds.
+
+```plaintext
+CLASS ´DebyeCalculator´:                                                  
+  FUNCTION Initialise(parameters...):
+      - Set class parameters based on given input or defaults           
+      - Setup scattering parameters (e.g., Q-values, r-values) and hardware parameters  
+      - Load atomic form factor coefficients                             
+      - Setup form factor calculation based on radiation type           
+  
+  FUNCTION gr(structure_path, keep_on_device=False):                
+      - Load atomic structure from given structure_path                       
+      - Calculate atomic form factors                                
+      - Calculate scattering intensity I(Q) (Debye scattering equation) 
+      - Compute structure factor S(Q) based on I(Q)                     
+      - Calculate F(Q) based on Q-values and S(Q)                       
+      - Apply modifications if necessary (like dampening and Lorch)       
+      - Calculate pair distribution function G(r) based on F(Q)         
+      - Return G(r) either on GPU or CPU            
+```
+
 # Authors
 __Frederik L. Johansen__<sup>1</sup><sup>, 2</sup>   
 __Andy S. Anker__<sup>1</sup>   
@@ -115,3 +139,8 @@ If you encounter any issues or problems with our software, please report them by
 ## Seeking support
 
 If you need help using our software, please reach out to us on our GitHub repository. We'll do our best to assist you and answer any questions you have.
+
+## References
+<a id="1">[1]</a>
+Waasmaier, D., & Kirfel, A. (1995). New analytical scattering-factor functions for free atoms and ions. Acta Crystallographica Section A, 51(3), 416–431. https://doi.org/10.1107/S0108767394013292
+
