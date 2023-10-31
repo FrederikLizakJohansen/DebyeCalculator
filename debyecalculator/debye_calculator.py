@@ -70,6 +70,7 @@ class DebyeCalculator:
         radiation_type: str = 'xray',
         profile: bool = False,
         _max_batch_size: int = 4000,
+        _lightweight_mode: bool = False,
     ) -> None:
 
         self.profile = profile
@@ -113,6 +114,9 @@ class DebyeCalculator:
 
         # Batch size
         self._max_batch_size = _max_batch_size
+        
+        # Lightweight mode
+        self._lightweight_mode = _lightweight_mode
 
     def __repr__(
         self,
@@ -309,7 +313,7 @@ class DebyeCalculator:
             raise ValueError("batch_size must be non-negative.")
         
         # Initialise structure
-        self._initialise_structures(structure_path, radii, disable_pbar = True)
+        self._initialise_structures(structure_path, radii, disable_pbar = True, _lightweight_mode=self._lightweight_mode)
 
         if self.profile:
             self.profiler.time('Setup structures and form factors')
@@ -391,7 +395,7 @@ class DebyeCalculator:
         """
 
         # Calculate Scattering S(Q)
-        _, iq = self.iq(structure_path, radii, keep_on_device=True, _total_scattering=True)
+        _, iq = self.iq(structure_path, radii, keep_on_device=True, _total_scattering=True, _lightweight_mode=self._lightweight_mode)
         
         sq_output = []
         for i in range(self.num_structures):
@@ -426,7 +430,7 @@ class DebyeCalculator:
             Tuple of torch tensors containing Q-values and reduced structure function F(Q) if keep_on_device is True, otherwise, numpy arrays on CPU.
         """
         # Calculate Scattering S(Q)
-        _, iq = self.iq(structure_path, radii, keep_on_device=True, _total_scattering=True)
+        _, iq = self.iq(structure_path, radii, keep_on_device=True, _total_scattering=True, _lightweight_mode=self._lightweight_mode)
 
         fq_output = []
         for i in range(self.num_structures):
@@ -466,7 +470,7 @@ class DebyeCalculator:
             self.profiler.reset()
 
         # Calculate Scattering I(Q), S(Q), F(Q)
-        _, iq = self.iq(structure_path, radii, keep_on_device=True, _total_scattering=True)
+        _, iq = self.iq(structure_path, radii, keep_on_device=True, _total_scattering=True, _lightweight_mode=self._lightweight_mode)
 
         gr_output = []
         for i in range(self.num_structures):
@@ -519,7 +523,7 @@ class DebyeCalculator:
         """
 
         # Initialise structure
-        self._initialise_structures(structure_path, radii, disable_pbar = True)
+        self._initialise_structures(structure_path, radii, disable_pbar = True, _lightweight_mode=self._lightweight_mode)
 
         # Calculate I(Q) for all initialised structures
         iq_output = []
@@ -623,10 +627,7 @@ class DebyeCalculator:
         r_max = np.amax(radii)
     
         # Create a supercell to encompass the entire range of nanoparticles and center it
-        if _lightweight_mode:
-            padding = 0
-        else:
-            padding = 2
+        padding = 2 # Symmetry padding to ensure the particle does not exceed the supercell boundary
         supercell_matrix = np.diag((np.ceil(r_max / cell_dims)) * 2 + padding)
         cell = make_supercell(prim=unit_cell, P=supercell_matrix)
         cell.center(about=0.)
