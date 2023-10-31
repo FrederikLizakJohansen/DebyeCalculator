@@ -1,16 +1,5 @@
 numpy==1.26.0
 pyyaml==6.0.1
-matplotlib==3.8.0
 tqdm==4.66.1
-torch==2.0.1
 ase==3.22.1
-notebook==6.1.5
-ipykernel==6.15.2
-ipython==7.31.1
-ipywidgets==7.6.5
-jupyter==1.0.0
-jupyter_client==7.4.7
-jupyter_console==6.4.4
-jupyter_core==4.11.2
-jupyter_server==1.18.1
-traitlets==5.11.1
+torch==2.0.1
