@@ -1,9 +1,9 @@
-numpy>=1.26.0
-pyyaml>=6.0.1
-matplotlib>=3.8.0
-tqdm>=4.66.1
-torch>=2.0.1
-ase>=3.22.1
+numpy==1.26.0
+pyyaml==6.0.1
+matplotlib==3.8.0
+tqdm==4.66.1
+torch==2.0.1
+ase==3.22.1
 notebook==6.1.5
 ipykernel==6.15.2
 ipython==7.31.1
