@@ -1,5 +1,9 @@
 # From https://github.com/marketplace/actions/open-journals-pdf-generator
-on: [push]
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
 
 jobs:
   paper:
