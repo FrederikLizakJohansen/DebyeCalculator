@@ -70,6 +70,7 @@ class DebyeCalculator:
         radiation_type: str = 'xray',
         profile: bool = False,
         _max_batch_size: int = 4000,
+        _lightweight_mode: bool = False,
     ) -> None:
 
         self.profile = profile
@@ -113,6 +114,9 @@ class DebyeCalculator:
 
         # Batch size
         self._max_batch_size = _max_batch_size
+        
+        # Lightweight mode
+        self._lightweight_mode = _lightweight_mode
 
     def __repr__(
         self,
@@ -309,7 +313,7 @@ class DebyeCalculator:
             raise ValueError("batch_size must be non-negative.")
         
         # Initialise structure
-        self._initialise_structures(structure_path, radii, disable_pbar = True)
+        self._initialise_structures(structure_path, radii, disable_pbar = True, _lightweight_mode=self._lightweight_mode)
 
         if self.profile:
             self.profiler.time('Setup structures and form factors')
@@ -391,7 +395,7 @@ class DebyeCalculator:
         """
 
         # Calculate Scattering S(Q)
-        _, iq = self.iq(structure_path, radii, keep_on_device=True, _total_scattering=True)
+        _, iq = self.iq(structure_path, radii, keep_on_device=True, _total_scattering=True, _lightweight_mode=self._lightweight_mode)
         
         sq_output = []
         for i in range(self.num_structures):
@@ -426,7 +430,7 @@ class DebyeCalculator:
             Tuple of torch tensors containing Q-values and reduced structure function F(Q) if keep_on_device is True, otherwise, numpy arrays on CPU.
         """
         # Calculate Scattering S(Q)
-        _, iq = self.iq(structure_path, radii, keep_on_device=True, _total_scattering=True)
+        _, iq = self.iq(structure_path, radii, keep_on_device=True, _total_scattering=True, _lightweight_mode=self._lightweight_mode)
 
         fq_output = []
         for i in range(self.num_structures):
@@ -466,7 +470,7 @@ class DebyeCalculator:
             self.profiler.reset()
 
         # Calculate Scattering I(Q), S(Q), F(Q)
-        _, iq = self.iq(structure_path, radii, keep_on_device=True, _total_scattering=True)
+        _, iq = self.iq(structure_path, radii, keep_on_device=True, _total_scattering=True, _lightweight_mode=self._lightweight_mode)
 
         gr_output = []
         for i in range(self.num_structures):
@@ -519,7 +523,7 @@ class DebyeCalculator:
         """
 
         # Initialise structure
-        self._initialise_structures(structure_path, radii, disable_pbar = True)
+        self._initialise_structures(structure_path, radii, disable_pbar = True, _lightweight_mode=self._lightweight_mode)
 
         # Calculate I(Q) for all initialised structures
         iq_output = []
@@ -585,6 +589,7 @@ class DebyeCalculator:
         sort_atoms: bool = True,
         disable_pbar: bool = False,
         _override_device: bool = True,
+        _lightweight_mode: bool = False,
     ) -> Tuple[Union[List[Atoms], Atoms], Union[List[float], float]]:
 
         """
@@ -622,23 +627,28 @@ class DebyeCalculator:
         r_max = np.amax(radii)
     
         # Create a supercell to encompass the entire range of nanoparticles and center it
-        supercell_matrix = np.diag((np.ceil(r_max / cell_dims)) * 2 + 2)
+        padding = 2 # Symmetry padding to ensure the particle does not exceed the supercell boundary
+        supercell_matrix = np.diag((np.ceil(r_max / cell_dims)) * 2 + padding)
         cell = make_supercell(prim=unit_cell, P=supercell_matrix)
         cell.center(about=0.)
     
         # Convert positions to torch and send to device
         positions = torch.from_numpy(cell.get_positions()).to(dtype = torch.float32, device = device)
 
-        # Find all metals and center around the nearest metal
-        ligands = ['O', 'Cl', 'H'] # Placeholder
-        metal_filter = torch.BoolTensor([a not in ligands for a in cell.get_chemical_symbols()]).to(device = device)
-        center_dists = torch.norm(positions, dim=1)
-        positions -= positions[metal_filter][torch.argmin(center_dists[metal_filter])]
-        center_dists = torch.norm(positions, dim=1)
-        min_metal_dist = torch.min(pdist(positions[metal_filter]))
-        min_bond_dist = torch.amin(cdist(positions[metal_filter], positions[~metal_filter]))
-        # Update the cell positions
-        cell.positions = positions.cpu()
+        if _lightweight_mode:
+            ligands = ['O', 'Cl', 'H'] # Placeholder
+            center_dists = torch.norm(positions, dim=1)
+        else:
+            # Find all metals and center around the nearest metal
+            ligands = ['O', 'Cl', 'H'] # Placeholder
+            metal_filter = torch.BoolTensor([a not in ligands for a in cell.get_chemical_symbols()]).to(device = device)
+            center_dists = torch.norm(positions, dim=1)
+            positions -= positions[metal_filter][torch.argmin(center_dists[metal_filter])]
+            center_dists = torch.norm(positions, dim=1)
+            min_metal_dist = torch.min(pdist(positions[metal_filter]))
+            min_bond_dist = torch.amin(cdist(positions[metal_filter], positions[~metal_filter]))
+            # Update the cell positions
+            cell.positions = positions.cpu()
     
         # Initialize nanoparticle lists and progress bar
         nanoparticle_list = []
@@ -647,27 +657,35 @@ class DebyeCalculator:
     
         # Generate nanoparticles for each radius
         for r in sorted(radii, reverse=True):
+            if _lightweight_mode:
+                # Mask all atoms within radius
+                incl_mask = (center_dists <= r)
+                
+                # Modify objects based on mask
+                cell = cell[incl_mask.cpu()]
+                center_dists = center_dists[incl_mask]
+                
+            else:
+                # Mask all atoms within radius
+                incl_mask = (center_dists <= r) | ((center_dists <= r + min_metal_dist) & ~metal_filter)
 
-            # Mask all atoms within radius
-            incl_mask = (center_dists <= r) | ((center_dists <= r + min_metal_dist) & ~metal_filter)
-
-            # Modify objects based on mask
-            cell = cell[incl_mask.cpu()]
-            center_dists = center_dists[incl_mask]
-            metal_filter = metal_filter[incl_mask]
-            positions = positions[incl_mask]
-            
-            # Find interdistances from all included atoms and remove 0's from diagonal
-            interface_dists = cdist(positions, positions).fill_diagonal_(min_metal_dist*2)
-    
-            # Remove floating atoms
-            interaction_mask = torch.amin(interface_dists, dim=0) < min_bond_dist*1.2
-            
-            # Modify objects based on mask
-            cell = cell[interaction_mask.cpu()]
-            center_dists = center_dists[interaction_mask]
-            metal_filter = metal_filter[interaction_mask]
-            positions = positions[interaction_mask]
+                # Modify objects based on mask
+                cell = cell[incl_mask.cpu()]
+                center_dists = center_dists[incl_mask]
+                metal_filter = metal_filter[incl_mask]
+                positions = positions[incl_mask]
+                
+                # Find interdistances from all included atoms and remove 0's from diagonal
+                interface_dists = cdist(positions, positions).fill_diagonal_(min_metal_dist*2)
+        
+                # Remove floating atoms
+                interaction_mask = torch.amin(interface_dists, dim=0) < min_bond_dist*1.2
+                
+                # Modify objects based on mask
+                cell = cell[interaction_mask.cpu()]
+                center_dists = center_dists[interaction_mask]
+                metal_filter = metal_filter[interaction_mask]
+                positions = positions[interaction_mask]
             
             # Determine NP size
             nanoparticle_size = torch.amax(center_dists) * 2
