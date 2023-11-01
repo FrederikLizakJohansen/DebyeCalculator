@@ -177,7 +177,7 @@ class DebyeCalculator:
         # If cif, check for radii and generate particles
         if structure_ext == 'cif':
             if radii is not None:
-                ase_structures, _ = self.generate_nanoparticles(structure_path, radii, disable_pbar=disable_pbar)
+                ase_structures, _ = self.generate_nanoparticles(structure_path, radii, disable_pbar=disable_pbar, _lightweight_mode=self._lightweight_mode)
                 self.num_structures = len(ase_structures)
             else:
                 raise ValueError('FAILED: When providing .cif data file, please provide radii (Union[List[float], float]) to generate from.')
@@ -313,7 +313,7 @@ class DebyeCalculator:
             raise ValueError("batch_size must be non-negative.")
         
         # Initialise structure
-        self._initialise_structures(structure_path, radii, disable_pbar = True, _lightweight_mode=self._lightweight_mode)
+        self._initialise_structures(structure_path, radii, disable_pbar = True)
 
         if self.profile:
             self.profiler.time('Setup structures and form factors')
@@ -523,7 +523,7 @@ class DebyeCalculator:
         """
 
         # Initialise structure
-        self._initialise_structures(structure_path, radii, disable_pbar = True, _lightweight_mode=self._lightweight_mode)
+        self._initialise_structures(structure_path, radii, disable_pbar = True)
 
         # Calculate I(Q) for all initialised structures
         iq_output = []
