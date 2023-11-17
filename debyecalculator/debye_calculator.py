@@ -289,8 +289,8 @@ class DebyeCalculator:
         """
         
         # Raises errors if wrong path or parameters
-        if not os.path.exists(structure_path):
-            raise FileNotFoundError(f"{structure_path} not found.")
+        # if not os.path.exists(structure_path):
+        #     raise FileNotFoundError(f"{structure_path} not found.")
         if self.qmin < 0:
             raise ValueError("qmin must be non-negative.")
         if self.qmax < 0:
@@ -679,7 +679,7 @@ class DebyeCalculator:
                 interface_dists = cdist(positions, positions).fill_diagonal_(min_metal_dist*2)
         
                 # Remove floating atoms
-                interaction_mask = torch.amin(interface_dists, dim=0) < min_bond_dist*1.2
+                interaction_mask = torch.amin(interface_dists, dim=0) < min_bond_dist*1.1
                 
                 # Modify objects based on mask
                 cell = cell[interaction_mask.cpu()]
