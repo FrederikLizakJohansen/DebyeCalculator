@@ -586,6 +586,7 @@ class DebyeCalculator:
         self,
         structure_path: str,
         radii: Union[List[float], float],
+        metals: Union[List[float], List[str]],
         sort_atoms: bool = True,
         disable_pbar: bool = False,
         _override_device: bool = True,
