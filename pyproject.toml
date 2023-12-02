@@ -5,7 +5,7 @@ description = "A vectorized implementation of the Debye Equation on CPU and GPU"
 license = "Apache-2.0"
 authors = [
   "Frederik Lizak Johansen <frjo@di.ku.dk>",
-  "Andy Sode Anker <andy@chem.ku.dk>",
+  "Andy Sode Anker <ansoan@dtu.dk>",
 ]
 readme = "README.md"
 repository = "https://github.com/FrederikLizakJohansen/DebyeCalculator"
