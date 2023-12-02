@@ -15,7 +15,7 @@ setup(
     long_description=open('README.md').read(),
     long_description_content_type='text/markdown',
     author='Frederik L. Johansen and Andy S. Anker',
-    author_email='frjo@di.ku.dk and andy@chem.ku.dk',
+    author_email='frjo@di.ku.dk and ansoan@dtu.dk',
     install_requires=reqs,
     packages=find_packages(
         where='debyecalculator',
