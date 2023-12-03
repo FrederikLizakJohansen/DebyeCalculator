@@ -2,10 +2,6 @@
 
 The Debye scattering equation is used to calculate scattering intensities from atomic structures considering the position of each atom in the structure:
 
-\begin{equation}\label{eq:Debye}
-I(Q) = \sum_{\nu=1}^{N} \sum_{\mu=1}^{N} b_{\nu} b_{\mu} \frac{\sin(Qr_{\nu\mu})}{Qr_{\nu\mu}}
-\end{equation}
-
 $$
 I(Q) = \sum_{\nu=1}^{N} \sum_{\mu=1}^{N} b_{\nu} b_{\mu} \frac{\sin(Qr_{\nu\mu})}{Qr_{\nu\mu}}
 $$
@@ -14,12 +10,19 @@ In this equation $Q$ is the momentum transfer of the scattered radiation, $N$ is
 
 # S(Q)
 
-XX
+$$
+S(Q) = \frac{I_{\text{coh}}(Q) + \langle f(Q) \rangle^2 - \langle f(Q)^2 \rangle}{N \langle f(Q) \rangle^2} - 1
+$$
 
 # F(Q)
 
-XX
+$$
+F(Q) = Q \left( S(Q) \right)
+$$
+
 
 # G(r)
 
-XX
+$$
+G(r) = \frac{2}{\pi} \int_{Q_{\text{min}}}^{Q_{\text{max}}} F(Q) \sin(Qr) \, dQ
+$$
