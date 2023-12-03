@@ -31,7 +31,7 @@ $$
 The Reduced Atomic Pair Distribution Function, $G(r)$, is calculated as:
 
 $$
-G(r) = \frac{2}{\pi} \int_{Q_{\text{min}}}^{Q_{\text{max}}} F(Q) \sin(Qr) \dQ
+G(r) = \frac{2}{\pi} \int_{Q_{\text{min}}}^{Q_{\text{max}}} F(Q) \sin(Qr)dQ
 $$
 
 Where $Q_{min}$ and $Q_{max}$ is the minimum and maximum Q-values of the data.
