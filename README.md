@@ -22,6 +22,14 @@ Here, we provide an optimised code for the calculation of the Debye scattering e
 
 # Installation
 
+`DebyeCalculator` requires Python version >=3.9, <3.12. If needed, create an environment with any of these Python versions:
+```
+conda create -n debyecalculator_env python=3.9```
+
+```
+conda activate debyecalculator_env
+```
+
 ## Install with [pip](https://pypi.org/project/DebyeCalculator/)
 
 Run the following command to install the __DebyeCalculator__ package. (**Requires**: Python >=3.9, <3.12)
@@ -31,7 +39,7 @@ pip install DebyeCalculator
 
 ## Install locally
 
-Run the following command to install the __DebyeCalculator__ package.  
+Run the following command to install the __DebyeCalculator__ package. (**Requires**: Python >=3.9, <3.12)
 ```
 pip install .
 or
