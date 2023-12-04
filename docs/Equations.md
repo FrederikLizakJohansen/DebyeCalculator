@@ -16,7 +16,7 @@ $$
 S(Q) = \frac{1}{N} \frac{I(Q)}{\langle b \rangle^2}
 $$
 
-The normalisation is performed over the compositional average of the form factor (scattering length) contributions, $\langle b \rangle^2 = \sum_µ c_µ b_µ$, where $c_µ$ is the contribution fraction of element $µ$ as well as the number of atoms $N$. Certain conventions will have the total scattering structure function converge to unity at large $Q$. Our implementation is different in that $S(Q)$ will converge to zero. This however can be rectified by simply adding unity to the above equation.
+The normalisation is performed over the compositional average of the form factor (scattering length) contributions, $\langle b \rangle = \sum_µ c_µ b_µ$, where $c_µ$ is the contribution fraction of element $µ$ as well as the number of atoms $N$. Certain conventions will have the total scattering structure function converge to unity at large $Q$. Our implementation is different in that $S(Q)$ will converge to zero. This however can be rectified by simply adding unity to the above equation.
 
 ## The Reduced Total Scattering Function - $F(Q)$
 
