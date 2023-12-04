@@ -581,12 +581,71 @@ class DebyeCalculator:
                 return self.r.squeeze(-1).cpu().numpy(), self.q.squeeze(-1).cpu().numpy(), iq_output[0].cpu().numpy(), sq_output[0].cpu().numpy(), fq_output[0].cpu().numpy(), gr_output[0].cpu().numpy()
             else:
                 return self.r.squeeze(-1).cpu().numpy(), self.q.squeeze(-1).cpu().numpy(), [iq.cpu().numpy() for iq in iq_output], [sq.cpu().numpy() for sq in sq_output], [fq.cpu().numpy() for fq in fq_output], [gr.cpu().numpy() for gr in gr_output]
+    
+    def get_default_atoms(
+            self, 
+            atom_type: str, 
+            output_type: str ='number'
+            ):
+            """
+            Get the default atoms based on the atom type and output type.
 
+            Parameters:
+            - atom_type (str): The type of atoms to retrieve. Accepts either "metal" or "ligand".
+            - output_type (str): The type of output to retrieve. Accepts either "number" or "symbol". Defaults to "number".
+
+            Returns:
+            - atoms (list): The list of default atoms based on the atom type and output type.
+
+            Raises:
+            - ValueError: If the atom_type is not "metal" or "ligand".
+            - ValueError: If the output_type is not "number" or "symbol".
+            """
+            if atom_type == 'metal':
+                if output_type == 'number':
+                    atoms = [
+                        3, 4, 5, 11, 12, 13, 14, 19, 20, 21, 22, 23, 24, 
+                        25, 26, 27, 28, 29, 30, 31, 32, 33, 37, 38, 39, 
+                        40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 
+                        52, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 
+                        66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 
+                        78, 79, 80, 81, 82, 83, 88
+                    ]
+                elif output_type == 'symbol':
+                    atoms = [
+                        'Li', 'Be', 'B', 'Na', 'Mg', 'Al', 'Si', 'K', 
+                        'Ca', 'Sc', 'Ti', 'V', 'Cr', 'Mn', 'Fe', 'Co', 
+                        'Ni', 'Cu', 'Zn', 'Ga', 'Ge', 'As', 'Rb', 'Sr', 
+                        'Y', 'Zr', 'Nb', 'Mo', 'Tc', 'Ru', 'Rh', 'Pd', 
+                        'Ag', 'Cd', 'In', 'Sn', 'Sb', 'Te', 'Cs', 'Ba', 
+                        'La', 'Ce', 'Pr', 'Nd', 'Pm', 'Sm', 'Eu', 'Gd', 
+                        'Tb', 'Dy', 'Ho', 'Er', 'Tm', 'Yb', 'Lu', 'Hf', 
+                        'Ta', 'W', 'Re', 'Os', 'Ir', 'Pt', 'Au', 'Hg', 
+                        'Tl', 'Pb', 'Bi', 'Ra'
+                    ]
+                else:
+                    raise ValueError('FAILED: Invalid output_type, accepts only "number" or "symbol"')
+            elif atom_type == 'ligand':
+                if output_type == 'number':
+                    atoms = [
+                        1, 6, 7, 8, 9, 15, 16, 17, 34, 35, 53
+                    ]
+                elif output_type == 'symbol':
+                    atoms = [
+                        'H', 'C', 'N', 'O', 'F', 'P', 'S', 'Cl', 'Se', 'Br', 'I'
+                    ]
+                else:
+                    raise ValueError('FAILED: Invalid output_type, accepts only "number" or "symbol"')
+            else:
+                raise ValueError('FAILED: Invalid atom_type, accepts only "metal" or "ligand"')
+            return atoms
+                    
     def generate_nanoparticles(
         self,
         structure_path: str,
         radii: Union[List[float], float],
-        metals: Union[List[float], List[str]],
+        metals: Union[List[float], List[str], str] = 'Default',
+        ligands: Union[List[float], List[str], str] = 'Default', 
         sort_atoms: bool = True,
         disable_pbar: bool = False,
         _override_device: bool = True,
@@ -617,6 +676,29 @@ class DebyeCalculator:
         else:
             raise ValueError('FAILED: Please provide valid radii for generation of nanoparticles')
 
+        # Handle metals and ligands
+        if metals == 'Default':
+            metals = self.get_default_atoms('metal', output_type='number')
+        elif isinstance(metals, list):
+            if isinstance(metals[0], str):
+                try:
+                    from mendeleev import element
+                    metals = [element(elm).atomic_number for elm in metals]
+                except ImportError:
+                    raise ImportError('FAILED: Please install mendeleev to use element symbols')
+        else:
+            raise ValueError('FAILED: Please provide valid metals for generation of nanoparticles')
+        
+        if ligands == 'Default':
+            ligands = self.get_default_atoms('ligand', output_type='number')
+        elif isinstance(ligands, list):
+            if isinstance(ligands[0], str):
+                try:
+                    from mendeleev import element
+                    ligands = [element(elm).atomic_number for elm in ligands]
+                except ImportError:
+                    raise ImportError('FAILED: Please install mendeleev to use element symbols')
+
         # DEV: Override device
         device = 'cpu' if _override_device else self.device
 
@@ -628,21 +710,24 @@ class DebyeCalculator:
         r_max = np.amax(radii)
     
         # Create a supercell to encompass the entire range of nanoparticles and center it
-        padding = 2 # Symmetry padding to ensure the particle does not exceed the supercell boundary
-        supercell_matrix = np.diag((np.ceil(r_max / cell_dims)) * 2 + padding)
-        cell = make_supercell(prim=unit_cell, P=supercell_matrix)
-        cell.center(about=0.)
+        size_check = np.array([False, False, False])
+        padding = np.array([0,0,0])
+        while not all(size_check):
+            padding[~size_check] += 2 # Symmetric padding to ensure the particle does not exceed the supercell boundary
+            supercell_matrix = np.diag((np.ceil(r_max / cell_dims)) * 2 + padding)
+            cell = make_supercell(prim=unit_cell, P=supercell_matrix)
+            size_check = cell.get_positions().max(axis=0) >= (r_max * 2 + 5) # Check if the supercell is larger than diameter of largest particle + 5 Angstroms of padding
+            
+        cell.center(about=0.) # Center the supercell
     
         # Convert positions to torch and send to device
         positions = torch.from_numpy(cell.get_positions()).to(dtype = torch.float32, device = device)
 
         if _lightweight_mode:
-            ligands = ['O', 'Cl', 'H'] # Placeholder
             center_dists = torch.norm(positions, dim=1)
         else:
             # Find all metals and center around the nearest metal
-            ligands = ['O', 'Cl', 'H'] # Placeholder
-            metal_filter = torch.BoolTensor([a not in ligands for a in cell.get_chemical_symbols()]).to(device = device)
+            metal_filter = torch.BoolTensor([a not in ligands for a in cell.get_atomic_numbers()]).to(device = device)
             center_dists = torch.norm(positions, dim=1)
             positions -= positions[metal_filter][torch.argmin(center_dists[metal_filter])]
             center_dists = torch.norm(positions, dim=1)
@@ -694,7 +779,7 @@ class DebyeCalculator:
             # Sort the atoms
             if sort_atoms:
                 sorted_cell = ase_sort(cell)
-                if sorted_cell.get_chemical_symbols()[0] in ligands:
+                if sorted_cell.get_atomic_numbers()[0] in ligands:
                     sorted_cell = sorted_cell[::-1]
     
                 # Append nanoparticle
