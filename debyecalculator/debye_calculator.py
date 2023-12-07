@@ -13,6 +13,7 @@ from torch import cdist
 from torch.nn.functional import pdist
 
 import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
 
 from ase import Atoms
@@ -644,6 +645,7 @@ class DebyeCalculator:
         self,
         structure_path: str,
         radii: Union[List[float], float],
+        atomic_radii: pd.DataFrame,
         metals: Union[List[float], List[str], str] = 'Default',
         ligands: Union[List[float], List[str], str] = 'Default', 
         sort_atoms: bool = True,
@@ -726,19 +728,45 @@ class DebyeCalculator:
         if _lightweight_mode:
             center_dists = torch.norm(positions, dim=1)
         else:
+            # Get atomic numbers
+            atomic_numbers = cell.get_atomic_numbers()
+
             # Find all metals and center around the nearest metal
-            metal_filter = torch.BoolTensor([a not in ligands for a in cell.get_atomic_numbers()]).to(device = device)
+            metal_filter = torch.BoolTensor([a in metals for a in atomic_numbers]).to(device = device)
+            ligand_filter = torch.BoolTensor([a in ligands for a in atomic_numbers]).to(device = device)
+            
+            # Remove atomic number array
+            del atomic_numbers
+
+            # Find the most central metal atom and center the cell around it
             center_dists = torch.norm(positions, dim=1)
             positions -= positions[metal_filter][torch.argmin(center_dists[metal_filter])]
             center_dists = torch.norm(positions, dim=1)
-            min_metal_dist = torch.min(pdist(positions[metal_filter]))
-            min_bond_dist = torch.amin(cdist(positions[metal_filter], positions[~metal_filter]))
+
             # Update the cell positions
             cell.positions = positions.cpu()
-    
+
+        # Calculate distance matrix
+        cell_dists = cdist(positions, positions)
+
+        # Create mask of threshold for bonds
+        bond_threshold = torch.zeros_like(cell_dists, device=device)
+        for i, r1 in enumerate(atomic_radii[:,1]):
+            bond_threshold[i,:] = (r1 + atomic_radii[:,1]) * 1.25
+        bond_threshold.fill_diagonal_(0.)
+
+        # Find edges
+        direction = torch.argwhere(cell_dists < bond_threshold).T
+
+        # Handle case with no edges
+        if len(direction[0]) == 0:
+            min_dist = torch.amin(cell_dists[cell_dists > 0])
+            direction = torch.argwhere(cell_dists < min_dist * 1.1).T
+
         # Initialize nanoparticle lists and progress bar
         nanoparticle_list = []
         nanoparticle_sizes = []
+        nanoparticle_edges = []
         pbar = tqdm(desc=f'Generating nanoparticles in range: [{np.amin(radii)},{np.amax(radii)}]', leave=False, total=len(radii), disable=disable_pbar)
     
         # Generate nanoparticles for each radius
@@ -752,41 +780,50 @@ class DebyeCalculator:
                 center_dists = center_dists[incl_mask]
                 
             else:
-                # Mask all atoms within radius
-                incl_mask = (center_dists <= r) | ((center_dists <= r + min_metal_dist) & ~metal_filter)
+                # Mask all metal atoms outside of the radius
+                excl_mask = (center_dists > r) & metal_filter
+                # Mask all metal atoms within the radius
+                incl_mask = (center_dists <= r) & metal_filter
 
-                # Modify objects based on mask
-                cell = cell[incl_mask.cpu()]
-                center_dists = center_dists[incl_mask]
-                metal_filter = metal_filter[incl_mask]
-                positions = positions[incl_mask]
+                # Get indices of atoms to be included and excluded
+                excl_indices = torch.nonzero(excl_mask).flatten()
+                incl_indices = torch.nonzero(incl_mask).flatten()
+
+                # Get edges to be included
+                included_edges = direction[:,(torch.isin(direction[0], incl_indices) + torch.isin(direction[1], incl_indices))]
+                # Remove edges to be excluded
+                included_edges = included_edges[:,~(torch.isin(included_edges[0], excl_indices) + torch.isin(included_edges[1], excl_indices))]
                 
-                # Find interdistances from all included atoms and remove 0's from diagonal
-                interface_dists = cdist(positions, positions).fill_diagonal_(min_metal_dist*2)
-        
-                # Remove floating atoms
-                interaction_mask = torch.amin(interface_dists, dim=0) < min_bond_dist*1.1
-                
-                # Modify objects based on mask
-                cell = cell[interaction_mask.cpu()]
-                center_dists = center_dists[interaction_mask]
-                metal_filter = metal_filter[interaction_mask]
-                positions = positions[interaction_mask]
+                # Get included atoms
+                included_atoms = included_edges.unique()
+
+                # Get included distances for calculating nanoparticle size
+                np_dists = center_dists[included_atoms]
+
+                # Get included atoms
+                np_cell = cell[included_atoms.cpu()]
             
             # Determine NP size
-            nanoparticle_size = torch.amax(center_dists) * 2
+            nanoparticle_size = torch.amax(np_dists) * 2
 
             # Sort the atoms
             if sort_atoms:
-                sorted_cell = ase_sort(cell)
+                sorted_cell = ase_sort(np_cell)
                 if sorted_cell.get_atomic_numbers()[0] in ligands:
                     sorted_cell = sorted_cell[::-1]
     
                 # Append nanoparticle
                 nanoparticle_list.append(sorted_cell)
+
+                # Append edges
+                # TODO: Change edge indices to reflect sorted atoms
+
             else:
                 # Append nanoparticle
-                nanoparticle_list.append(cell)
+                nanoparticle_list.append(np_cell)
+
+                # Append edges
+                nanoparticle_edges.append(included_edges)
 
             # Append size
             nanoparticle_sizes.append(nanoparticle_size.item())
@@ -794,7 +831,7 @@ class DebyeCalculator:
             pbar.update(1)
         pbar.close()
     
-        return nanoparticle_list, nanoparticle_sizes
+        return nanoparticle_list, nanoparticle_sizes, nanoparticle_edges
 
     def _is_notebook(
         self,
