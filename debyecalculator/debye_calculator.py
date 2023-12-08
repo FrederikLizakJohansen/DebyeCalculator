@@ -13,6 +13,7 @@ from torch import cdist
 from torch.nn.functional import pdist
 
 import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
 
 from ase import Atoms
@@ -581,13 +582,75 @@ class DebyeCalculator:
                 return self.r.squeeze(-1).cpu().numpy(), self.q.squeeze(-1).cpu().numpy(), iq_output[0].cpu().numpy(), sq_output[0].cpu().numpy(), fq_output[0].cpu().numpy(), gr_output[0].cpu().numpy()
             else:
                 return self.r.squeeze(-1).cpu().numpy(), self.q.squeeze(-1).cpu().numpy(), [iq.cpu().numpy() for iq in iq_output], [sq.cpu().numpy() for sq in sq_output], [fq.cpu().numpy() for fq in fq_output], [gr.cpu().numpy() for gr in gr_output]
+    
+    def get_default_atoms(
+            self, 
+            atom_type: str, 
+            output_type: str ='number'
+            ):
+            """
+            Get the default atoms based on the atom type and output type.
 
+            Parameters:
+            - atom_type (str): The type of atoms to retrieve. Accepts either "metal" or "ligand".
+            - output_type (str): The type of output to retrieve. Accepts either "number" or "symbol". Defaults to "number".
+
+            Returns:
+            - atoms (list): The list of default atoms based on the atom type and output type.
+
+            Raises:
+            - ValueError: If the atom_type is not "metal" or "ligand".
+            - ValueError: If the output_type is not "number" or "symbol".
+            """
+            if atom_type == 'metal':
+                if output_type == 'number':
+                    atoms = [
+                        3, 4, 5, 11, 12, 13, 14, 19, 20, 21, 22, 23, 24, 
+                        25, 26, 27, 28, 29, 30, 31, 32, 33, 37, 38, 39, 
+                        40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 
+                        52, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 
+                        66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 
+                        78, 79, 80, 81, 82, 83, 88
+                    ]
+                elif output_type == 'symbol':
+                    atoms = [
+                        'Li', 'Be', 'B', 'Na', 'Mg', 'Al', 'Si', 'K', 
+                        'Ca', 'Sc', 'Ti', 'V', 'Cr', 'Mn', 'Fe', 'Co', 
+                        'Ni', 'Cu', 'Zn', 'Ga', 'Ge', 'As', 'Rb', 'Sr', 
+                        'Y', 'Zr', 'Nb', 'Mo', 'Tc', 'Ru', 'Rh', 'Pd', 
+                        'Ag', 'Cd', 'In', 'Sn', 'Sb', 'Te', 'Cs', 'Ba', 
+                        'La', 'Ce', 'Pr', 'Nd', 'Pm', 'Sm', 'Eu', 'Gd', 
+                        'Tb', 'Dy', 'Ho', 'Er', 'Tm', 'Yb', 'Lu', 'Hf', 
+                        'Ta', 'W', 'Re', 'Os', 'Ir', 'Pt', 'Au', 'Hg', 
+                        'Tl', 'Pb', 'Bi', 'Ra'
+                    ]
+                else:
+                    raise ValueError('FAILED: Invalid output_type, accepts only "number" or "symbol"')
+            elif atom_type == 'ligand':
+                if output_type == 'number':
+                    atoms = [
+                        1, 6, 7, 8, 9, 15, 16, 17, 34, 35, 53
+                    ]
+                elif output_type == 'symbol':
+                    atoms = [
+                        'H', 'C', 'N', 'O', 'F', 'P', 'S', 'Cl', 'Se', 'Br', 'I'
+                    ]
+                else:
+                    raise ValueError('FAILED: Invalid output_type, accepts only "number" or "symbol"')
+            else:
+                raise ValueError('FAILED: Invalid atom_type, accepts only "metal" or "ligand"')
+            return atoms
+                    
     def generate_nanoparticles(
         self,
         structure_path: str,
         radii: Union[List[float], float],
+        atomic_size_table: pd.DataFrame,
+        metals: Union[List[float], List[str], str] = 'Default',
+        ligands: Union[List[float], List[str], str] = 'Default', 
         sort_atoms: bool = True,
         disable_pbar: bool = False,
+        return_graph_elements: bool = False,
         _override_device: bool = True,
         _lightweight_mode: bool = False,
     ) -> Tuple[Union[List[Atoms], Atoms], Union[List[float], float]]:
@@ -616,6 +679,29 @@ class DebyeCalculator:
         else:
             raise ValueError('FAILED: Please provide valid radii for generation of nanoparticles')
 
+        # Handle metals and ligands
+        if metals == 'Default':
+            metals = self.get_default_atoms('metal', output_type='number')
+        elif isinstance(metals, list):
+            if isinstance(metals[0], str):
+                try:
+                    from mendeleev import element
+                    metals = [element(elm).atomic_number for elm in metals]
+                except ImportError:
+                    raise ImportError('FAILED: Please install mendeleev to use element symbols')
+        else:
+            raise ValueError('FAILED: Please provide valid metals for generation of nanoparticles')
+        
+        if ligands == 'Default':
+            ligands = self.get_default_atoms('ligand', output_type='number')
+        elif isinstance(ligands, list):
+            if isinstance(ligands[0], str):
+                try:
+                    from mendeleev import element
+                    ligands = [element(elm).atomic_number for elm in ligands]
+                except ImportError:
+                    raise ImportError('FAILED: Please install mendeleev to use element symbols')
+
         # DEV: Override device
         device = 'cpu' if _override_device else self.device
 
@@ -627,32 +713,67 @@ class DebyeCalculator:
         r_max = np.amax(radii)
     
         # Create a supercell to encompass the entire range of nanoparticles and center it
-        padding = 2 # Symmetry padding to ensure the particle does not exceed the supercell boundary
-        supercell_matrix = np.diag((np.ceil(r_max / cell_dims)) * 2 + padding)
-        cell = make_supercell(prim=unit_cell, P=supercell_matrix)
-        cell.center(about=0.)
+        size_check = np.array([False, False, False])
+        padding = np.array([0,0,0])
+        while not all(size_check):
+            padding[~size_check] += 2 # Symmetric padding to ensure the particle does not exceed the supercell boundary
+            supercell_matrix = np.diag((np.ceil(r_max / cell_dims)) * 2 + padding)
+            cell = make_supercell(prim=unit_cell, P=supercell_matrix)
+            size_check = cell.get_positions().max(axis=0) >= (r_max * 2 + 5) # Check if the supercell is larger than diameter of largest particle + 5 Angstroms of padding
+            
+        cell.center(about=0.) # Center the supercell
     
         # Convert positions to torch and send to device
         positions = torch.from_numpy(cell.get_positions()).to(dtype = torch.float32, device = device)
 
+        # Get atomic numbers
+        atomic_numbers = cell.get_atomic_numbers()
+        # Find atomic radii
+        atomic_radii = torch.tensor(np.array([
+            atomic_size_table.loc[atom-1].values
+            for atom in atomic_numbers
+            ], dtype='float'), device=device)
+
         if _lightweight_mode:
-            ligands = ['O', 'Cl', 'H'] # Placeholder
             center_dists = torch.norm(positions, dim=1)
         else:
             # Find all metals and center around the nearest metal
-            ligands = ['O', 'Cl', 'H'] # Placeholder
-            metal_filter = torch.BoolTensor([a not in ligands for a in cell.get_chemical_symbols()]).to(device = device)
+            metal_filter = torch.BoolTensor([a in metals for a in atomic_numbers]).to(device = device)
+
+            # Find the most central metal atom and center the cell around it
             center_dists = torch.norm(positions, dim=1)
             positions -= positions[metal_filter][torch.argmin(center_dists[metal_filter])]
             center_dists = torch.norm(positions, dim=1)
-            min_metal_dist = torch.min(pdist(positions[metal_filter]))
-            min_bond_dist = torch.amin(cdist(positions[metal_filter], positions[~metal_filter]))
+
             # Update the cell positions
             cell.positions = positions.cpu()
-    
+
+        # Remove atomic number array
+        del atomic_numbers
+
+        # Calculate distance matrix
+        cell_dists = cdist(positions, positions)
+
+        # Create mask of threshold for bonds
+        bond_threshold = torch.zeros_like(cell_dists, device=device)
+        for i, r1 in enumerate(atomic_radii[:,1]):
+            bond_threshold[i,:] = (r1 + atomic_radii[:,1]) * 1.25
+        bond_threshold.fill_diagonal_(0.)
+
+        # Find edges
+        direction = torch.argwhere(cell_dists < bond_threshold).T
+
+        # Handle case with no edges
+        if len(direction[0]) == 0:
+            min_dist = torch.amin(cell_dists[cell_dists > 0])
+            direction = torch.argwhere(cell_dists < min_dist * 1.1).T
+
         # Initialize nanoparticle lists and progress bar
         nanoparticle_list = []
         nanoparticle_sizes = []
+        if return_graph_elements:
+            nanoparticle_edges = []
+            nanoparticle_distances = []
         pbar = tqdm(desc=f'Generating nanoparticles in range: [{np.amin(radii)},{np.amax(radii)}]', leave=False, total=len(radii), disable=disable_pbar)
     
         # Generate nanoparticles for each radius
@@ -661,54 +782,91 @@ class DebyeCalculator:
                 # Mask all atoms within radius
                 incl_mask = (center_dists <= r)
                 
-                # Modify objects based on mask
-                cell = cell[incl_mask.cpu()]
-                center_dists = center_dists[incl_mask]
+                # Get indices of atoms to be included
+                incl_indices = torch.nonzero(incl_mask).flatten()
+
+                # Get edges to be included
+                included_edges = direction[:,~(torch.isin(direction[0], ~incl_indices) + torch.isin(direction[1], ~incl_indices))]
+                
+                # Get included atoms
+                included_atoms = included_edges.unique()
+
+                # Get included distances for calculating nanoparticle size
+                center_dists = center_dists[included_atoms]
+
+                # Get Atoms object for the NP
+                np_cell = cell[included_atoms.cpu()]
                 
             else:
-                # Mask all atoms within radius
-                incl_mask = (center_dists <= r) | ((center_dists <= r + min_metal_dist) & ~metal_filter)
+                # Mask all metal atoms outside of the radius
+                excl_mask = (center_dists > r) & metal_filter
+                # Mask all metal atoms within the radius
+                incl_mask = (center_dists <= r) & metal_filter
 
-                # Modify objects based on mask
-                cell = cell[incl_mask.cpu()]
-                center_dists = center_dists[incl_mask]
-                metal_filter = metal_filter[incl_mask]
-                positions = positions[incl_mask]
+                # Get indices of atoms to be included and excluded
+                excl_indices = torch.nonzero(excl_mask).flatten()
+                incl_indices = torch.nonzero(incl_mask).flatten()
+
+                # Get edges to be included
+                included_edges = direction[:,(torch.isin(direction[0], incl_indices) + torch.isin(direction[1], incl_indices))]
+                # Remove edges to be excluded
+                included_edges = included_edges[:,~(torch.isin(included_edges[0], excl_indices) + torch.isin(included_edges[1], excl_indices))]
                 
-                # Find interdistances from all included atoms and remove 0's from diagonal
-                interface_dists = cdist(positions, positions).fill_diagonal_(min_metal_dist*2)
-        
-                # Remove floating atoms
-                interaction_mask = torch.amin(interface_dists, dim=0) < min_bond_dist*1.1
-                
-                # Modify objects based on mask
-                cell = cell[interaction_mask.cpu()]
-                center_dists = center_dists[interaction_mask]
-                metal_filter = metal_filter[interaction_mask]
-                positions = positions[interaction_mask]
-            
+                # Get included atoms
+                included_atoms = included_edges.unique()
+
+                # Get included distances for calculating nanoparticle size
+                np_dists = center_dists[included_atoms]
+
+                # Get Atoms object for the NP
+                np_cell = cell[included_atoms.cpu()]
+
+            # Remove NPs with only one atom
+            if len(np_cell) == 1:
+                pbar.update(1)
+                continue
+
             # Determine NP size
-            nanoparticle_size = torch.amax(center_dists) * 2
+            nanoparticle_size = torch.amax(np_dists) * 2
 
             # Sort the atoms
             if sort_atoms:
-                sorted_cell = ase_sort(cell)
-                if sorted_cell.get_chemical_symbols()[0] in ligands:
+                sorted_cell = ase_sort(np_cell)
+                if sorted_cell.get_atomic_numbers()[0] in ligands:
                     sorted_cell = sorted_cell[::-1]
     
                 # Append nanoparticle
                 nanoparticle_list.append(sorted_cell)
+
+                if return_graph_elements:
+                    # Append edges
+                    # TODO: Change edge indices to reflect sorted atoms
+
+                    # Append distances
+                    # TODO: Change distance indices to reflect sorted atoms
+
+                    return NotImplementedError('FAILED: return_graph_elements is not implemented for sorted atoms')
+
             else:
                 # Append nanoparticle
-                nanoparticle_list.append(cell)
+                nanoparticle_list.append(np_cell)
+
+                if return_graph_elements:
+                    # Append edges
+                    nanoparticle_edges.append(included_edges)
+
+                    # Append distances
+                    nanoparticle_distances.append(np_dists)
 
             # Append size
             nanoparticle_sizes.append(nanoparticle_size.item())
 
             pbar.update(1)
         pbar.close()
-    
-        return nanoparticle_list, nanoparticle_sizes
+        if return_graph_elements:
+            return nanoparticle_list, nanoparticle_sizes, nanoparticle_edges, nanoparticle_distances
+        else:
+            return nanoparticle_list, nanoparticle_sizes
 
     def _is_notebook(
         self,
