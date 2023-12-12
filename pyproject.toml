@@ -72,6 +72,9 @@ scipy = [
   {version = "^1.7.3", python = "^3.9,<3.12"}
 ]
 
+[tool.poetry.dev-dependencies]
+pytest = "^6.0.0"
+
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
