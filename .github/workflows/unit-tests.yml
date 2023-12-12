@@ -34,4 +34,4 @@ jobs:
         poetry update
     - name: Run tests
       run: |
-        poetry pytest
+        poetry run pytest
