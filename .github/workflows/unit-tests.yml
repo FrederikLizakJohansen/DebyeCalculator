@@ -28,10 +28,8 @@ jobs:
         python -m pip install --upgrade pip
         pip install poetry
         pip install pytest
-    - name: Install dependencies
+    - name: Install dependencies and run
       run: |
         poetry env use python
         poetry update
-    - name: Run tests
-      run: |
         poetry run pytest
