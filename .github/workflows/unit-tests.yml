@@ -4,11 +4,9 @@ on:
   push:
     branches:
       - main
-      - poetry_unit_tests
   pull_request:
     branches: 
       - main
-      - poetry_unit_tests
 
 jobs:
   build:
