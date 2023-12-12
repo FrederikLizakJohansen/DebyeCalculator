@@ -1,7 +1,7 @@
 [tool.poetry]
 name = "DebyeCalculator"
-version = "1.0.1"
-description = "A vectorized implementation of the Debye Equation on CPU and GPU"
+version = "1.0.2"
+description = "A vectorised implementation of the Debye Equation on CPU and GPU"
 license = "Apache-2.0"
 authors = [
   "Frederik Lizak Johansen <frjo@di.ku.dk>",
@@ -18,23 +18,59 @@ packages = [
 ]
 
 [tool.poetry.dependencies]
-python = "^3.9,<3.12"
-numpy = "^1.26.0"
+python = "^3.7"
+numpy = [
+  {version = "^1.21.5", python = "3.7"},
+  {version = "^1.24.3", python = "3.8"},
+  {version = "^1.26.0", python = "^3.9,<3.12"}
+]
+matplotlib = [
+  {version = "^3.4.3", python = "^3.7,<3.9"},
+  {version = "^3.8.0", python = "^3.9,<3.12"}
+]
+torch = [
+  {version = "1.13.1", python = "^3.7,<3.9"},
+  {version = "^2.0.1", python = "^3.9,<3.12"}
+]
 pyyaml = "^6.0.1"
-matplotlib = "^3.8.0"
 tqdm = "^4.66.1"
-torch = "^2.0.1"
 ase = "^3.22.1"
 notebook = "6.1.5"
-ipykernel = "6.15.2"
-ipython = "7.31.1"
-ipywidgets = "7.6.5"
+ipykernel = [
+  {version = "6.15.2", python = "3.7"},
+  {version = "^6.25.0", python = "^3.8,<3.12"}
+]
+ipython = [
+  {version = "7.31.1", python = "3.7"},
+  {version = "^8.12.2", python = "^3.8,<3.12"}
+]
+ipywidgets = "^8.0.3"
 jupyter = "1.0.0"
-jupyter_client = "7.4.7"
-jupyter_console = "6.4.4"
-jupyter_core = "4.11.2"
-jupyter_server = "1.18.1"
-traitlets = "5.11.1"
+jupyter_client = "^7.4.9"
+jupyter_console = [
+  {version = "6.4.3", python = "^3.7,<3.9"},
+  {version = "^6.4.4", python = "^3.9,<3.12"}
+]
+jupyter_core = [
+  {version = "4.11.2", python = "3.7"},
+  {version = "^5.5.0", python = "^3.8,<3.12"}
+]
+jupyter_server = [
+  {version = "1.13.5", python = "^3.7,<3.9"},
+  {version = "^1.18.1", python = "^3.9,<3.12"}
+]
+traitlets = [
+  {version = "5.7.1", python = "^3.7,<3.9"},
+  {version = "^5.11.1", python = "^3.9,<3.12"}
+]
+nbconvert = [
+  {version = "6.4.1", python = "^3.7,<3.9"},
+  {version = "^6.4.4", python = "^3.9,<3.12"},
+]
+scipy = [
+  {version = "1.7.3", python = "3.7"},
+  {version = "^1.7.3", python = "^3.9,<3.12"}
+]
 
 [build-system]
 requires = ["poetry-core"]
