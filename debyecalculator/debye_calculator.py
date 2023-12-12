@@ -395,7 +395,7 @@ class DebyeCalculator:
         """
 
         # Calculate Scattering S(Q)
-        _, iq = self.iq(structure_path, radii, keep_on_device=True, _total_scattering=True, _lightweight_mode=self._lightweight_mode)
+        _, iq = self.iq(structure_path, radii, keep_on_device=True, _total_scattering=True)
         
         sq_output = []
         for i in range(self.num_structures):
@@ -430,7 +430,7 @@ class DebyeCalculator:
             Tuple of torch tensors containing Q-values and reduced structure function F(Q) if keep_on_device is True, otherwise, numpy arrays on CPU.
         """
         # Calculate Scattering S(Q)
-        _, iq = self.iq(structure_path, radii, keep_on_device=True, _total_scattering=True, _lightweight_mode=self._lightweight_mode)
+        _, iq = self.iq(structure_path, radii, keep_on_device=True, _total_scattering=True)
 
         fq_output = []
         for i in range(self.num_structures):
@@ -470,7 +470,7 @@ class DebyeCalculator:
             self.profiler.reset()
 
         # Calculate Scattering I(Q), S(Q), F(Q)
-        _, iq = self.iq(structure_path, radii, keep_on_device=True, _total_scattering=True, _lightweight_mode=self._lightweight_mode)
+        _, iq = self.iq(structure_path, radii, keep_on_device=True, _total_scattering=True)
 
         gr_output = []
         for i in range(self.num_structures):
