@@ -72,18 +72,8 @@ class DebyeCalculator:
         _max_batch_size: int = 4000,
         _lightweight_mode: bool = False,
     ) -> None:
-
-        self.profile = profile
-        if self.profile:
-            self.profiler = Profiler()
-        
-        # Initial parameters
-        self.device = device
-        self.batch_size = batch_size
-        self.lorch_mod = lorch_mod
-        self.radiation_type = radiation_type
-        
-        # Standard Debye parameters
+            
+        # Set parameters
         self.qmin = qmin
         self.qmax = qmax
         self.qstep = qstep
@@ -93,7 +83,19 @@ class DebyeCalculator:
         self.rstep = rstep
         self.rthres = rthres
         self.biso = biso
+        self.device = device
+        self.batch_size = batch_size
+        self.lorch_mod = lorch_mod
+        self.radiation_type = radiation_type
 
+        # Parameter constraint assertion
+        self.parameter_constraint_assertion()
+
+        # Profiler
+        self.profile = profile
+        if self.profile:
+            self.profiler = Profiler()
+        
         # Initialise ranges
         self.q = torch.arange(self.qmin, self.qmax, self.qstep).unsqueeze(-1).to(device=self.device)
         self.r = torch.arange(self.rmin, self.rmax, self.rstep).unsqueeze(-1).to(device=self.device)
@@ -111,8 +113,11 @@ class DebyeCalculator:
             self.form_factor_func = lambda p: torch.sum(p[:5] * torch.exp(-1*p[6:11] * (self.q / (4*torch.pi)).pow(2)), dim=1) + p[5]
         elif radiation_type.lower() in ['neutron', 'n']:
             self.form_factor_func = lambda p: p[11].unsqueeze(-1)
+        else:
+            # Should not reach this point, here for safety
+            raise ValueError("Invalid radiation type")
 
-        # Batch size
+        # Max batch size
         self._max_batch_size = _max_batch_size
         
         # Lightweight mode
@@ -126,6 +131,38 @@ class DebyeCalculator:
                       'biso': self.biso}
 
         return f"DebyeCalculator{parameters}"
+
+    def parameter_constraint_assertion(
+        self,
+    ) -> None:
+        """
+        Asserting that all parameters are valid.
+        """
+
+        if self.qmin < 0:
+            raise ValueError("qmin must be non-negative.")
+        if self.qmax < 0:
+            raise ValueError("qmax must be non-negative.")
+        if self.qstep < 0:
+            raise ValueError("qstep must be non-negative.")
+        if self.qdamp < 0:
+            raise ValueError("qdamp must be non-negative.")
+        if self.rmin < 0:
+            raise ValueError("rmin must be non-negative.")
+        if self.rmax < 0:
+            raise ValueError("rmax must be non-negative.")
+        if self.rstep < 0:
+            raise ValueError("rstep must be non-negative.")
+        if self.rthres < 0:
+            raise ValueError("rthres must be non-negative.")
+        if self.biso < 0:
+            raise ValueError("biso must be non-negative.")
+        if self.batch_size is not None and self.batch_size < 0:
+            raise ValueError("batch_size must be non-negative.")
+        if self.device not in ['cpu', 'cuda']:
+            raise ValueError("Invalid device")
+        if self.radiation_type not in ['xray', 'x', 'neutron', 'n']:
+            raise ValueError("Invalid radiation type")
     
     def update_parameters(
         self,
@@ -143,6 +180,9 @@ class DebyeCalculator:
             except:
                 print("Failed to update parameters because of unexpected parameter names")
                 return
+
+        # Run constrain assertion
+        self.parameter_constraint_assertion()
             
         # Re-initialise ranges
         if np.any([k in ['qmin','qmax','qstep','rmin', 'rmax', 'rstep'] for k in kwargs.keys()]):
@@ -292,26 +332,6 @@ class DebyeCalculator:
         if not isinstance(structure_path, Atoms):
             if not os.path.exists(structure_path):
                 raise FileNotFoundError(f"{structure_path} not found.")
-        if self.qmin < 0:
-            raise ValueError("qmin must be non-negative.")
-        if self.qmax < 0:
-            raise ValueError("qmax must be non-negative.")
-        if self.qstep < 0:
-            raise ValueError("qstep must be non-negative.")
-        if self.qdamp < 0:
-            raise ValueError("qdamp must be non-negative.")
-        if self.rmin < 0:
-            raise ValueError("rmin must be non-negative.")
-        if self.rmax < 0:
-            raise ValueError("rmax must be non-negative.")
-        if self.rstep < 0:
-            raise ValueError("rstep must be non-negative.")
-        if self.rthres < 0:
-            raise ValueError("rthres must be non-negative.")
-        if self.biso < 0:
-            raise ValueError("biso must be non-negative.")
-        if self.batch_size is not None and self.batch_size < 0:
-            raise ValueError("batch_size must be non-negative.")
         
         # Initialise structure
         self._initialise_structures(structure_path, radii, disable_pbar = True)

@@ -106,8 +106,58 @@ def test_invalid_input():
         calc = DebyeCalculator()
         calc.iq('non_existent_file.xyz')
 
-    # Test that the DebyeCalculator raises a ValueError when given invalid input parameters in the iq method
+    # Test that the DebyeCalculator raises a ValueError when given invalid input parameters
     with pytest.raises(ValueError):
-        calc = DebyeCalculator()
+        calc = DebyeCalculator(qmin=-1.0)
+    with pytest.raises(ValueError):
+        calc = DebyeCalculator(qmax=-1.0)
+    with pytest.raises(ValueError):
+        calc = DebyeCalculator(qstep=-1.0)
+    with pytest.raises(ValueError):
+        calc = DebyeCalculator(qdamp=-1.0)
+    with pytest.raises(ValueError):
+        calc = DebyeCalculator(rmin=-1.0)
+    with pytest.raises(ValueError):
+        calc = DebyeCalculator(rmax=-1.0)
+    with pytest.raises(ValueError):
+        calc = DebyeCalculator(rstep=-1.0)
+    with pytest.raises(ValueError):
+        calc = DebyeCalculator(rthres=-1.0)
+    with pytest.raises(ValueError):
+        calc = DebyeCalculator(biso=-1.0)
+    with pytest.raises(ValueError):
+        calc = DebyeCalculator(batch_size = -1)
+    with pytest.raises(ValueError):
+        calc = DebyeCalculator(device = 'xxx')
+    with pytest.raises(ValueError):
+        calc = DebyeCalculator(radiation_type = 'xxx')
+
+    # Test invalid update of parameters
+    calc = DebyeCalculator()
+    with pytest.raises(ValueError):
         calc.update_parameters(qmin=-1.0)
-        calc.iq('debyecalculator/unittests_files/icsd_001504_cc_r6_lc_2.85_6_tetragonal.xyz')
+    with pytest.raises(ValueError):
+        calc.update_parameters(qmin=-1.0)
+    with pytest.raises(ValueError):
+        calc.update_parameters(qmax=-1.0)
+    with pytest.raises(ValueError):
+        calc.update_parameters(qstep=-1.0)
+    with pytest.raises(ValueError):
+        calc.update_parameters(qdamp=-1.0)
+    with pytest.raises(ValueError):
+        calc.update_parameters(rmin=-1.0)
+    with pytest.raises(ValueError):
+        calc.update_parameters(rmax=-1.0)
+    with pytest.raises(ValueError):
+        calc.update_parameters(rstep=-1.0)
+    with pytest.raises(ValueError):
+        calc.update_parameters(rthres=-1.0)
+    with pytest.raises(ValueError):
+        calc.update_parameters(biso=-1.0)
+    with pytest.raises(ValueError):
+        calc.update_parameters(batch_size = -1)
+    with pytest.raises(ValueError):
+        calc.update_parameters(device = 'xxx')
+    with pytest.raises(ValueError):
+        calc.update_parameters(radiation_type = 'xxx')
+
