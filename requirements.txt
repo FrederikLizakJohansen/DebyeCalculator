@@ -1,8 +1,0 @@
-ase==3.22.1
-numpy==1.24.2
-torch==2.0.1
-torchaudio==2.0.2
-torchvision==0.15.2
-PyYAML==6.0.1
-ipywidgets==8.1.1
-tqdm==4.66.1
