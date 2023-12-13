@@ -48,9 +48,7 @@ git clone https://github.com/FrederikLizakJohansen/DebyeCalculator.git
 
 Run the following command to install the __DebyeCalculator__ package. (**Requires**: Python >=3.7, <3.12)
 ```
-pip install .
-or
-python setup.py install
+python -m pip install .
 ```
 
 # Usage
