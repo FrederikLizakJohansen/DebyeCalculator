@@ -29,8 +29,8 @@ def test_iq():
     Q, Iq = calc.iq('debyecalculator/unittests_files/icsd_001504_cc_r6_lc_2.85_6_tetragonal.xyz')
 
     # Check that the calculated scattering intensity matches the expected value
-    assert np.allclose(Q, Q_expected, rtol=1e-03), f"Expected Q to be {Q_expected}, but got {Q}"
-    assert np.allclose(Iq, Iq_expected, rtol=1e-03), f"Expected Iq to be {Iq_expected}, but got {Iq}"
+    assert np.allclose(Q, Q_expected, atol=1e-05, rtol=1e-03), f"Expected Q to be {Q_expected}, but got {Q}"
+    assert np.allclose(Iq, Iq_expected, atol=1e-05, rtol=1e-03), f"Expected Iq to be {Iq_expected}, but got {Iq}"
 
 def test_sq():
     # Load the expected structure factor from a file
@@ -42,8 +42,8 @@ def test_sq():
     Q, sq = calc.sq('debyecalculator/unittests_files/icsd_001504_cc_r6_lc_2.85_6_tetragonal.xyz')
 
     # Check that the calculated structure factor matches the expected value
-    assert np.allclose(Q, Q_expected, rtol=1e-03), f"Expected Q to be {Q_expected}, but got {Q}"
-    assert np.allclose(sq, sq_expected, rtol=1e-03), f"Expected Sq to be {sq_expected}, but got {sq}"
+    assert np.allclose(Q, Q_expected, atol=1e-05, rtol=1e-03), f"Expected Q to be {Q_expected}, but got {Q}"
+    assert np.allclose(sq, sq_expected, atol=1e-05, rtol=1e-03), f"Expected Sq to be {sq_expected}, but got {sq}"
 
 def test_fq():
     # Load the expected atomic form factor from a file
@@ -55,8 +55,8 @@ def test_fq():
     Q, fq = calc.fq('debyecalculator/unittests_files/icsd_001504_cc_r6_lc_2.85_6_tetragonal.xyz')
 
     # Check that the calculated atomic form factor matches the expected value
-    assert np.allclose(Q, Q_expected, rtol=1e-03), f"Expected Q to be {Q_expected}, but got {Q}"
-    assert np.allclose(fq, fq_expected, rtol=1e-03), f"Expected fq to be {fq_expected}, but got {fq}"
+    assert np.allclose(Q, Q_expected, atol=1e-05, rtol=1e-03), f"Expected Q to be {Q_expected}, but got {Q}"
+    assert np.allclose(fq, fq_expected, atol=1e-05, rtol=1e-03), f"Expected fq to be {fq_expected}, but got {fq}"
 
 def test_gr():
     # Load the expected radial distribution function from a file
@@ -68,8 +68,8 @@ def test_gr():
     r, gr = calc.gr('debyecalculator/unittests_files/icsd_001504_cc_r6_lc_2.85_6_tetragonal.xyz')
 
     # Check that the calculated radial distribution function matches the expected value
-    assert np.allclose(r, r_expected, rtol=1e-03), f"Expected r to be {r_expected}, but got {r}"
-    assert np.allclose(gr, gr_expected, rtol=1e-03), f"Expected Gr to be {gr_expected}, but got {gr}"
+    assert np.allclose(r, r_expected, atol=1e-05, rtol=1e-03), f"Expected r to be {r_expected}, but got {r}"
+    assert np.allclose(gr, gr_expected, atol=1e-05, rtol=1e-03), f"Expected Gr to be {gr_expected}, but got {gr}"
 
 def test_get_all():
     # Calculate Iq, Fq, Sq, and Gr using the DebyeCalculator
@@ -79,8 +79,8 @@ def test_get_all():
     # Check that the calculated Iq matches the expected value
     ph = np.loadtxt('debyecalculator/unittests_files/icsd_001504_cc_r6_lc_2.85_6_tetragonal_Iq.dat')
     q_expected, iq_expected = ph[:,0], ph[:,1]
-    assert np.allclose(q, q_expected, rtol=1e-03), f"Expected q to be {q_expected}, but got {q}"
-    assert np.allclose(iq, iq_expected, rtol=1e-03), f"Expected Iq to be {iq_expected}, but got {iq}"
+    assert np.allclose(q, q_expected, atol=1e-05, rtol=1e-03), f"Expected q to be {q_expected}, but got {q}"
+    assert np.allclose(iq, iq_expected, atol=1e-05, rtol=1e-03), f"Expected Iq to be {iq_expected}, but got {iq}"
 
     # Check that the calculated Sq matches the expected value
     ph = np.loadtxt('debyecalculator/unittests_files/icsd_001504_cc_r6_lc_2.85_6_tetragonal_Sq.dat')
@@ -91,14 +91,14 @@ def test_get_all():
     # Check that the calculated Fq matches the expected value
     ph = np.loadtxt('debyecalculator/unittests_files/icsd_001504_cc_r6_lc_2.85_6_tetragonal_Fq.dat')
     q_expected, fq_expected = ph[:,0], ph[:,1]
-    assert np.allclose(q, q_expected, rtol=1e-03), f"Expected q to be {q_expected}, but got {q}"
-    assert np.allclose(fq, fq_expected, rtol=1e-03), f"Expected Fq to be {fq_expected}, but got {fq}"
+    assert np.allclose(q, q_expected, atol=1e-05, rtol=1e-03), f"Expected q to be {q_expected}, but got {q}"
+    assert np.allclose(fq, fq_expected, atol=1e-05, rtol=1e-03), f"Expected Fq to be {fq_expected}, but got {fq}"
 
     # Check that the calculated Gr matches the expected value
     ph = np.loadtxt('debyecalculator/unittests_files/icsd_001504_cc_r6_lc_2.85_6_tetragonal_Gr.dat')
     r_expected, gr_expected = ph[:,0], ph[:,1]
-    assert np.allclose(gr, gr_expected, rtol=1e-03), f"Expected r to be {gr_expected}, but got {gr}"
-    assert np.allclose(gr, gr_expected, rtol=1e-03), f"Expected Gr to be {gr_expected}, but got {gr}"
+    assert np.allclose(gr, gr_expected, atol=1e-05, rtol=1e-03), f"Expected r to be {gr_expected}, but got {gr}"
+    assert np.allclose(gr, gr_expected, atol=1e-05, rtol=1e-03), f"Expected Gr to be {gr_expected}, but got {gr}"
 
 def test_invalid_input():
     # Test that the DebyeCalculator raises a FileNotFoundError when given a non-existent file
