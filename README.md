@@ -10,6 +10,7 @@ Here, we provide an optimised code for the calculation of the Debye scattering e
 1. [Installation](#installation)
     1. [Install with pip](#install-with-pip)
     2. [Install locally](#install-locally)
+    3. [Testing installation](#testing-installation)
 2. [Usage](#usage)
     1. [Interactive mode](#interactive-mode-at-google-colab)
     3. [Example usage](#example-usage)
@@ -49,6 +50,17 @@ git clone https://github.com/FrederikLizakJohansen/DebyeCalculator.git
 Run the following command to install the __DebyeCalculator__ package. (**Requires**: Python >=3.7, <3.12)
 ```
 python -m pip install .
+```
+
+## Testing the installation
+To ensure that the installation is set up correctly and your environment is ready to go, we recommend running the included unit tests. </br>
+First, make sure you have [pytest](https://docs.pytest.org/en/stable/) installed. If not, you can install it using:
+```bash
+pip install pytest
+```
+After installing the package, open a terminal or command prompt and navigate to the root directory of the package. Then run the following command to execute the tests:
+```bash
+pytest
 ```
 
 # Usage
