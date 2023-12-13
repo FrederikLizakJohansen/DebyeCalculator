@@ -6,7 +6,8 @@ import pkg_resources
 import warnings
 from glob import glob
 from datetime import datetime
-from typing import Union, Tuple, Any, List
+from typing import Union, Tuple, Any, List, Type
+from collections import namedtuple
 
 import torch
 from torch import cdist
@@ -29,6 +30,23 @@ from tqdm.auto import tqdm
 
 import collections
 import timeit
+
+StructureTuple = namedtuple('StructureTuple', 'elements size occupancy xyz triu_indices unique_inverse unique_form_factors form_avg_sq structure_inverse')
+IQTuple = namedtuple('IQTuple', 'Q I')
+
+ArrayLike = Union[np.ndarray, torch.Tensor]
+IntArrayLike = Union[List[int], np.ndarray, torch.Tensor]
+StructureSourceType = Union[
+    Tuple[List[str], ArrayLike],
+    Tuple[IntArrayLike, ArrayLike],
+    List[Tuple[List[str], ArrayLike]],
+    List[Tuple[IntArrayLike, ArrayLike]],
+    str,
+    List[str],
+    Atoms,
+    List[Atoms],
+]
+
 
 class DebyeCalculator:
     """
@@ -189,127 +207,131 @@ class DebyeCalculator:
             self.q = torch.arange(self.qmin, self.qmax, self.qstep).unsqueeze(-1).to(device=self.device)
             self.r = torch.arange(self.rmin, self.rmax, self.rstep).unsqueeze(-1).to(device=self.device)
 
-    def _initialise_structures(
+    def _initialise_structure(
         self,
-        structure_path: Union[str, Atoms, List[Atoms]],
+        structure_source: StructureSourceType,
         radii: Union[List[float], float, None] = None,
         disable_pbar: bool = False,
     ) -> None:
 
         """
-        Initialise atomic structures and unique elements form factors from an input file.
+        Initialise a single atomic structure and unique elements form factors from an input file.
 
         Parameters:
-            structure_path (Union[str, Atoms, List[Atoms]]): Path to the atomic structure file in XYZ/CIF format or stored ASE Atoms objects.
+            structure_source (StructureSourceType): Atomic structure source in XYZ/CIF format, ASE Atoms object or as a tuple of (atomic_identities, atomic_positions)
             radii (Union[List[float], float, None]): List/float of radii/radius of particle(s) to generate with parsed CIF
         """
-        # Check if input is a file or ASE Atoms object
-        if isinstance(structure_path, str):
-            # Check file and extention
-            structure_ext = structure_path.split('.')[-1]
-            if structure_ext not in ['xyz', 'cif']:
-                raise TypeError('FAILED: Invalid file/file-extention, accepts only .xyz or .cif data files')
-        elif isinstance(structure_path, Atoms) or all(isinstance(lst_elm, Atoms) for lst_elm in structure_path):
-            structure_ext = 'ase'
-        else:
-            raise TypeError('FAILED: Invalid structure format, accepts only .xyz, .cif data files or ASE Atoms objects')
 
-        # If cif, check for radii and generate particles
-        if structure_ext == 'cif':
-            if radii is not None:
-                ase_structures, _ = self.generate_nanoparticles(structure_path, radii, disable_pbar=disable_pbar, _lightweight_mode=self._lightweight_mode)
-                self.num_structures = len(ase_structures)
-            else:
-                raise ValueError('FAILED: When providing .cif data file, please provide radii (Union[List[float], float]) to generate from.')
-
-            self.struc_elements = []
-            self.struc_size = []
-            self.struc_occupancy = []
-            self.struc_xyz = []
+        def is_valid_str_tuple(t: Tuple[List[str], ArrayLike]) -> bool:
+            check_len = len(t) == 2
+            check_type = isinstance(t[0], list) and isinstance(t[1], (np.ndarray, torch.Tensor))
+            check_shape = len(t[1].shape) == 2 and t[1].shape[1] == 3
             
-            for structure in ase_structures:
-                elements = structure.get_chemical_symbols()
-                size = len(elements)
-                occupancy = torch.ones((size), dtype=torch.float32).to(device=self.device)
-                xyz = torch.tensor(np.array(structure.get_positions())).to(device=self.device, dtype=torch.float32)
+            return check_len and check_type and check_shape
 
-                self.struc_elements.append(elements)
-                self.struc_size.append(size)
-                self.struc_occupancy.append(occupancy)
-                self.struc_xyz.append(xyz)
+        def is_valid_int_tuple(t: Tuple[IntArrayLike, ArrayLike]) -> bool:
+            check_len = lent(t) == 2
+            check_type = isinstance(t[0], (np.ndarray, torch.Tensor)) and isinstance(t[1], (np.ndarray, torch.Tensor))
+            check_shape = len(t[0].shape) == 1 and len(t[1].shape) == 2 and t[1].shape[1] == 3
 
-        elif structure_ext == 'xyz':
-                
-            self.num_structures = 1
-            struc = np.genfromtxt(structure_path, dtype='str', skip_header=2) # Gen
-            self.struc_elements = [struc[:,0]] # Identities
-            self.struc_size = [len(self.struc_elements[0])] # Size
+            return check_len and check_type and check_shape
 
-            # Append occupancy if nothing is provided
-            if struc.shape[1] == 5:
-                self.struc_occupancy = [torch.from_numpy(struc[:,-1]).to(device=self.device, dtype=torch.float32)]
-                self.struc_xyz = [torch.tensor(struc[:,1:-1].astype('float')).to(device=self.device, dtype=torch.float32)]
-            else:
-                self.struc_occupancy = [torch.ones((self.struc_size[0]), dtype=torch.float32).to(device=self.device)]
-                self.struc_xyz = [torch.tensor(struc[:,1:].astype('float')).to(device=self.device, dtype=torch.float32)]
-        elif structure_ext == 'ase':
-            if isinstance(structure_path, Atoms):
-                ase_structures = [structure_path]
-            else:
-                ase_structures = structure_path
-            
-            self.num_structures = len(ase_structures)
-            
-            self.struc_elements = []
-            self.struc_size = []
-            self.struc_occupancy = []
-            self.struc_xyz = []
-            
-            for structure in ase_structures:
-                elements = structure.get_chemical_symbols()
-                size = len(elements)
-                occupancy = torch.ones((size), dtype=torch.float32).to(device=self.device)
-                xyz = torch.tensor(np.array(structure.get_positions())).to(device=self.device, dtype=torch.float32)
-
-                self.struc_elements.append(elements)
-                self.struc_size.append(size)
-                self.struc_occupancy.append(occupancy)
-                self.struc_xyz.append(xyz)
-        else:
-            raise TypeError('FAILED: Invalid structure format, accepts only .xyz, .cif data files or ASE Atoms objects')
-
-        # Unique elements and their counts
-        self.triu_indices = []
-        self.unique_inverse = []
-        self.struc_unique_form_factors = []
-        self.struc_form_avg_sq = []
-        self.struc_inverse = []
-
-        for i in range(self.num_structures):
-
+        def parse_elements(elements):
             # Get unique elements and construc form factor stacks
-            unique_elements, inverse, counts = np.unique(self.struc_elements[i], return_counts=True, return_inverse=True)
+            unique_elements, inverse, counts = np.unique(elements, return_counts=True, return_inverse=True)
 
-            triu_indices = torch.triu_indices(self.struc_size[i], self.struc_size[i], 1)
+            triu_indices = torch.triu_indices(size, size, 1)
             unique_inverse = torch.from_numpy(inverse[triu_indices]).to(device=self.device)
-            struc_unique_form_factors = torch.stack([self.form_factor_func(self.FORM_FACTOR_COEF[el]) for el in unique_elements])
-
-            self.triu_indices.append(triu_indices)
-            self.unique_inverse.append(unique_inverse)
-            self.struc_unique_form_factors.append(struc_unique_form_factors)
+            unique_form_factors = torch.stack([self.form_factor_func(self.FORM_FACTOR_COEF[el]) for el in unique_elements])
 
             # Calculate average squared form factor and self scattering inverse indices
             counts = torch.from_numpy(counts).to(device=self.device)
             compositional_fractions = counts / torch.sum(counts)
-            struc_form_avg_sq = torch.sum(compositional_fractions.reshape(-1,1) * struc_unique_form_factors, dim=0)**2
-            struc_inverse = torch.from_numpy(np.array([inverse[i] for i in range(self.struc_size[i])])).to(device=self.device)
+            struc_form_avg_sq = torch.sum(compositional_fractions.reshape(-1,1) * unique_form_factors, dim=0)**2
+            struc_inverse = torch.from_numpy(np.array([inverse[i] for i in range(size)])).to(device=self.device)
 
-            self.struc_form_avg_sq.append(struc_form_avg_sq)
-            self.struc_inverse.append(struc_inverse)
+            return triu_indices, unique_inverse, unique_form_factors, form_avg_sq, structure_inverse
+
+        if isinstance(structure_source, tuple):
+            if is_valid_str_tuple(structure_source):
+
+                elements, xyz = structure_source
+                size = xyz.shape[0]
+                xyz = xyz.to(device=self.device, dtype=torch.float32)
+                occupancy = torch.ones(xyz.shape[0]).to(device=self.device, dtype=torch.float32)
+                triu_indices, unique_inverse, unique_form_factors, form_avg_sq, structure_inverse = parse_elements(elements)
+
+                return StructureTuple(elements, size, occupancy, xyz, triu_indices, unique_inverse, unique_form_factors, form_avg_sq, structure_inverse)
+
+            elif is_valid_int_tuple(structure_source):
+                raise NotImplementedError('Coming soon')
+            else:
+                raise TypeError('Encountered an invalid structure source (type: tuple)')
+        elif isinstance(structure_source, str):
+            try:
+                ext = structure_source.split('.')[-1]
+            except:
+                raise TypeError(f'Encountered invalid file path on {structure_source}')
+            if ext == 'xyz':
+                try:
+                    structure = np.genfromtxt(structure_source, dtype='str', skip_header=2)
+                    elements = structure[:,0]
+                    size = len(elements)
+
+                    # Append occupancy if nothing is provided
+                    if structure.shape[1] == 5:
+                        occupancy = torch.from_numpy(structure[:,-1]).to(device=self.device, dtype=torch.float32)
+                        xyz = torch.tensor(structure[:,1:-1].astype('float')).to(device=self.device, dtype=torch.float32)
+                    else:
+                        occupancy = torch.ones((structure_size[0]), dtype=torch.float32).to(device=self.device)
+                        xyz = torch.tensor(structure[:,1:].astype('float')).to(device=self.device, dtype=torch.float32)
+                except:
+                    raise IOError(f'Encountered invalid file format when trying to load structure from {structure_source}')
+                    
+                triu_indices, unique_inverse, unique_form_factors, form_avg_sq, structure_inverse = parse_elements(elements)
+
+                return StructureTuple(elements, size, occupancy, xyz, triu_indices, unique_inverse, unique_form_factors, form_avg_sq, structure_inverse)
+
+            elif ext == 'cif':
+                if radii is not None:
+                    structures = self.generate_nanoparticles(structure_source, radii, disable_pbar=disable_pbar, _lightweight_mode=self._lightweight_mode)[0]
+                    structure_tuple_list = []
+
+                    for structure in structures:
+                        elements = structure.get_chemical_symbols()
+                        size = len(elements)
+                        occupancy = torch.ones((size), dtype=torch.float32).to(device=self.device)
+                        xyz = torch.tensor(np.array(structure.get_positions())).to(device=self.device, dtype=torch.float32)
+                
+                        triu_indices, unique_inverse, unique_form_factors, form_avg_sq, structure_inverse = parse_elements(elements)
+
+                        structure_tuple_list.append(
+                            StructureTuple(elements, size, occupancy, xyz, triu_indices, unique_inverse, unique_form_factors, form_avg_sq, structure_inverse)
+                        )
+
+                    return structure_tuple_list
+                else:
+                    raise ValueError('When providing .cif data file, please provide radii (Union[List[float], float]) for the decrete particle generation')
+            else:
+                raise TypeError(f'Encountered invalid file-extention on {structure_source}, valid extentions include [".xyz", ".cif"]')
+        elif isinstance(structure_source, Atoms):
+            try:
+                elements = structure_source.get_chemical_symbols()
+                size = len(elements)
+                occupancy = torch.ones((size), dtype=torch.float32).to(device=self.device)
+                xyz = torch.tensor(np.array(structure_source.get_positions())).to(device=self.device, dtype=torch.float32)
+            except:
+                raise ValueError(f'Encountered invalid Atoms object')
+                
+            triu_indices, unique_inverse, unique_form_factors, form_avg_sq, structure_inverse = parse_elements(elements)
+
+            return StructureTuple(elements, size, occupancy, xyz, triu_indices, unique_inverse, unique_form_factors, form_avg_sq, structure_inverse)
+        else:
+            raise TypeError('Encountered unknown structure source')
 
     def iq(
         self,
-        structure_path: Union[str, Atoms, List[Atoms]],
+        structure_source: StructureSourceType,
         radii: Union[List[float], float, None] = None,
         keep_on_device: bool = False,
         _total_scattering: bool = False,
@@ -327,28 +349,16 @@ class DebyeCalculator:
         Returns:
             Tuple of torch tensors containing Q-values and scattering intensity I(Q) if keep_on_device is True, otherwise, numpy arrays on CPU.
         """
-        
-        # Raises errors if wrong path or parameters
-        if not isinstance(structure_path, Atoms):
-            if not os.path.exists(structure_path):
-                raise FileNotFoundError(f"{structure_path} not found.")
-        
-        # Initialise structure
-        self._initialise_structures(structure_path, radii, disable_pbar = True)
 
-        if self.profile:
-            self.profiler.time('Setup structures and form factors')
-
-        # Calculate I(Q) for all initialised structures
-        iq_output = []
-        for i in range(self.num_structures):
+        def compute_iq(structure):
 
             # Calculate distances and batch
             if self.batch_size is None:
                 self.batch_size = self._max_batch_size
-            dists = pdist(self.struc_xyz[i]).split(self.batch_size)
-            indices = self.triu_indices[i].split(self.batch_size, dim=1)
-            inverse_indices = self.unique_inverse[i].split(self.batch_size, dim=1)
+
+            dists = pdist(structure.xyz).split(self.batch_size)
+            indices = structure.triu_indices.split(self.batch_size, dim=1)
+            inverse_indices = structure.unique_inverse.split(self.batch_size, dim=1)
 
             if self.profile:
                 self.profiler.time('Batching and Distances')
@@ -357,9 +367,9 @@ class DebyeCalculator:
             iq = torch.zeros((len(self.q))).to(device=self.device, dtype=torch.float32)
             for d, inv_idx, idx in zip(dists, inverse_indices, indices):
                 mask = d >= self.rthres
-                occ_product = self.struc_occupancy[i][idx[0]] * self.struc_occupancy[i][idx[1]]
+                occ_product = structure.occupancy[idx[0]] * structure.occupancy[idx[1]]
                 sinc = torch.sinc(d[mask] * self.q / torch.pi)
-                ffp = self.struc_unique_form_factors[i][inv_idx[0]] * self.struc_unique_form_factors[i][inv_idx[1]]
+                ffp = structure.unique_form_factors[inv_idx[0]] * structure.unique_form_factors[inv_idx[1]]
                 iq += torch.sum(occ_product.unsqueeze(-1)[mask] * ffp[mask] * sinc.permute(1,0), dim=0)
 
             # Apply Debye-Weller Isotropic Atomic Displacement
@@ -370,32 +380,49 @@ class DebyeCalculator:
             if _total_scattering:
                 if self.profile:
                     self.profiler.time('I(Q)')
-                iq_output.append(iq) # TODO Times 2
-                continue
-
-            # Self-scattering contribution
-            sinc = torch.ones((self.struc_size[i], len(self.q))).to(device=self.device)
-            iq += torch.sum((self.struc_occupancy[i].unsqueeze(-1) * self.struc_unique_form_factors[i][self.struc_inverse[i]])**2 * sinc, dim=0) / 2
-            iq *= 2
-
-            if self.profile:
-                self.profiler.time('I(Q)')
-
-            iq_output.append(iq)
-            
-        if _total_scattering:
-            return self.q.squeeze(-1), iq_output
-
-        if keep_on_device:
-            if self.num_structures == 1:
-                return self.q.squeeze(-1), iq_output[0]
+                return iq
             else:
-                return self.q.squeeze(-1), iq_output
+                # Self-scattering contribution
+                sinc = torch.ones((structure.size, len(self.q))).to(device=self.device)
+                iq += torch.sum((structure.occupancy.unsqueeze(-1) * structure.unique_form_factors[structure.inverse])**2 * sinc, dim=0) / 2
+                iq *= 2
+
+                if self.profile:
+                    self.profiler.time('I(Q)')
+
+                return iq
+        
+        # Initialise structure(s)
+        if isinstance(structure_source, list):
+            structures = []
+            for i, item in enumerate(structure_source):
+                structure_output = self._initialise_structure(item, radii, disable_pbar = True)
+                if self.profile:
+                    self.profiler.time('Setup structures and form factors')
+
+                if isinstance(structure_tuple, list):
+                    structures.extend(structure_output)
+                else:
+                    structures.append(structure_output)
+
+            output = []
+            for structure in structures:
+                if _keep_on_device:
+                    iq_tuple = IQTuple(self.q.squeeze(-1), compute_iq(structure))
+                else:
+                    iq_tuple = IQTuple(self.q.squeeze(-1).cpu().numpy(), compute_iq(structure).cpu().numpy())
+                output.append(iq_tuple)
+            return output
         else:
-            if self.num_structures == 1:
-                return self.q.squeeze(-1).cpu().numpy(), iq_output[0].cpu().numpy()
+            structure = self._initialise_structure(structure_source, radii, disable_pbar = True)
+            if self.profile:
+                self.profiler.time('Setup structures and form factors')
+                
+            if _keep_on_device:
+                iq_tuple = IQTuple(self.q.squeeze(-1), compute_iq(structure))
             else:
-                return self.q.squeeze(-1).cpu().numpy(), [iq.cpu().numpy() for iq in iq_output]
+                iq_tuple = IQTuple(self.q.squeeze(-1).cpu().numpy(), compute_iq(structure).cpu().numpy())
+            return iq_tuple
 
     def sq(
         self,
