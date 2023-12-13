@@ -290,8 +290,9 @@ class DebyeCalculator:
         """
         
         # Raises errors if wrong path or parameters
-        # if not os.path.exists(structure_path):
-        #     raise FileNotFoundError(f"{structure_path} not found.")
+        if not isinstance(structure_path, Atoms):
+            if not os.path.exists(structure_path):
+                 raise FileNotFoundError(f"{structure_path} not found.")
         if self.qmin < 0:
             raise ValueError("qmin must be non-negative.")
         if self.qmax < 0:
