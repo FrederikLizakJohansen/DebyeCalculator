@@ -102,7 +102,7 @@ def test_get_all():
 
 def test_invalid_input():
     # Test that the DebyeCalculator raises a FileNotFoundError when given a non-existent file
-    with pytest.raises(FileNotFoundError):
+    with pytest.raises(IOError):
         calc = DebyeCalculator()
         calc.iq('non_existent_file.xyz')
 
