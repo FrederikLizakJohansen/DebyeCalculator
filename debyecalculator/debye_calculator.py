@@ -22,14 +22,12 @@ from ase.build import make_supercell
 from ase.build.tools import sort as ase_sort
 
 from debyecalculator.utility.profiling import Profiler
+from debyecalculator.utility.generate import generate_nanoparticles
 
 import ipywidgets as widgets
 from IPython.display import display, HTML, clear_output
 from ipywidgets import HBox, VBox, Layout
 from tqdm.auto import tqdm
-
-import collections
-import timeit
 
 StructureTuple = namedtuple('StructureTuple', 'elements size occupancy xyz triu_indices unique_inverse unique_form_factors form_avg_sq structure_inverse')
 IqTuple = namedtuple('IqTuple', 'q i')
@@ -122,7 +120,7 @@ class DebyeCalculator:
         self.r = torch.arange(self.rmin, self.rmax, self.rstep).unsqueeze(-1).to(device=self.device)
 
         # Form factor coefficients
-        with open(pkg_resources.resource_filename(__name__, 'form_factor_coef.yaml'), 'r') as yaml_file:
+        with open(pkg_resources.resource_filename(__name__, 'utility/elements_info.yaml'), 'r') as yaml_file:
             self.FORM_FACTOR_COEF = yaml.safe_load(yaml_file)
 
         # Formfactor retrieval lambda
@@ -239,7 +237,7 @@ class DebyeCalculator:
 
             return check_len and check_type and check_shape
 
-        def parse_elements(elements):
+        def parse_elements(elements, size):
             # Get unique elements and construc form factor stacks
             unique_elements, inverse, counts = np.unique(elements, return_counts=True, return_inverse=True)
 
@@ -262,7 +260,7 @@ class DebyeCalculator:
                 size = xyz.shape[0]
                 xyz = xyz.to(device=self.device, dtype=torch.float32)
                 occupancy = torch.ones(xyz.shape[0]).to(device=self.device, dtype=torch.float32)
-                triu_indices, unique_inverse, unique_form_factors, form_avg_sq, structure_inverse = parse_elements(elements)
+                triu_indices, unique_inverse, unique_form_factors, form_avg_sq, structure_inverse = parse_elements(elements, size)
 
                 return StructureTuple(elements, size, occupancy, xyz, triu_indices, unique_inverse, unique_form_factors, form_avg_sq, structure_inverse)
 
@@ -291,25 +289,28 @@ class DebyeCalculator:
                 except:
                     raise IOError(f'Encountered invalid file format when trying to load structure from {structure_source}')
                     
-                triu_indices, unique_inverse, unique_form_factors, form_avg_sq, structure_inverse = parse_elements(elements)
+                triu_indices, unique_inverse, unique_form_factors, form_avg_sq, structure_inverse = parse_elements(elements, size)
 
                 return StructureTuple(elements, size, occupancy, xyz, triu_indices, unique_inverse, unique_form_factors, form_avg_sq, structure_inverse)
 
             elif ext == 'cif':
                 if radii is not None:
-                    structures = self.generate_nanoparticles(structure_source, radii, disable_pbar=disable_pbar, _lightweight_mode=self._lightweight_mode)[0]
+                    structures = generate_nanoparticles(structure_source, radii, disable_pbar=disable_pbar, _lightweight_mode=self._lightweight_mode)
                     structure_tuple_list = []
-
                     for structure in structures:
-                        elements = structure.get_chemical_symbols()
-                        size = len(elements)
-                        occupancy = torch.ones((size), dtype=torch.float32).to(device=self.device)
-                        xyz = torch.tensor(np.array(structure.get_positions())).to(device=self.device, dtype=torch.float32)
-                
-                        triu_indices, unique_inverse, unique_form_factors, form_avg_sq, structure_inverse = parse_elements(elements)
-
+                        triu_indices, unique_inverse, unique_form_factors, form_avg_sq, structure_inverse = parse_elements(structure.elements, structure.size)
                         structure_tuple_list.append(
-                            StructureTuple(elements, size, occupancy, xyz, triu_indices, unique_inverse, unique_form_factors, form_avg_sq, structure_inverse)
+                            StructureTuple(
+                                elements = structure.elements,
+                                size = structure.size,
+                                occupancy = structure.occupancy.to(dtype=torch.float32, device=self.device),
+                                xyz = structure.xyz.to(dtype=torch.float32, device=self.device),
+                                triu_indices = triu_indices,
+                                unique_inverse = unique_inverse,
+                                unique_form_factors = unique_form_factors,
+                                form_avg_sq = form_avg_sq,
+                                structure_inverse = structure_inverse
+                            )
                         )
 
                     return structure_tuple_list
@@ -326,7 +327,7 @@ class DebyeCalculator:
             except:
                 raise ValueError(f'Encountered invalid Atoms object')
                 
-            triu_indices, unique_inverse, unique_form_factors, form_avg_sq, structure_inverse = parse_elements(elements)
+            triu_indices, unique_inverse, unique_form_factors, form_avg_sq, structure_inverse = parse_elements(elements, size)
 
             return StructureTuple(elements, size, occupancy, xyz, triu_indices, unique_inverse, unique_form_factors, form_avg_sq, structure_inverse)
         else:
@@ -725,134 +726,6 @@ class DebyeCalculator:
             output.append(output_tuple)
 
         return output if len(output) > 1 else output[0]
-
-    def generate_nanoparticles(
-        self,
-        structure_path: str,
-        radii: Union[List[float], float],
-        sort_atoms: bool = True,
-        disable_pbar: bool = False,
-        _override_device: bool = True,
-        _lightweight_mode: bool = False,
-    ) -> Tuple[Union[List[Atoms], Atoms], Union[List[float], float]]:
-
-        """
-        Generate nanoparticles from a given structure and list of radii.
-    
-        Args:
-            structure_path (str): Path to the input structure file.
-            radii (Union[List[float], float]): List of floats or float of radii for nanoparticles to be generated.
-            sort_atoms (bool, optional): Whether to sort atoms in the nanoparticle. Defaults to True.
-            _override_device (bool): Ignore object device and run in CPU
-    
-        Returns:
-            list: List of ASE Atoms objects representing the generated nanoparticles.
-            list: List of nanoparticle sizes (diameter) corresponding to each radius.
-        """
-
-        # Fix radii type
-        if isinstance(radii, list):
-            radii = [float(r) for r in radii]
-        elif isinstance(radii, float):
-            radii = [radii]
-        elif isinstance(radii, int):
-            radii = [float(radii)]
-        else:
-            raise ValueError('FAILED: Please provide valid radii for generation of nanoparticles')
-
-        # DEV: Override device
-        device = 'cpu' if _override_device else self.device
-
-        # Read the input unit cell structure
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            unit_cell = read(structure_path)
-        cell_dims = np.array(unit_cell.cell.cellpar()[:3])
-        r_max = np.amax(radii)
-    
-        # Create a supercell to encompass the entire range of nanoparticles and center it
-        padding = 2 # Symmetry padding to ensure the particle does not exceed the supercell boundary
-        supercell_matrix = np.diag((np.ceil(r_max / cell_dims)) * 2 + padding)
-        cell = make_supercell(prim=unit_cell, P=supercell_matrix)
-        cell.center(about=0.)
-    
-        # Convert positions to torch and send to device
-        positions = torch.from_numpy(cell.get_positions()).to(dtype = torch.float32, device = device)
-
-        if _lightweight_mode:
-            ligands = ['O', 'Cl', 'H'] # Placeholder
-            center_dists = torch.norm(positions, dim=1)
-        else:
-            # Find all metals and center around the nearest metal
-            ligands = ['O', 'Cl', 'H'] # Placeholder
-            metal_filter = torch.BoolTensor([a not in ligands for a in cell.get_chemical_symbols()]).to(device = device)
-            center_dists = torch.norm(positions, dim=1)
-            positions -= positions[metal_filter][torch.argmin(center_dists[metal_filter])]
-            center_dists = torch.norm(positions, dim=1)
-            min_metal_dist = torch.min(pdist(positions[metal_filter]))
-            min_bond_dist = torch.amin(cdist(positions[metal_filter], positions[~metal_filter]))
-            # Update the cell positions
-            cell.positions = positions.cpu()
-    
-        # Initialize nanoparticle lists and progress bar
-        nanoparticle_list = []
-        nanoparticle_sizes = []
-        pbar = tqdm(desc=f'Generating nanoparticles in range: [{np.amin(radii)},{np.amax(radii)}]', leave=False, total=len(radii), disable=disable_pbar)
-    
-        # Generate nanoparticles for each radius
-        for r in sorted(radii, reverse=True):
-            if _lightweight_mode:
-                # Mask all atoms within radius
-                incl_mask = (center_dists <= r)
-                
-                # Modify objects based on mask
-                cell = cell[incl_mask.cpu()]
-                center_dists = center_dists[incl_mask]
-                
-            else:
-                # Mask all atoms within radius
-                incl_mask = (center_dists <= r) | ((center_dists <= r + min_metal_dist) & ~metal_filter)
-
-                # Modify objects based on mask
-                cell = cell[incl_mask.cpu()]
-                center_dists = center_dists[incl_mask]
-                metal_filter = metal_filter[incl_mask]
-                positions = positions[incl_mask]
-                
-                # Find interdistances from all included atoms and remove 0's from diagonal
-                interface_dists = cdist(positions, positions).fill_diagonal_(min_metal_dist*2)
-        
-                # Remove floating atoms
-                interaction_mask = torch.amin(interface_dists, dim=0) < min_bond_dist*1.1
-                
-                # Modify objects based on mask
-                cell = cell[interaction_mask.cpu()]
-                center_dists = center_dists[interaction_mask]
-                metal_filter = metal_filter[interaction_mask]
-                positions = positions[interaction_mask]
-            
-            # Determine NP size
-            nanoparticle_size = torch.amax(center_dists) * 2
-
-            # Sort the atoms
-            if sort_atoms:
-                sorted_cell = ase_sort(cell)
-                if sorted_cell.get_chemical_symbols()[0] in ligands:
-                    sorted_cell = sorted_cell[::-1]
-    
-                # Append nanoparticle
-                nanoparticle_list.append(sorted_cell)
-            else:
-                # Append nanoparticle
-                nanoparticle_list.append(cell)
-
-            # Append size
-            nanoparticle_sizes.append(nanoparticle_size.item())
-
-            pbar.update(1)
-        pbar.close()
-    
-        return nanoparticle_list, nanoparticle_sizes
 
     def _is_notebook(
         self,
@@ -1470,7 +1343,8 @@ class DebyeCalculator:
                                 print(f'Generating nanoparticle of radius {select_radius.value} using {select_file.value.split("/")[-1]} ...')
                             debye_outputs.append(debye_calc._get_all(select_file.value, select_radius.value))
                         except Exception as e:
-                            print(f'FAILED: Could not load data file: {path}', end='\r')
+                            print(f'FAILED: Could not load data file: {select_file.value}', end='\r')
+                            raise e
                 
                 if len(debye_outputs) < 1:
                     print('FAILED: Please select data file(s)', end="\r")
@@ -1493,8 +1367,8 @@ class DebyeCalculator:
                         gr_data = np.column_stack([r, gr])
 
                         if select_radius.layout.visibility == 'visible':
-                            ase_atoms, _ = DebyeCalculator().generate_nanoparticles(select_file.value, select_radius.value)
-                            display(HTML(create_structure_download_link(select_file, select_radius, f'structure', ase_atoms[0])))
+                            structures = generate_nanoparticles(select_file.value, select_radius.value, _return_ase = True, disable_pbar=True)
+                            display(HTML(create_structure_download_link(select_file, select_radius, f'structure', structures[0].ase_structure)))
                             display(HTML(create_download_link(select_file, select_radius, 'iq', iq_data, "q,I(Q)")))
                             display(HTML(create_download_link(select_file, select_radius, 'sq', sq_data, "q,S(Q)")))
                             display(HTML(create_download_link(select_file, select_radius, 'fq', fq_data, "q,F(Q)")))
@@ -1786,7 +1660,8 @@ class DebyeCalculator:
                             print(f'Generating nanoparticle of radius {select_radius.value} using {select_file.value.split("/")[-1]} ...')
                         debye_outputs.append(debye_calc._get_all(select_file.value, select_radius.value))
                     except Exception as e:
-                        print(f'FAILED: Could not load data file: {path}', end='\r')
+                        print(f'FAILED: Could not load data file: {select_file.value}', end='\r')
+                        raise e
 
             # Clear and display
             clear_output(wait=True)
