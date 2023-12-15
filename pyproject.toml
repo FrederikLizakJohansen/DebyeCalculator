@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "DebyeCalculator"
-version = "1.0.2"
+version = "1.0.3"
 description = "A vectorised implementation of the Debye Equation on CPU and GPU"
 license = "Apache-2.0"
 authors = [
@@ -18,7 +18,7 @@ packages = [
 ]
 
 [tool.poetry.dependencies]
-python = "^3.7"
+python = "^3.7,<3.12"
 numpy = [
   {version = "^1.21.5", python = "3.7"},
   {version = "^1.24.3", python = "3.8"},
