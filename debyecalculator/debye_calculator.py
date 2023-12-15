@@ -355,7 +355,7 @@ class DebyeCalculator:
         structure_source: StructureSourceType,
         radii: Union[List[float], float, None] = None,
         keep_on_device: bool = False,
-        _total_scattering: bool = False,
+        _self_scattering: bool = True,
     ) -> Union[IqTuple, List[IqTuple]]:
         """
         Calculate the scattering intensity I(Q) for the given atomic structure(s).
@@ -364,7 +364,7 @@ class DebyeCalculator:
             structure_source (StructureSourceType): Atomic structure source in XYZ/CIF format, ASE Atoms object, or as a tuple of (atomic_identities, atomic_positions).
             radii (Union[List[float], float, None]): List/float of radii/radius of particle(s) to generate with parsed CIF.
             keep_on_device (bool): Flag to keep the results on the class device. Default is False, and will return numpy arrays on CPU.
-            _total_scattering (bool): Flag to compute the total scattering without self-scattering contribution. Default is False.
+            _self_scattering (bool): Flag to compute self-scattering contribution. Default is True.
 
         Returns:
             Union[IqTuple, List[IqTuple]]: IqTuple containing Q-values and scattering intensity I(Q) or a list of such tuples.
@@ -400,21 +400,19 @@ class DebyeCalculator:
             if self.biso != 0.0:
                 iq *= torch.exp(-self.q.squeeze(-1).pow(2) * self.biso/(8*torch.pi**2))
             
-            # For total scattering
-            if _total_scattering:
-                if self.profile:
-                    self.profiler.time('I(Q)')
-                return iq
-            else:
-                # Self-scattering contribution
+            # Self-scattering contribution
+            if _self_scattering:
                 sinc = torch.ones((structure.size, len(self.q))).to(device=self.device)
                 iq += torch.sum((structure.occupancy.unsqueeze(-1) * structure.unique_form_factors[structure.structure_inverse])**2 * sinc, dim=0) / 2
                 iq *= 2
 
-                if self.profile:
-                    self.profiler.time('I(Q)')
+            if self.profile:
+                self.profiler.time('I(Q)')
 
-                return iq
+            return iq
+        
+        if self.profile:
+            self.profiler.reset()
         
         if not isinstance(structure_source, list):
             structure_source = [structure_source]
@@ -466,6 +464,9 @@ class DebyeCalculator:
             dists = pdist(structure.xyz).split(self.batch_size)
             indices = structure.triu_indices.split(self.batch_size, dim=1)
             inverse_indices = structure.unique_inverse.split(self.batch_size, dim=1)
+            
+            if self.profile:
+                self.profiler.time('Batching and Distances')
 
             # Calculate scattering using Debye Equation
             iq = torch.zeros((len(self.q))).to(device=self.device, dtype=torch.float32)
@@ -482,8 +483,14 @@ class DebyeCalculator:
         
             # Calculate S(Q) and F(Q)
             sq = iq/structure.form_avg_sq/structure.size
+            
+            if self.profile:
+                self.profiler.time('S(Q)')
 
             return sq
+        
+        if self.profile:
+            self.profiler.reset()
         
         if not isinstance(structure_source, list):
             structure_source = [structure_source]
@@ -542,6 +549,9 @@ class DebyeCalculator:
             dists = pdist(structure.xyz).split(self.batch_size)
             indices = structure.triu_indices.split(self.batch_size, dim=1)
             inverse_indices = structure.unique_inverse.split(self.batch_size, dim=1)
+            
+            if self.profile:
+                self.profiler.time('Batching and Distances')
 
             # Calculate scattering using Debye Equation
             iq = torch.zeros((len(self.q))).to(device=self.device, dtype=torch.float32)
@@ -559,8 +569,14 @@ class DebyeCalculator:
             # Calculate S(Q) and F(Q)
             sq = iq/structure.form_avg_sq/structure.size
             fq = self.q.squeeze(-1) * sq
+            
+            if self.profile:
+                self.profiler.time('F(Q)')
 
             return fq
+        
+        if self.profile:
+            self.profiler.reset()
         
         if not isinstance(structure_source, list):
             structure_source = [structure_source]
@@ -618,6 +634,9 @@ class DebyeCalculator:
             dists = pdist(structure.xyz).split(self.batch_size)
             indices = structure.triu_indices.split(self.batch_size, dim=1)
             inverse_indices = structure.unique_inverse.split(self.batch_size, dim=1)
+            
+            if self.profile:
+                self.profiler.time('Batching and Distances')
 
             # Calculate scattering using Debye Equation
             iq = torch.zeros((len(self.q))).to(device=self.device, dtype=torch.float32)
@@ -639,6 +658,9 @@ class DebyeCalculator:
             damp = 1 if self.qdamp == 0.0 else torch.exp(-(self.r.squeeze(-1) * self.qdamp).pow(2) / 2)
             lorch_mod = 1 if self.lorch_mod == None else torch.sinc(self.q * self.lorch_mod*(torch.pi / self.qmax))
             gr = (2 / torch.pi) * torch.sum(fq.unsqueeze(-1) * torch.sin(self.q * self.r.permute(1,0))*self.qstep * lorch_mod, dim=0) * damp
+            
+            if self.profile:
+                self.profiler.time('G(r)')
             
             return gr
         
@@ -701,6 +723,9 @@ class DebyeCalculator:
             dists = pdist(structure.xyz).split(self.batch_size)
             indices = structure.triu_indices.split(self.batch_size, dim=1)
             inverse_indices = structure.unique_inverse.split(self.batch_size, dim=1)
+            
+            if self.profile:
+                self.profiler.time('Batching and Distances')
 
             # Calculate scattering using Debye Equation
             iq = torch.zeros((len(self.q))).to(device=self.device, dtype=torch.float32)
@@ -727,8 +752,14 @@ class DebyeCalculator:
             sinc = torch.ones((structure.size, len(self.q))).to(device=self.device)
             iq += torch.sum((structure.occupancy.unsqueeze(-1) * structure.unique_form_factors[structure.structure_inverse])**2 * sinc, dim=0) / 2
             iq *= 2
+            
+            if self.profile:
+                self.profiler.time('All')
 
             return iq, sq, fq, gr
+        
+        if self.profile:
+            self.profiler.reset()
         
         if not isinstance(structure_source, list):
             structure_source = [structure_source]
