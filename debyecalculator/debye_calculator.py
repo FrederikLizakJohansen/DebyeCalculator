@@ -124,6 +124,11 @@ class DebyeCalculator:
         # Form factor coefficients
         with open(pkg_resources.resource_filename(__name__, 'utility/elements_info.yaml'), 'r') as yaml_file:
             self.FORM_FACTOR_COEF = yaml.safe_load(yaml_file)
+        self.atomic_numbers_to_elements = {}
+        for i, (key, value) in enumerate(self.FORM_FACTOR_COEF.items()):
+            if i > 97:
+                break
+            self.atomic_numbers_to_elements[value[12]] = key
 
         # Formfactor retrieval lambda
         for k,v in self.FORM_FACTOR_COEF.items():
@@ -282,7 +287,15 @@ class DebyeCalculator:
                 return StructureTuple(elements, size, occupancy, xyz, triu_indices, unique_inverse, unique_form_factors, form_avg_sq, structure_inverse)
 
             elif is_valid_int_tuple(structure_source):
-                raise NotImplementedError('Coming soon')
+
+                elements, xyz = structure_source
+                elements = [self.atomic_numbers_to_elements[e] for e in elements]
+                size = xyz.shape[0]
+                xyz = xyz.to(device=self.device, dtype=torch.float32)
+                occupancy = torch.ones(xyz.shape[0]).to(device=self.device, dtype=torch.float32)
+                triu_indices, unique_inverse, unique_form_factors, form_avg_sq, structure_inverse = parse_elements(elements, size)
+
+                return StructureTuple(elements, size, occupancy, xyz, triu_indices, unique_inverse, unique_form_factors, form_avg_sq, structure_inverse)
             else:
                 raise TypeError('Encountered an invalid structure source (type: tuple)')
         elif isinstance(structure_source, str):
