@@ -51,25 +51,8 @@ StructureSourceType = Union[
 
 class DebyeCalculator:
     """
-    Calculate the scattering intensity I(q) through the Debye scattering equation, the Total Scattering Structure Function S(q), 
-    the Reduced Total Scattering Function F(q), and the Reduced Atomic Pair Distribution Function G(r) for a given atomic structure.
-
-
-    Parameters:
-        qmin (float): Minimum q-value for the scattering calculation. Default is 1.0.
-        qmax (float): Maximum q-value for the scattering calculation. Default is 30.0.
-        qstep (float): Step size for the q-values in the scattering calculation. Default is 0.1.
-        qdamp (float): Damping parameter caused by the truncated Q-range of the Fourier transformation. Default is 0.04.
-        rmin (float): Minimum r-value for the pair distribution function (PDF) calculation. Default is 0.0.
-        rmax (float): Maximum r-value for the PDF calculation. Default is 20.0.
-        rstep (float): Step size for the r-values in the PDF calculation. Default is 0.01.
-        rthres (float): Threshold value for exclusion of distances below this value in the scattering calculation. Default is 0.0.
-        biso (float): Debye-Waller isotropic atomic displacement parameter. Default is 0.3.
-        device (str): Device to use for computation (e.g., 'cuda' for GPU or 'cpu' for CPU). Default is 'cuda' if the computer has a GPU.
-        batch_size (int or None): Batch size for computation. If None, the batch size will be automatically set. Default is None.
-        lorch_mod (bool): Flag to enable Lorch modification. Default is False.
-        radiation_type (str): Type of radiation for form factor calculations ('xray' or 'neutron'). Default is 'xray'.
-        profile (bool): Activate profiler. Default is False.
+    Calculate the scattering intensity I(Q) through the Debye scattering equation, the Total Scattering Structure Function S(Q), 
+    the Reduced Total Scattering Function F(Q), and the Reduced Atomic Pair Distribution Function G(r) for a given atomic structure.
     """
 
     def __init__(
@@ -91,6 +74,25 @@ class DebyeCalculator:
         _max_batch_size: int = 4000,
         _lightweight_mode: bool = False,
     ) -> None:
+        """
+        Initialize a DebyeCalculator instance with specified parameters.
+
+        Args:
+            qmin (float): Minimum q-value for the scattering calculation. Default is 1.0.
+            qmax (float): Maximum q-value for the scattering calculation. Default is 30.0.
+            qstep (float): Step size for the q-values in the scattering calculation. Default is 0.1.
+            qdamp (float): Damping parameter caused by the truncated Q-range of the Fourier transformation. Default is 0.04.
+            rmin (float): Minimum r-value for the pair distribution function (PDF) calculation. Default is 0.0.
+            rmax (float): Maximum r-value for the PDF calculation. Default is 20.0.
+            rstep (float): Step size for the r-values in the PDF calculation. Default is 0.01.
+            rthres (float): Threshold value for exclusion of distances below this value in the scattering calculation. Default is 0.0.
+            biso (float): Debye-Waller isotropic atomic displacement parameter. Default is 0.3.
+            device (str): Device to use for computation (e.g., 'cuda' for GPU or 'cpu' for CPU). Default is 'cuda' if the computer has a GPU.
+            batch_size (int or None): Batch size for computation. If None, the batch size will be automatically set. Default is None.
+            lorch_mod (bool): Flag to enable Lorch modification. Default is False.
+            radiation_type (str): Type of radiation for form factor calculations ('xray' or 'neutron'). Default is 'xray'.
+            profile (bool): Activate profiler. Default is False.
+        """
             
         # Set parameters
         self.qmin = qmin
@@ -155,7 +157,10 @@ class DebyeCalculator:
         self,
     ) -> None:
         """
-        Asserting that all parameters are valid.
+        Assert that all parameters meet valid constraints.
+
+        Raises:
+            ValueError: If any of the parameters violate the specified constraints.
         """
 
         if self.qmin < 0:
@@ -192,6 +197,9 @@ class DebyeCalculator:
 
         Parameters:
             **kwargs: Arbitrary keyword arguments to update the parameters.
+
+        Raises:
+            ValueError: If any of the updated parameters violate the specified constraints.
         """
         for k,v in kwargs.items():
             try:
@@ -213,14 +221,23 @@ class DebyeCalculator:
         structure_source: StructureSourceType,
         radii: Union[List[float], float, None] = None,
         disable_pbar: bool = False,
-    ) -> None:
+    ) -> Union[None, StructureTuple, List[StructureTuple]]:
 
         """
-        Initialise a single atomic structure and unique elements form factors from an input file.
+        Initialize a single atomic structure and unique elements form factors from an input file or Atoms object.
 
         Parameters:
-            structure_source (StructureSourceType): Atomic structure source in XYZ/CIF format, ASE Atoms object or as a tuple of (atomic_identities, atomic_positions)
-            radii (Union[List[float], float, None]): List/float of radii/radius of particle(s) to generate with parsed CIF
+            structure_source (StructureSourceType): Atomic structure source in XYZ/CIF format, ASE Atoms object, or as a tuple of (atomic_identities, atomic_positions).
+            radii (Union[List[float], float, None]): List/float of radii/radius of particle(s) to generate with parsed CIF.
+            disable_pbar (bool): Flag to disable the progress bar during nanoparticle generation. Default is False.
+
+        Returns:
+            Union[None, StructureTuple, List[StructureTuple]]: The initialized structure(s) as StructureTuple or list of StructureTuple objects.
+
+        Raises:
+            TypeError: If the structure source is of an invalid type.
+            IOError: If there is an issue loading the structure from the specified file.
+            ValueError: If the file extension is not valid or when providing .cif data file, radii is not provided.
         """
 
         def is_valid_str_tuple(t: Tuple[List[str], ArrayLike]) -> bool:
@@ -341,14 +358,21 @@ class DebyeCalculator:
         _total_scattering: bool = False,
     ) -> Union[IqTuple, List[IqTuple]]:
         """
-        Calculate the scattering intensity I(Q) for the given atomic structure(s)
+        Calculate the scattering intensity I(Q) for the given atomic structure(s).
 
         Parameters:
-            structure_source (StructureSourceType): Atomic structure source in XYZ/CIF format, ASE Atoms object or as a tuple of (atomic_identities, atomic_positions)
-            keep_on_device (bool): Flag to keep the results on the class device. Default is False, and will return numpy arrays on CPU
+            structure_source (StructureSourceType): Atomic structure source in XYZ/CIF format, ASE Atoms object, or as a tuple of (atomic_identities, atomic_positions).
+            radii (Union[List[float], float, None]): List/float of radii/radius of particle(s) to generate with parsed CIF.
+            keep_on_device (bool): Flag to keep the results on the class device. Default is False, and will return numpy arrays on CPU.
+            _total_scattering (bool): Flag to compute the total scattering without self-scattering contribution. Default is False.
 
         Returns:
-            IqTuple containing Q-values and scattering intensity I(Q)
+            Union[IqTuple, List[IqTuple]]: IqTuple containing Q-values and scattering intensity I(Q) or a list of such tuples.
+
+        Raises:
+            TypeError: If the structure source is of an invalid type.
+            IOError: If there is an issue loading the structure from the specified file.
+            ValueError: If the file extension is not valid or when providing .cif data file, radii is not provided.
         """
         def compute_iq(structure):
 
@@ -495,14 +519,20 @@ class DebyeCalculator:
         keep_on_device: bool = False,
     ) -> Union[FqTuple, List[FqTuple]]:
         """
-        Calculate the reduced structure function F(Q) for the given atomic structure(s)
+        Calculate the structure function S(Q) for the given atomic structure(s).
 
         Parameters:
-            structure_source (StructureSourceType): Atomic structure source in XYZ/CIF format, ASE Atoms object or as a tuple of (atomic_identities, atomic_positions)
-            keep_on_device (bool): Flag to keep the results on the class device. Default is False, and will return numpy arrays on CPU
+            structure_source (StructureSourceType): Atomic structure source in XYZ/CIF format, ASE Atoms object, or as a tuple of (atomic_identities, atomic_positions).
+            radii (Union[List[float], float, None]): List/float of radii/radius of particle(s) to generate with parsed CIF.
+            keep_on_device (bool): Flag to keep the results on the class device. Default is False, and will return numpy arrays on CPU.
 
         Returns:
-            FqTuple containing Q-values and reduced structure function F(Q)
+            Union[SqTuple, List[SqTuple]]: SqTuple containing Q-values and structure function S(Q) or a list of such tuples.
+
+        Raises:
+            TypeError: If the structure source is of an invalid type.
+            IOError: If there is an issue loading the structure from the specified file.
+            ValueError: If the file extension is not valid or when providing .cif data file, radii is not provided.
         """
         
         def compute_fq(structure):
@@ -566,14 +596,20 @@ class DebyeCalculator:
         keep_on_device: bool = False,
     ) -> Union[GrTuple, List[GrTuple]]:
         """
-        Calculate the reduced pair distribution function G(r) for the given atomic structure(s)
+        Calculate the reduced pair distribution function G(r) for the given atomic structure(s).
 
         Parameters:
-            structure_source (StructureSourceType): Atomic structure source in XYZ/CIF format, ASE Atoms object or as a tuple of (atomic_identities, atomic_positions)
-            keep_on_device (bool): Flag to keep the results on the class device. Default is False, and will return numpy arrays on CPU
+            structure_source (StructureSourceType): Atomic structure source in XYZ/CIF format, ASE Atoms object, or as a tuple of (atomic_identities, atomic_positions).
+            radii (Union[List[float], float, None]): List/float of radii/radius of particle(s) to generate with parsed CIF.
+            keep_on_device (bool): Flag to keep the results on the class device. Default is False, and will return numpy arrays on CPU.
 
         Returns:
-            GrTuple containing r-values and reduced pair distribution function G(r)
+            Union[GrTuple, List[GrTuple]]: GrTuple containing r-values and reduced pair distribution function G(r) or a list of such tuples.
+
+        Raises:
+            TypeError: If the structure source is of an invalid type.
+            IOError: If there is an issue loading the structure from the specified file.
+            ValueError: If the file extension is not valid or when providing .cif data file, radii is not provided.
         """
         def compute_gr(structure):
             # Calculate distances and batch
@@ -643,14 +679,20 @@ class DebyeCalculator:
         keep_on_device: bool = False,
     ) -> Union[AllTuple, List[AllTuple]]:
         """
-        Calculate I(Q), S(Q), F(Q) and G(r) for the given atomic structure(s)
+        Calculate I(Q), S(Q), F(Q), and G(r) for the given atomic structure(s).
 
         Parameters:
-            structure_source (StructureSourceType): Atomic structure source in XYZ/CIF format, ASE Atoms object or as a tuple of (atomic_identities, atomic_positions)
-            keep_on_device (bool): Flag to keep the results on the class device. Default is False, and will return numpy arrays on CPU
+            structure_source (StructureSourceType): Atomic structure source in XYZ/CIF format, ASE Atoms object, or as a tuple of (atomic_identities, atomic_positions).
+            radii (Union[List[float], float, None]): List/float of radii/radius of particle(s) to generate with parsed CIF.
+            keep_on_device (bool): Flag to keep the results on the class device. Default is False, and will return numpy arrays on CPU.
 
         Returns:
-            AllTuple containing r-values, Q-values, I(Q) S(Q), F(Q) and G(r)
+            Union[AllTuple, List[AllTuple]]: AllTuple containing r-values, Q-values, I(Q), S(Q), F(Q), and G(r) or a list of such tuples.
+
+        Raises:
+            TypeError: If the structure source is of an invalid type.
+            IOError: If there is an issue loading the structure from the specified file.
+            ValueError: If the file extension is not valid or when providing .cif data file, radii is not provided.
         """
         def compute_all(structure):
             # Calculate distances and batch

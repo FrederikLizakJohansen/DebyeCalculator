@@ -1,7 +1,6 @@
 import torch
 from torch import cdist
 import numpy as np
-#import pandas as pd
 from ase.io import read
 from ase.build import make_supercell
 from ase.build.tools import sort as ase_sort
@@ -42,43 +41,41 @@ def get_default_atoms(
     - ValueError: If the atom_type is not "metal" or "ligand".
     - ValueError: If the output_type is not "number" or "symbol".
     """
+    METAL_SYMBOLS = [
+        'Li', 'Be', 'B', 'Na', 'Mg', 'Al', 'Si', 'K',
+        'Ca', 'Sc', 'Ti', 'V', 'Cr', 'Mn', 'Fe', 'Co',
+        'Ni', 'Cu', 'Zn', 'Ga', 'Ge', 'As', 'Rb', 'Sr',
+        'Y', 'Zr', 'Nb', 'Mo', 'Tc', 'Ru', 'Rh', 'Pd',
+        'Ag', 'Cd', 'In', 'Sn', 'Sb', 'Te', 'Cs', 'Ba',
+        'La', 'Ce', 'Pr', 'Nd', 'Pm', 'Sm', 'Eu', 'Gd',
+        'Tb', 'Dy', 'Ho', 'Er', 'Tm', 'Yb', 'Lu', 'Hf',
+        'Ta', 'W', 'Re', 'Os', 'Ir', 'Pt', 'Au', 'Hg',
+        'Tl', 'Pb', 'Bi', 'Ra'
+    ]
+
+    LIGAND_SYMBOLS = ['H', 'C', 'N', 'O', 'F', 'P', 'S', 'Cl', 'Se', 'Br', 'I']
+
+    METAL_NUMBERS = [
+        3, 4, 5, 11, 12, 13, 14, 19, 20, 21, 22, 23, 24,
+        25, 26, 27, 28, 29, 30, 31, 32, 33, 37, 38, 39,
+        40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51,
+        52, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65,
+        66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77,
+        78, 79, 80, 81, 82, 83, 88
+    ]
+
+    LIGAND_NUMBERS = [1, 6, 7, 8, 9, 15, 16, 17, 34, 35, 53]
+
     if atom_type == 'metal':
-        if output_type == 'number':
-            atoms = [
-                3, 4, 5, 11, 12, 13, 14, 19, 20, 21, 22, 23, 24, 
-                25, 26, 27, 28, 29, 30, 31, 32, 33, 37, 38, 39, 
-                40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 
-                52, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 
-                66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 
-                78, 79, 80, 81, 82, 83, 88
-            ]
-        elif output_type == 'symbol':
-            atoms = [
-                'Li', 'Be', 'B', 'Na', 'Mg', 'Al', 'Si', 'K', 
-                'Ca', 'Sc', 'Ti', 'V', 'Cr', 'Mn', 'Fe', 'Co', 
-                'Ni', 'Cu', 'Zn', 'Ga', 'Ge', 'As', 'Rb', 'Sr', 
-                'Y', 'Zr', 'Nb', 'Mo', 'Tc', 'Ru', 'Rh', 'Pd', 
-                'Ag', 'Cd', 'In', 'Sn', 'Sb', 'Te', 'Cs', 'Ba', 
-                'La', 'Ce', 'Pr', 'Nd', 'Pm', 'Sm', 'Eu', 'Gd', 
-                'Tb', 'Dy', 'Ho', 'Er', 'Tm', 'Yb', 'Lu', 'Hf', 
-                'Ta', 'W', 'Re', 'Os', 'Ir', 'Pt', 'Au', 'Hg', 
-                'Tl', 'Pb', 'Bi', 'Ra'
-            ]
-        else:
-            raise ValueError('FAILED: Invalid output_type, accepts only "number" or "symbol"')
+        atoms = METAL_NUMBERS if output_type == 'number' else METAL_SYMBOLS
     elif atom_type == 'ligand':
-        if output_type == 'number':
-            atoms = [
-                1, 6, 7, 8, 9, 15, 16, 17, 34, 35, 53
-            ]
-        elif output_type == 'symbol':
-            atoms = [
-                'H', 'C', 'N', 'O', 'F', 'P', 'S', 'Cl', 'Se', 'Br', 'I'
-            ]
-        else:
-            raise ValueError('FAILED: Invalid output_type, accepts only "number" or "symbol"')
+        atoms = LIGAND_NUMBERS if output_type == 'number' else LIGAND_SYMBOLS
     else:
-        raise ValueError('FAILED: Invalid atom_type, accepts only "metal" or "ligand"')
+        raise ValueError(f'Invalid atom_type, accepts only "metal" or "ligand", got {atom_type}')
+
+    if output_type not in ['number', 'symbol']:
+        raise ValueError(f'Invalid output_type, accepts only "number" or "symbol", got {output_type}')
+
     return atoms
                     
 def generate_nanoparticles(
@@ -89,25 +86,27 @@ def generate_nanoparticles(
     sort_atoms: bool = True,
     disable_pbar: bool = False,
     return_graph_elements: bool = False,
-    device: str = None,
     _override_device: bool = False,
     _lightweight_mode: bool = False,
     _return_ase: bool = False,
 ) -> NanoParticleType:
     """
-    Generate generic spherical nanoparticles from a given CIF and radii.
+    Generate spherical nanoparticles from a given CIF and radii.
 
     Args:
-        cif (str): input CIF file.
+        cif_file (str): Input CIF file.
         radii (Union[List[float], float]): List of floats or float of radii for nanoparticles to be generated.
+        metals (Union[List[float], List[str], str]): List of metals, their symbols, or 'Default' for default metal atoms.
+        ligands (Union[List[float], List[str], str]): List of ligands, their symbols, or 'Default' for default ligand atoms.
         sort_atoms (bool, optional): Whether to sort atoms in the nanoparticle. Defaults to True.
-        _override_device (bool): Ignore object device and run in CPU
-        _lightweight_model (bool):
-        _return_ase (bool):
+        disable_pbar (bool, optional): Whether to disable the progress bar. Defaults to False.
+        return_graph_elements (bool, optional): Whether to return graph elements. Defaults to False.
+        _override_device (bool): Ignore object device and run on CPU.
+        _lightweight_mode (bool): Whether to use lightweight mode. Defaults to False.
+        _return_ase (bool): Whether to return ASE objects. Defaults to False.
 
     Returns:
-        list: List of ASE Atoms objects representing the generated nanoparticles.
-        list: List of nanoparticle sizes (diameter) corresponding to each radius.
+        NanoParticleType: List of nanoparticle tuples or ASE objects.
     """
     torch.cuda.empty_cache()
     device = 'cuda' if (torch.cuda.is_available() and not _override_device) else 'cpu'
