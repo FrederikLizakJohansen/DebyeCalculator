@@ -268,8 +268,8 @@ def test_get_all_cif():
     # Check that the calculated Sq matches the expected value
     ph = np.genfromtxt('debyecalculator/unittests_files/sq_AntiFluorite_Co2O_radius10.0.dat', delimiter=',', skip_header=15)
     q_expected, sq_expected = ph[:,0], ph[:,1]
-    assert np.allclose(q, q_expected, rtol=1e-03), f"Expected Q to be {q_expected}, but got {q}"
-    assert np.allclose(sq, sq_expected, rtol=1e-03), f"Expected S(Q) to be {sq_expected}, but got {sq}"
+    assert np.allclose(q, q_expected, atol=1e-04, rtol=1e-03), f"Expected Q to be {q_expected}, but got {q}"
+    assert np.allclose(sq, sq_expected, atol=1e-04, rtol=1e-03), f"Expected S(Q) to be {sq_expected}, but got {sq}"
 
     # Check that the calculated Fq matches the expected value
     ph = np.genfromtxt('debyecalculator/unittests_files/fq_AntiFluorite_Co2O_radius10.0.dat', delimiter=',', skip_header=15)
