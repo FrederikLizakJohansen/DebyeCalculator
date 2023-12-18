@@ -253,7 +253,7 @@ class DebyeCalculator:
             return check_len and check_type and check_shape
 
         def is_valid_int_tuple(t: Tuple[IntArrayLike, ArrayLike]) -> bool:
-            check_len = lent(t) == 2
+            check_len = len(t) == 2
             check_type = isinstance(t[0], (np.ndarray, torch.Tensor)) and isinstance(t[1], (np.ndarray, torch.Tensor))
             check_shape = len(t[0].shape) == 1 and len(t[1].shape) == 2 and t[1].shape[1] == 3
 
@@ -277,9 +277,10 @@ class DebyeCalculator:
 
         if isinstance(structure_source, tuple):
             if is_valid_str_tuple(structure_source):
-
                 elements, xyz = structure_source
                 size = xyz.shape[0]
+                if isinstance(xyz, np.ndarray):
+                    xyz = torch.from_numpy(xyz)
                 xyz = xyz.to(device=self.device, dtype=torch.float32)
                 occupancy = torch.ones(xyz.shape[0]).to(device=self.device, dtype=torch.float32)
                 triu_indices, unique_inverse, unique_form_factors, form_avg_sq, structure_inverse = parse_elements(elements, size)
@@ -291,6 +292,8 @@ class DebyeCalculator:
                 elements, xyz = structure_source
                 elements = [self.atomic_numbers_to_elements[e] for e in elements]
                 size = xyz.shape[0]
+                if isinstance(xyz, np.ndarray):
+                    xyz = torch.from_numpy(xyz)
                 xyz = xyz.to(device=self.device, dtype=torch.float32)
                 occupancy = torch.ones(xyz.shape[0]).to(device=self.device, dtype=torch.float32)
                 triu_indices, unique_inverse, unique_form_factors, form_avg_sq, structure_inverse = parse_elements(elements, size)
@@ -1330,7 +1333,8 @@ class DebyeCalculator:
     
             # Join content
             output = ''
-            content = "\n".join([",".join(map(str, np.around(row,len(str(qstep_box.value))))) for row in data])
+            #content = "\n".join([",".join(map(str, np.around(row,len(str(qstep_box.value))))) for row in data])
+            content = "\n".join([",".join(map(str, np.around(row,len(str(qstep_box.value))+5))) for row in data])
             for k,v in metadata.items():
                 output += f'{k}:{v}\n'
             output += '\n'
@@ -1371,7 +1375,7 @@ class DebyeCalculator:
             header = str(num_atoms) + "\n\n"
         
             # Join content 
-            content = header + "\n".join([el + '\t' + "\t".join(map(str,np.around(row, 3))) for row, el in zip(positions, elements)])
+            content = header + "\n".join([el + '\t' + "\t".join(map(str,np.around(row, 5))) for row, el in zip(positions, elements)])
             
             # Encode as base64
             b64 = base64.b64encode(content.encode()).decode()
