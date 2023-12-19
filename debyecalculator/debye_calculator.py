@@ -66,7 +66,7 @@ class DebyeCalculator:
         rstep: float = 0.01,
         rthres: float = 0.0,
         biso: float = 0.3,
-        device: str = 'cuda' if torch.cuda.is_available() else 'cpu',
+        device: str = 'cuda',
         batch_size: Union[int, None] = 10000,
         lorch_mod: bool = False,
         radiation_type: str = 'xray',
@@ -93,6 +93,19 @@ class DebyeCalculator:
             radiation_type (str): Type of radiation for form factor calculations ('xray' or 'neutron'). Default is 'xray'.
             profile (bool): Activate profiler. Default is False.
         """
+
+        # Handling CUDA availability
+        if device == 'cuda' and not torch.cuda.is_available():
+            warnings.warn("Warning: Your system might have a CUDA-enabled GPU, but CUDA is not available. Computations will run on the CPU instead. " \
+                          "For optimal performance, please install Pytorch with CUDA support. " \
+                          "If you do not have a CUDA-enabled CPU, you can surpress this warning by specifying the 'device' argument as 'cpu'", stacklevel=2)
+            self.device = 'cpu'
+        elif device == 'cpu' and torch.cuda.is_available():
+            warnings.warn("Warning: Your system has a CUDA-enabled GPU, but CPU was explicitly specified for computations. " \
+                          "To utilise GPU acceleration, omit the 'device' argument or specify 'cuda'", stacklevel=2)
+            self.device = 'cpu'
+        else:
+            self.device = device
             
         # Set parameters
         self.qmin = qmin
@@ -104,7 +117,6 @@ class DebyeCalculator:
         self.rstep = rstep
         self.rthres = rthres
         self.biso = biso
-        self.device = device
         self.batch_size = batch_size
         self.lorch_mod = lorch_mod
         self.radiation_type = radiation_type
