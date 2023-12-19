@@ -43,6 +43,7 @@ jobs:
           echo "Unsupported value for device"
           exit 1
     - name: Install DebyeCalculator dependencies
+      run: |
         poetry install
     - name: Run pytest
       run: |
