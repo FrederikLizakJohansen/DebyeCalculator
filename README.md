@@ -37,11 +37,6 @@ conda activate debyecalculator_env
 
 Before installing the `DebyeCalculator` package, ensure that you have PyTorch installed. Follow the instructions on the official PyTorch website to install the appropriate version for your system: [PyTorch Installation Guide](https://pytorch.org/get-started/locally/).
 
-```bash
-# Example installation command for the latest version of Pytorch with CUDA 12.1
-pip install torch torchvision torchaudio
-```
-
 ## Install with [pip](https://pypi.org/project/DebyeCalculator/)
 
 Run the following command to install the __DebyeCalculator__ package. (**Requires**: Python >=3.7, <3.12)
@@ -93,8 +88,6 @@ from debyecalculator import DebyeCalculator
 
 calc = DebyeCalculator(device='cuda')
 ```
-If you omit the device argument or set it to 'cuda', the DebyeCalculator will automatically default to using the GPU if available.
-If you attempt to use GPU acceleration but CUDA is not available, you will receive a UserWarning. In this case, follow the instructions to ensure that your system meets the CUDA requirements and that you have installed the correct PyTorch version.
 
 # Usage
 
