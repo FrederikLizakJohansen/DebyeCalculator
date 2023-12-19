@@ -8,29 +8,38 @@ The Debye scattering equation can be used to compute the scattering pattern of a
 Here, we provide an optimised code for the calculation of the Debye scattering equation on Graphics processing units (GPUs) which accelerate the calculations with orders of magnitudes.
 
 1. [Installation](#installation)
-    1. [Install with pip](#install-with-pip)
-    2. [Install locally](#install-locally)
-    3. [Testing installation](#testing-installation)
-2. [Usage](#usage)
+    1. [Prerequisites](#prerequisites)
+    2. [Install with pip](#install-with-pip)
+    3. [Install locally](#install-locally)
+    4. [Testing installation](#testing-the-installation)
+    5. [GPU support](#gpu-support)
+3. [Usage](#usage)
     1. [Interactive mode](#interactive-mode-at-google-colab)
     3. [Example usage](#example-usage)
-3. [Additional implementation details](#additional-implementation-details)
-4. [Authors](#authors)
-5. [Cite](#cite)
-6. [Contributing to the software](#contributing-to-the-software)
+4. [Additional implementation details](#additional-implementation-details)
+5. [Authors](#authors)
+6. [Cite](#cite)
+7. [Contributing to the software](#contributing-to-the-software)
     1. [Reporting issues](#reporting-issues)
     2. [Seeking support](#seeking-support)
 
 # Installation
 
-`DebyeCalculator` requires Python version >=3.7, <3.12. If needed, create an environment with any of these Python versions:
+## Prerequisites
 
-```
+`DebyeCalculator` requires Python version >=3.7, <3.12. If needed, create an environment with any of these Python versions:
+```bash
 conda create -n debyecalculator_env python=3.9
 ```
-
-```
+```bash
 conda activate debyecalculator_env
+```
+
+Before installing the `DebyeCalculator` package, ensure that you have PyTorch installed. Follow the instructions on the official PyTorch website to install the appropriate version for your system: [PyTorch Installation Guide](https://pytorch.org/get-started/locally/).
+
+```bash
+# Example installation command for the latest version of Pytorch with CUDA 12.1
+pip install torch torchvision torchaudio
 ```
 
 ## Install with [pip](https://pypi.org/project/DebyeCalculator/)
@@ -62,6 +71,30 @@ After installing the package, open a terminal or command prompt and navigate to 
 ```bash
 pytest
 ```
+
+## GPU Support
+
+The `DebyeCalculator` package supports GPU acceleration using PyTorch with CUDA. Follow these steps to enable GPU support:
+
+### 1. Verify GPU Availability
+
+After installing PyTorch with CUDA, you can check if your GPU is available by running the following code snippet in a Python environment:
+
+```python
+import torch
+print("CUDA available:", torch.cuda.is_available())
+```
+
+### 2. Specify GPU Device in DebyeCalculator
+When creating an instance of DebyeCalculator, you can specify the device as 'cuda' to utilize GPU acceleration:
+
+```python
+from debyecalculator import DebyeCalculator
+
+calc = DebyeCalculator(device='cuda')
+```
+If you omit the device argument or set it to 'cuda', the DebyeCalculator will automatically default to using the GPU if available.
+If you attempt to use GPU acceleration but CUDA is not available, you will receive a UserWarning. In this case, follow the instructions to ensure that your system meets the CUDA requirements and that you have installed the correct PyTorch version.
 
 # Usage
 
