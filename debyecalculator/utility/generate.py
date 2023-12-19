@@ -1,5 +1,16 @@
-import torch
-from torch import cdist
+# Handle import of torch (prerequisite)
+try:
+    import torch
+    from torch import cdist
+except ModuleNotFoundError:
+    raise ImportError(
+        "\n\nDebyeCalculator (and generate_nanoparticles) requires PyTorch, which is not installed. "
+        "Please install PyTorch before using DebyeCalculator. "
+        "Follow the instructions on the official PyTorch website: "
+        "https://pytorch.org/get-started/locally/. "
+        "For more information about DebyeCalculator, visit the GitHub repository: "
+        "https://github.com/FrederikLizakJohansen/DebyeCalculator"
+    )
 import numpy as np
 from ase.io import read
 from ase.build import make_supercell

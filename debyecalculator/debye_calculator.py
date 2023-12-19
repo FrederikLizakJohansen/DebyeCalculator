@@ -9,9 +9,19 @@ from datetime import datetime
 from typing import Union, Tuple, Any, List, Type
 from collections import namedtuple
 
-import torch
-from torch import cdist
-from torch.nn.functional import pdist
+# Handle import of torch (prerequisite)
+try:
+    import torch
+    from torch.nn.functional import pdist
+except ModuleNotFoundError:
+    raise ImportError(
+        "\n\nDebyeCalculator requires PyTorch, which is not installed. "
+        "Please install PyTorch before using DebyeCalculator. "
+        "Follow the instructions on the official PyTorch website: "
+        "https://pytorch.org/get-started/locally/. "
+        "For more information about DebyeCalculator, visit the GitHub repository: "
+        "https://github.com/FrederikLizakJohansen/DebyeCalculator"
+    )
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -87,7 +97,7 @@ class DebyeCalculator:
             rstep (float): Step size for the r-values in the PDF calculation. Default is 0.01.
             rthres (float): Threshold value for exclusion of distances below this value in the scattering calculation. Default is 0.0.
             biso (float): Debye-Waller isotropic atomic displacement parameter. Default is 0.3.
-            device (str): Device to use for computation (e.g., 'cuda' for GPU or 'cpu' for CPU). Default is 'cuda' if the computer has a GPU.
+            device (str): Device to use for computations ('cuda' for CUDA-enabled GPU's or 'cpu' for CPU)
             batch_size (int or None): Batch size for computation. If None, the batch size will be automatically set. Default is None.
             lorch_mod (bool): Flag to enable Lorch modification. Default is False.
             radiation_type (str): Type of radiation for form factor calculations ('xray' or 'neutron'). Default is 'xray'.
