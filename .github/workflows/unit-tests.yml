@@ -14,7 +14,6 @@ jobs:
     strategy:
       matrix:
         python-version: ["3.7", "3.8", "3.9", "3.10", "3.11"]
-        device: ["cpu", "cuda"]
 
     steps:
     - uses: actions/checkout@v2
@@ -26,26 +25,56 @@ jobs:
       run: |
         python -m pip install --upgrade pip
         pip install poetry
-    - name: Install PyTorch
+    - name: Reset poetry env
       run: |
         poetry env use python
-        if [ "${{ matrix.device }}" == "cpu"]; then
-          if [ "${{ matrix.python-version }}" == "3.7"]; then
-            poetry run pip install torch==1.13.1+cpu torchvision==0.14.1+cpu torchaudio==0.13.1 --extra-index-url https://download.pytorch.org/whl/cpu
-          else
-            poetry run pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
-        elif [ "${{ matrix.device }}" == "cuda"]; then
-          if [ "${{ matrix.python-version }}" == "3.7"]; then
-            poetry run pip install torch==1.13.1+cu116 torchvision==0.14.1+cu116 torchaudio==0.13.1 --extra-index-url https://download.pytorch.org/whl/cu116
-          else
-            poetry run pip install torch torchvision torchaudio
-        else
-          echo "Unsupported value for device"
-          exit 1
+    - name: Install PyTorch CPU
+      run: |
+        if [ "${{ matrix.python-version }}" == "3.7"]; then
+          poetry run pip install torch==1.13.1+cpu torchvision==0.14.1+cpu torchaudio==0.13.1 --extra-index-url https://download.pytorch.org/whl/cpu
+        fi
+        if [ "${{ matrix.python-version }}" == "3.8"]; then
+          poetry run pip install torch torchvision torchaudio
+        fi
+        if [ "${{ matrix.python-version }}" == "3.9"]; then
+          poetry run pip install torch torchvision torchaudio
+        fi
+        if [ "${{ matrix.python-version }}" == "3.10"]; then
+          poetry run pip install torch torchvision torchaudio
+        fi
+        if [ "${{ matrix.python-version }}" == "3.11"]; then
+          poetry run pip install torch torchvision torchaudio
         fi
     - name: Install DebyeCalculator dependencies
       run: |
         poetry install
-    - name: Run pytest
+    - name: Run pytest CPU
+      run: |
+        poetry run pytest
+    - name: Reset poetry env
+      run: |
+        poetry env remove python
+        poetry env use python
+    - name: Install PyTorch CUDA
+      run: |
+        if [ "${{ matrix.python-version }}" == "3.7"]; then
+          poetry run pip install torch==1.13.1+cu116 torchvision==0.14.1+cu116 torchaudio==0.13.1 --extra-index-url https://download.pytorch.org/whl/cu116
+        fi
+        if [ "${{ matrix.python-version }}" == "3.8"]; then
+          poetry run pip install torch torchvision torchaudio
+        fi
+        if [ "${{ matrix.python-version }}" == "3.9"]; then
+          poetry run pip install torch torchvision torchaudio
+        fi
+        if [ "${{ matrix.python-version }}" == "3.10"]; then
+          poetry run pip install torch torchvision torchaudio
+        fi
+        if [ "${{ matrix.python-version }}" == "3.11"]; then
+          poetry run pip install torch torchvision torchaudio
+        fi
+    - name: Install DebyeCalculator dependencies
+      run: |
+        poetry install
+    - name: Run pytest CUDA
       run: |
         poetry run pytest
