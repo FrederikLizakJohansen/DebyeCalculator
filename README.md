@@ -35,7 +35,9 @@ conda create -n debyecalculator_env python=3.9
 conda activate debyecalculator_env
 ```
 
-Before installing the `DebyeCalculator` package, ensure that you have PyTorch installed. Follow the instructions on the official PyTorch website to install the appropriate version for your system: [PyTorch Installation Guide](https://pytorch.org/get-started/locally/).
+Before installing the `DebyeCalculator` package, ensure that you have PyTorch installed. Follow the instructions on the official PyTorch website to install the appropriate version for your system: [PyTorch Installation Guide](https://pytorch.org/get-started/locally/). 
+
+**NOTE**: Installing an [earlier version](https://pytorch.org/get-started/previous-versions/) of PyTorch (<=1.13.1) will be necessary if you're running Python 3.7, since the latest PyTorch version requires Python 3.8 or higher.
 
 ## Install with [pip](https://pypi.org/project/DebyeCalculator/)
 
