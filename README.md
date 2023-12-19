@@ -71,35 +71,47 @@ Follow the instructions in our [Interactive Google Colab notebook](https://githu
 ## Example usage
 ```python
 from debyecalculator import DebyeCalculator
+import torch
 
 # Initialise calculator object
 calc = DebyeCalculator(qmin=1.0, qmax=8.0, qstep=0.01)
 
-# Define structure path
-XYZ_path = "some_path/some_file.xyz"
-CIF_path = "some_path/some_file.cif"
+# Define structure sources
+xyz_file = "some_path/some_file.xyz"
+cif_file = "some_path/some_file.cif"
+structure_tuple = (
+    ["Fe", "Fe", "O", "O"],
+    torch.tensor(
+        [[0.5377, 0.7068, 0.8589],
+         [0.1576, 0.1456, 0.8799],
+         [0.5932, 0.0204, 0.6759],
+         [0.6946, 0.4114, 0.4869]]
+))
 
 # Print object to view all parameters
 print(calc)
 ## [OUTPUT] DebyeCalculator{'qmin': 1.0, 'qmax': 8.0, 'qstep': 0.01, 'rmin': 0.0, 'rmax': 20.0, ...}
 
 # Calculate Powder (X-ray) Diffraction from XYZ-file
-Q, I = calc.iq(structure_path=XYZ_path)
+Q, I = calc.iq(structure_source=xyz_file)
 
 # Calculate Powder (X-ray) Diffraction from CIF
-Q, I = calc.iq(structure_path=CIF_path, radii=5) # radii is the radius of the particle in Å 
+Q, I = calc.iq(structure_source=cif_file, radii=5) # radii is the radius of the particle in Å
+
+# Calculate Powder (X-ray) Diffraction from Tuple
+Q, I = calc.iq(structure_source=structure_tuple)
 
 # Update parameters for Small Angle (Neutron) Scattering
 calc.update_parameters(qmin=0.0, qmax=3.0, qstep=0.01, radiation_type="neutron")
 
 # Calculate Small Angle (Neutron) Scattering
-calc.iq(structure_path=XYZ_path)
+Q, I = calc.iq(structure_source=xyz_file)
 
 # Update parameters for Total Scattering with Pair Distribution Function analysis
 calc.update_parameters(qmin=1.0, qmax=30.0, qstep=0.1, radiation_type="xray")
 
 # Calculate Pair Distribution Function
-r, G = calc.gr(structure_path=XYZ_path)
+r, G = calc.gr(structure_source=xyz_file)
 .....
 
 ```
