@@ -23,7 +23,7 @@ import warnings
 from tqdm import tqdm
 
 NanoParticle = namedtuple('NanoParticle', 'elements size occupancy xyz')
-NanoParticleASE = namedtuple('NanoParticleASe', 'ase_structure np_size')
+NanoParticleASE = namedtuple('NanoParticleASE', 'ase_structure np_size')
 NanoParticleASEGraph = namedtuple('NanoParticleASEGraph', 'ase_structure np_size edges distances')
 NanoParticleType = Union[
     List[NanoParticle],
@@ -97,6 +97,7 @@ def generate_nanoparticles(
     sort_atoms: bool = True,
     disable_pbar: bool = False,
     return_graph_elements: bool = False,
+    device: str = 'cuda',
     _override_device: bool = False,
     _lightweight_mode: bool = False,
     _return_ase: bool = False,
@@ -112,6 +113,7 @@ def generate_nanoparticles(
         sort_atoms (bool, optional): Whether to sort atoms in the nanoparticle. Defaults to True.
         disable_pbar (bool, optional): Whether to disable the progress bar. Defaults to False.
         return_graph_elements (bool, optional): Whether to return graph elements. Defaults to False.
+        device (str): Device to use for computations ('cuda' for CUDA-enabled GPU's or 'cpu' for CPU)
         _override_device (bool): Ignore object device and run on CPU.
         _lightweight_mode (bool): Whether to use lightweight mode. Defaults to False.
         _return_ase (bool): Whether to return ASE objects. Defaults to False.
@@ -119,8 +121,22 @@ def generate_nanoparticles(
     Returns:
         NanoParticleType: List of nanoparticle tuples or ASE objects.
     """
-    torch.cuda.empty_cache()
-    device = 'cuda' if (torch.cuda.is_available() and not _override_device) else 'cpu'
+        
+    # Handling CUDA availability
+    if _override_device:
+        device = 'cpu'
+    else:
+        if device == 'cuda' and not torch.cuda.is_available():
+            warnings.warn("Warning: Your system might have a CUDA-enabled GPU, but CUDA is not available. Computations will run on the CPU instead. " \
+                          "For optimal performance, please install Pytorch with CUDA support. " \
+                          "If you do not have a CUDA-enabled CPU, you can surpress this warning by specifying the 'device' argument as 'cpu'", stacklevel=2)
+            device = 'cpu'
+        elif device == 'cpu' and torch.cuda.is_available():
+            warnings.warn("Warning: Your system has a CUDA-enabled GPU, but CPU was explicitly specified for computations. " \
+                          "To utilise GPU acceleration, omit the 'device' argument or specify 'cuda'", stacklevel=2)
+            device = 'cpu'
+        else:
+            device = device
 
     # Fetch atomic numbers and radii
     with open(pkg_resources.resource_filename(__name__, 'elements_info.yaml'), 'r') as yaml_file:
