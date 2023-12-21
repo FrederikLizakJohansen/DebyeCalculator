@@ -1380,15 +1380,23 @@ class DebyeCalculator:
 
         def update_uploaded_files(change):
             global global_file_widgets
+        
+            file_widgets = [HBox([
+                widgets.Text("Include", disabled=True, layout=Layout(width='90px')),
+                widgets.Text("Filename", disabled=True, layout=Layout(width='500px')),
+                widgets.Text("Radius [Å] of generated particle", disabled=True, layout=Layout(width='200px')),
+            ], layout=Layout(justify_content='flex-start'))]
             
             num_files = len(upload.value)
 
             if num_files > 0:
                 file_list = '<strong>Uploaded Files:</strong><br>'
                 for file_info in upload.value:
-                    create_file_widgets(file_info, global_file_widgets)
+                    create_file_widgets(file_info, file_widgets)
 
             upload_text.value = file_list
+
+            global_file_widgets = file_widgets
             
             clear_output(wait=True)
             display_tabs()
