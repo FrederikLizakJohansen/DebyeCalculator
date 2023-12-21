@@ -1,6 +1,11 @@
 import os
+import tempfile
+from io import BytesIO
+import zipfile
 import sys
 import base64
+import hashlib
+import time
 import yaml
 import pkg_resources
 import warnings
@@ -37,6 +42,7 @@ from debyecalculator.utility.generate import generate_nanoparticles
 import ipywidgets as widgets
 from IPython.display import display, HTML, clear_output
 from ipywidgets import HBox, VBox, Layout
+from functools import partial
 from tqdm.auto import tqdm
 
 StructureTuple = namedtuple('StructureTuple', 'elements size occupancy xyz triu_indices unique_inverse unique_form_factors form_avg_sq structure_inverse')
@@ -69,7 +75,7 @@ class DebyeCalculator:
         self,
         qmin: float = 1.0,
         qmax: float = 30.0,
-        qstep: float = 0.1,
+        qstep: float = 0.05,
         qdamp: float = 0.04,
         rmin: float = 0.0,
         rmax: float = 20.0,
@@ -351,7 +357,7 @@ class DebyeCalculator:
 
             elif ext == 'cif':
                 if radii is not None:
-                    structures = generate_nanoparticles(structure_source, radii, disable_pbar=disable_pbar, _lightweight_mode=self._lightweight_mode)
+                    structures = generate_nanoparticles(structure_source, radii, disable_pbar=disable_pbar, _lightweight_mode=self._lightweight_mode, device=self.device)
                     structure_tuple_list = []
                     for structure in structures:
                         triu_indices, unique_inverse, unique_form_factors, form_avg_sq, structure_inverse = parse_elements(structure.elements, structure.size)
@@ -932,59 +938,32 @@ class DebyeCalculator:
         # File selection sizes
         header_widths = [105*1.8, 130*1.8]
         header_widths = [str(i)+'px' for i in header_widths]
-
-        # Folder selection
-        folder = widgets.Text(description='', placeholder='Enter data directory', disabled=False, layout=Layout(width='650px'))
         
-        # Dropdown file sections
-        DEFAULT_MSGS = ['No valid files in entered directory', 'Select data file']
-        select_file_1 = widgets.Dropdown(options=DEFAULT_MSGS, value=DEFAULT_MSGS[0], disabled=True, layout=Layout(width='650px'))
-        select_file_2 = widgets.Dropdown(options=DEFAULT_MSGS, value=DEFAULT_MSGS[0], disabled=True, layout=Layout(width='650px'))
-        
-        # File 1
-        select_file_desc_1 = HBox([widgets.Image(value=file_1_img, format='png', layout=Layout(object_fit='contain', object_position='20px', width='32px'))], layout=Layout(width='88px'))
-        select_radius_desc_1 = HBox([widgets.Image(value=radius_a_img, format='png', layout=Layout(object_fit='contain', object_position='20px', width='60px', visibility='hidden'))], layout=Layout(width='88px'))
-        select_radius_1 = widgets.FloatText(min = 0, max = 50, step=0.01, value=5, disabled = False, layout = Layout(width='50px', visibility='hidden'))
-        cif_text_1 = widgets.Text(
-            value='Given radius, generate spherical nanoparticles (NP) from crystallographic information files (CIFs)', 
-            disabled=True,
-            layout=Layout(width='595px', visibility='hidden')
-        )
+        # Upload files
+        # Specify the allowed file extensions
+        allowed_extensions = ['.cif', '.xyz']
 
-        # File 2
-        select_file_desc_2 = HBox([widgets.Image(value=file_2_img, format='png', layout=Layout(object_fit='contain', object_position='20px', width='32px'))], layout=Layout(width='88px'))
-        select_radius_desc_2 = HBox([widgets.Image(value=radius_a_img, format='png', layout=Layout(object_fit='contain', object_position='20px', width='60px', visibility='hidden'))], layout=Layout(width='88px'))
-        select_radius_2 = widgets.FloatText(min = 0, max = 50, step=0.01, value=5, disabled = False, layout = Layout(width='50px', visibility='hidden'))
-        cif_text_2 = widgets.Text(
-            value='Given radius, generate spherical nanoparticles (NP) from crystallographic information files (CIFs)', 
-            disabled=True,
-            layout=Layout(width='595px', visibility='hidden')
-        )
+        # Create FileUpload widget with the specified extensions
+        upload = widgets.FileUpload(accept=','.join(allowed_extensions), multiple=True)
+        upload_text = widgets.HTML()
+
+        # Dictionary to store uploaded files and associated float values
+        radii_inputs = {}
+        file_names = {}
+        checkboxes = {}
+
+        global global_file_widgets
+            
+        global_file_widgets = [HBox([
+            widgets.Text("Include", disabled=True, layout=Layout(width='90px')),
+            widgets.Text("Filename", disabled=True, layout=Layout(width='500px')),
+            widgets.Text("Radius [Å] of generated particle", disabled=True, layout=Layout(width='200px')),
+        ], layout=Layout(justify_content='flex-start'))]
 
         # File selection Tab
         file_tab = VBox([
-            # Enter path
-            widgets.Image(value=enter_path_img, format='png', layout=Layout(object_fit='contain', width=header_widths[0])),
-            folder,
-
-            spacing_10px,
-            
-            # Select file(s)
-            widgets.Image(value=select_files_img, format='png', layout=Layout(object_fit='contain', width=header_widths[1])),
-
-            # Select file 1
-            HBox([select_file_desc_1, select_file_1]),
-
-            # if CIF, radius options
-            HBox([select_radius_desc_1, select_radius_1, cif_text_1]),
-
-            spacing_10px,
-
-            # Select file 2
-            HBox([select_file_desc_2, select_file_2]),
-
-            # If CIF, radius options
-            HBox([select_radius_desc_2, select_radius_2, cif_text_2]),
+            VBox([upload, upload_text], layout=Layout(justify_content='flex-start')),
+            VBox(global_file_widgets),
         ], layout = file_tab_layout)
         
         """ Scattering Options Tab """
@@ -1326,234 +1305,97 @@ class DebyeCalculator:
         
         # Plot button and Download buttons
         plot_button = widgets.Button(description='Plot data', layout=Layout(width='50%', height='90%'), button_style='primary', icon='fa-pencil-square-o')
-        download_button = widgets.Button(description="Download- and plot data", layout=Layout(width='50%', height='90%'), button_style='success', icon='fa-download')
+        download_button = DownloadButton(zip_filename='DebyeCalculator_output.zip', description='Download data',
+                                         layout=Layout(width='50%', height='90%'), button_style='success', icon='fa-download')
         
+        # Tab index observer
+        global selected_tab_idx
+        selected_tab_idx = 0
+
+        def on_tab_change(change):
+            global selected_tab_idx
+            selected_tab_idx = change['new']
+
         def display_tabs():
+            global global_file_widgets
+
+            file_tab = VBox([
+                VBox([upload, upload_text], layout=Layout(justify_content='flex-start')),
+                VBox(global_file_widgets),
+            ], layout = file_tab_layout)
+
+            tabs = widgets.Tab([
+                file_tab,
+                scattering_tab,
+                plotting_tab,
+                hardware_tab,
+            ])
+            # Set tab titles
+            tabs.set_title(0, 'File Selection')
+            tabs.set_title(1, 'Scattering Options')
+            tabs.set_title(2, 'Plotting Options')
+            tabs.set_title(3, 'Hardware Options')
+            
+            tabs.selected_index = selected_tab_idx
+
             display(VBox([tabs, HBox([plot_button, download_button], layout=Layout(width='100%', height='50px'))]))
-
-
-        """ Download utility """
         
-        # Download options
-        def create_download_link(select_file, select_radius, filename_prefix, data, header=None):
-        
-            # Collect Metadata
-            metadata ={
-                'qmin': qslider.value[0],
-                'qmax': qslider.value[1],
-                'qdamp': qdamp_box.value,
-                'qstep': qstep_box.value,
-                'rmin': rslider.value[0], 
-                'rmax': rslider.value[1],
-                'rstep': rstep_box.value, 
-                'rthres': rthres_box.value,
-                'biso': biso_box.value,
-                'device': hardware_button.value,
-                'batch_size': batch_size_box.value, 
-                'lorch_mod': lorch_mod_button.value,
-                'radiation_type': radtype_button.value
-            }
-    
-            # Join content
-            output = ''
-            #content = "\n".join([",".join(map(str, np.around(row,len(str(qstep_box.value))))) for row in data])
-            content = "\n".join([",".join(map(str, np.around(row,len(str(qstep_box.value))+5))) for row in data])
-            for k,v in metadata.items():
-                output += f'{k}:{v}\n'
-            output += '\n'
-            if header:
-                output += header + '\n'
-            output += content
-        
-            # Encode as base64
-            b64 = base64.b64encode(output.encode()).decode()
-        
-            # Add Time
-            t = datetime.now()
-            year = f'{t.year}'[-2:]
-            month = f'{t.month}'.zfill(2)
-            day = f'{t.day}'.zfill(2)
-            hours = f'{t.hour}'.zfill(2)
-            minutes = f'{t.minute}'.zfill(2)
-            seconds = f'{t.second}'.zfill(2)
-            
-            # Make filename
-            if select_radius is not None:
-                filename = filename_prefix + '_' + select_file.value.split('/')[-1].split('.')[0] + '_radius' + str(select_radius.value) + '_' + month + day + year + '_' + hours + minutes + seconds + '.csv'
-            else:
-                filename = filename_prefix + '_' + select_file.value.split('/')[-1].split('.')[0] + '_' + month + day + year + '_' + hours + minutes + seconds + '.csv'
-        
-            # Make href and return
-            href = filename_prefix + ':\t' + f'<a href="data:text/csv;base64,{b64}" download="{filename}">{filename}</a>'
-            return href
-        
-        def create_structure_download_link(select_file, select_radius, filename_prefix, ase_atoms):
-            
-            # Get atomic properties
-            positions = ase_atoms.get_positions()
-            elements = ase_atoms.get_chemical_symbols()
-            num_atoms = len(ase_atoms)
-        
-            # Make header
-            header = str(num_atoms) + "\n\n"
-        
-            # Join content 
-            content = header + "\n".join([el + '\t' + "\t".join(map(str,np.around(row, 5))) for row, el in zip(positions, elements)])
-            
-            # Encode as base64
-            b64 = base64.b64encode(content.encode()).decode()
-            
-            # Add Time
-            t = datetime.now()
-            year = f'{t.year}'[-2:]
-            month = f'{t.month}'.zfill(2)
-            day = f'{t.day}'.zfill(2)
-            hours = f'{t.hour}'.zfill(2)
-            minutes = f'{t.minute}'.zfill(2)
-            seconds = f'{t.second}'.zfill(2)
-        
-            # Make ilename
-            filename = filename_prefix + '_' + select_file.value.split('/')[-1].split('.')[0] + '_radius' + str(select_radius.value) + '_' + month + day + year + '_' + hours + minutes + seconds + '.xyz'
-        
-            # Make href and return
-            href = filename_prefix + ':\t' + f'<a href="data:text/xyz;base64,{b64}" download="{filename}">{filename}</a>'
-            return href
-        
-
-        @download_button.on_click
-        def on_download_button_click(button):
-            global debye_outputs
-            # Try to compile all the data and create html link to download files
-            try:
-                # clear and display
-                clear_output(wait=True)
-                display_tabs()
-
-                debye_outputs = []
-                for select_file, select_radius in zip([select_file_1, select_file_2], [select_radius_1, select_radius_2]):
-                    try:
-                        path_ext = select_file.value.split('.')[-1]
-                    except Exception as e:
-                        return
-                    if (select_file.value is not None) and (select_file.value not in DEFAULT_MSGS) and (path_ext in ['xyz', 'cif']):
-                        try:
-                            debye_calc = DebyeCalculator(
-                                device=hardware_button.value, 
-                                batch_size=batch_size_box.value,
-                                radiation_type=radtype_button.value,
-                                qmin=qslider.value[0], 
-                                qmax=qslider.value[1], 
-                                qstep=qstep_box.value, 
-                                qdamp=qdamp_box.value,
-                                rmin=rslider.value[0],
-                                rmax=rslider.value[1], 
-                                rstep=rstep_box.value, 
-                                rthres=rthres_box.value, 
-                                biso=biso_box.value,
-                                lorch_mod=lorch_mod_button.value
-                            )
-                            if (select_radius.layout.visibility != 'hidden') and (select_radius.value > 8):
-                                print(f'Generating nanoparticle of radius {select_radius.value} using {select_file.value.split("/")[-1]} ...')
-                            debye_outputs.append(debye_calc._get_all(select_file.value, select_radius.value))
-                        except Exception as e:
-                            print(f'FAILED: Could not load data file: {select_file.value}', end='\r')
-                            raise e
-                
-                if len(debye_outputs) < 1:
-                    print('FAILED: Please select data file(s)', end="\r")
-                    return
-
-                i = 0
-                for select_file, select_radius in zip([select_file_1, select_file_2], [select_radius_1, select_radius_2]):
-                    
-                    # Display download links
-                    if select_file.value not in DEFAULT_MSGS:
-
-                        # Print
-                        print('Download links for '  + select_file.value.split('/')[-1] + ':')
-                            
-                        r, q, iq, sq, fq, gr = debye_outputs[i]
-
-                        iq_data = np.column_stack([q, iq])
-                        sq_data = np.column_stack([q, sq])
-                        fq_data = np.column_stack([q, fq])
-                        gr_data = np.column_stack([r, gr])
-
-                        if select_radius.layout.visibility == 'visible':
-                            structures = generate_nanoparticles(select_file.value, select_radius.value, _return_ase = True, disable_pbar=True)
-                            display(HTML(create_structure_download_link(select_file, select_radius, f'structure', structures[0].ase_structure)))
-                            display(HTML(create_download_link(select_file, select_radius, 'iq', iq_data, "q,I(Q)")))
-                            display(HTML(create_download_link(select_file, select_radius, 'sq', sq_data, "q,S(Q)")))
-                            display(HTML(create_download_link(select_file, select_radius, 'fq', fq_data, "q,F(Q)")))
-                            display(HTML(create_download_link(select_file, select_radius, 'gr', gr_data, "r,G(r)")))
-                        else:
-                            display(HTML(create_download_link(select_file, None, 'iq', iq_data, "q,I(Q)")))
-                            display(HTML(create_download_link(select_file, None, 'sq', sq_data, "q,S(Q)")))
-                            display(HTML(create_download_link(select_file, None, 'fq', fq_data, "q,F(Q)")))
-                            display(HTML(create_download_link(select_file, None, 'gr', gr_data, "r,G(r)")))
-                        print('\n')
-                        i += 1
-                    
-                update_figure(debye_outputs)
-        
-            except Exception as e:
-                raise(e)
-                print('FAILED: Please select data file(s)', end="\r")
+            tabs.observe(on_tab_change, names='selected_index')
 
         """ Observer utility """
-                      
-        # Define a function to update the scattering patterns based on the selected parameters
-        def update_options(change):
-            folder = change.new
-            paths = sorted(glob(os.path.join(folder, '*.xyz')) + glob(os.path.join(folder, '*.cif')))
-            if len(paths):
-                for select_file in [select_file_1, select_file_2]:
-                    select_file.options = ['Select data file'] + paths
-                    select_file.value = 'Select data file'
-                    select_file.disabled = False
+
+        # Upload observer
+        def create_file_widgets(file_info, file_widgets):
+
+            file_name = file_info['name']
+
+            # Add FloatText widget for ".cif" files
+            is_cif = file_name.lower().endswith('.cif')
+            checkboxes[file_name] = widgets.ToggleButton(
+                value=True,
+                description='',
+                disabled=False,
+                button_style='success',
+                tooltip='',
+                icon='check-square-o',
+                layout=Layout(width='90px')
+            )
+            file_names[file_name] = widgets.Text(file_name, disabled=True, layout=Layout(width='500px'))
+            radii_inputs[file_name] = widgets.FloatText(value=5.0, disabled=not is_cif, 
+                                                layout=Layout(width='200px', visibility = 'hidden' if not is_cif else 'visible'))
+            
+            file_widgets.append(HBox([checkboxes[file_name], file_names[file_name], radii_inputs[file_name]],
+                                layout=Layout(justify_content='flex-start')))
+            
+            # Add an observer for each ToggleButton
+            checkboxes[file_name].observe(partial(callback_toggle_button, file_name=file_name), names='value')
+
+        def callback_toggle_button(change, file_name):
+            if change['owner'].value:
+                change['owner'].button_style = 'success'
+                change['owner'].icon = 'check-square-o'
             else:
-                for select_file in [select_file_1, select_file_2]:
-                    select_file.options = [DEFAULT_MSGS[0]]
-                    select_file.value = DEFAULT_MSGS[0]
-                    select_file.disabled = True
-        
-        
-        def update_options_radius_1(change):
-            #select_radius = change.new
-            selected_ext = select_file_1.value.split('.')[-1]
-            if selected_ext == 'xyz':
-                select_radius_desc_1.children[0].layout.visibility = 'hidden'
-                select_radius_1.layout.visibility = 'hidden'
-                cif_text_1.layout.visibility = 'hidden'
-            elif selected_ext == 'cif':
-                select_radius_desc_1.children[0].layout.visibility = 'visible'
-                select_radius_1.layout.visibility = 'visible'
-                cif_text_1.layout.visibility = 'visible'
-            else:
-                select_radius_desc_1.children[0].layout.visibility = 'hidden'
-                select_radius_1.layout.visibility = 'hidden'
-                cif_text_1.layout.visibility = 'hidden'
-        
-        def update_options_radius_2(change):
-            #select_radius = change.new
-            selected_ext = select_file_2.value.split('.')[-1]
-            if selected_ext == 'xyz':
-                select_radius_desc_2.children[0].layout.visibility = 'hidden'
-                select_radius_2.layout.visibility = 'hidden'
-                cif_text_2.layout.visibility = 'hidden'
-            elif selected_ext == 'cif':
-                select_radius_desc_2.children[0].layout.visibility = 'visible'
-                select_radius_2.layout.visibility = 'visible'
-                cif_text_2.layout.visibility = 'visible'
-            else:
-                select_radius_desc_2.children[0].layout.visibility = 'hidden'
-                select_radius_2.layout.visibility = 'hidden'
-                cif_text_2.layout.visibility = 'hidden'
-        
-        # Link the update functions to the dropdown widget's value change event
-        folder.observe(update_options, names='value')
-        select_file_1.observe(update_options_radius_1, names='value')
-        select_file_2.observe(update_options_radius_2, names='value')
+                change['owner'].button_style = ''
+                change['owner'].icon = 'minus'
+
+        def update_uploaded_files(change):
+            global global_file_widgets
+            
+            num_files = len(upload.value)
+
+            if num_files > 0:
+                file_list = '<strong>Uploaded Files:</strong><br>'
+                for file_info in upload.value:
+                    create_file_widgets(file_info, global_file_widgets)
+
+            upload_text.value = file_list
+            
+            clear_output(wait=True)
+            display_tabs()
+                              
+        upload.observe(update_uploaded_files, names='value')
+
+        tabs.observe(on_tab_change, names='selected_index')
         
 
         """ Plotting utility """
@@ -1609,7 +1451,7 @@ class DebyeCalculator:
 
             # Set qmin and qmax
             qslider.value = [1.0, 30.0]
-            qstep_box.value = 0.1
+            qstep_box.value = 0.05
         
         @reset_button.on_click
         def reset(b=None):
@@ -1642,8 +1484,9 @@ class DebyeCalculator:
             normalize_sq_text = '' if not normalize_iq.value else ' [normalized]'
             normalize_fq_text = '' if not normalize_iq.value else ' [normalized]'
             normalize_gr_text = '' if not normalize_iq.value else ' [normalized]'
-
-            for do in debye_outputs:
+            
+            labels = [out[0] for out in debye_outputs]
+            for do in [out[1] for out in debye_outputs]:
                 if show_iq_button.value:
                     axis_ids.append(0)
                     xseries.append(do[1]) # q
@@ -1685,29 +1528,6 @@ class DebyeCalculator:
                     scales.append('linear')
                     titles.append('Reduced Pair Distribution Function, G(r)')
 
-            sup_title = []
-            labels = []
-            if select_file_1.value not in ['Select data file', 'No valid files in entered directory']:
-
-                sup_title.append(select_file_1.value.split('/')[-1])
-
-                if select_radius_1.layout.visibility == 'hidden':
-                    labels.append(sup_title[-1])
-                else:
-                    labels.append(sup_title[-1] + ', rad.: ' + str(select_radius_1.value) + ' Å')
-
-            if select_file_2.value not in ['Select data file', 'No valid files in entered directory']:
-
-                sup_title.append(select_file_2.value.split('/')[-1])
-
-                if select_radius_2.layout.visibility == 'hidden':
-                    labels.append(sup_title[-1])
-                else:
-                    labels.append(sup_title[-1] + ', rad.: ' + str(select_radius_2.value) + ' Å')
-
-            if len(labels) == 0:
-                return
-
             num_plots = int(show_iq_button.value) + int(show_sq_button.value) + int(show_fq_button.value) + int(show_gr_button.value) 
             if num_plots == 4:
                 fig, axs = plt.subplots(2,2,figsize=(12, 8), dpi=75)
@@ -1734,11 +1554,6 @@ class DebyeCalculator:
                 axs[ii].grid(alpha=0.2, which='both')
                 axs[ii].legend()
 
-            if len(sup_title) == 1:
-                title = f"Showing files: {sup_title[0]}"
-            else:
-                title = f"Showing files: {sup_title[0]} and {sup_title[1]}"
-            fig.suptitle(title)
             fig.tight_layout()
 
         @plot_button.on_click
@@ -1746,39 +1561,78 @@ class DebyeCalculator:
             global debye_outputs
 
             debye_outputs = []
-            for select_file, select_radius in zip([select_file_1, select_file_2], [select_radius_1, select_radius_2]):
-                try:
-                    path_ext = select_file.value.split('.')[-1]
-                except Exception as e:
-                    return
-                if (select_file.value is not None) and (select_file.value not in [DEFAULT_MSGS]) and (path_ext in ['xyz', 'cif']):
-                    try:
-                        # TODO if not changed, dont make new object
-                        debye_calc = DebyeCalculator(
-                            device=hardware_button.value, 
-                            batch_size=batch_size_box.value,
-                            radiation_type=radtype_button.value,
-                            qmin=qslider.value[0], 
-                            qmax=qslider.value[1], 
-                            qstep=qstep_box.value, 
-                            qdamp=qdamp_box.value,
-                            rmin=rslider.value[0],
-                            rmax=rslider.value[1], 
-                            rstep=rstep_box.value, 
-                            rthres=rthres_box.value, 
-                            biso=biso_box.value,
-                            lorch_mod=lorch_mod_button.value
-                        )
-                        if not select_radius.disabled and select_radius.value > 8:
-                            print(f'Generating nanoparticle of radius {select_radius.value} using {select_file.value.split("/")[-1]} ...')
-                        debye_outputs.append(debye_calc._get_all(select_file.value, select_radius.value))
-                    except Exception as e:
-                        print(f'FAILED: Could not load data file: {select_file.value}', end='\r')
-                        raise e
+            download_button.reset()
+
+            # Collect Metadata
+            metadata ={
+                'qmin': qslider.value[0],
+                'qmax': qslider.value[1],
+                'qdamp': qdamp_box.value,
+                'qstep': qstep_box.value,
+                'rmin': rslider.value[0], 
+                'rmax': rslider.value[1],
+                'rstep': rstep_box.value, 
+                'rthres': rthres_box.value,
+                'biso': biso_box.value,
+                'device': hardware_button.value,
+                'batch_size': batch_size_box.value, 
+                'lorch_mod': lorch_mod_button.value,
+                'radiation_type': radtype_button.value
+            }
+
+            # Loop thorugh all the files
+            for i, upload_file in enumerate(upload.value):
+                name = upload_file['name']
+                suffix = name.split('.')[-1]
+                if checkboxes[name].value:
+                    with tempfile.NamedTemporaryFile(delete=True, suffix='.' + suffix, mode = 'w') as temp_file:
+                        temp_content = BytesIO(upload_file['content']).read().decode()
+                        temp_filename = temp_file.name
+                        temp_file.write(temp_content)
+                        temp_file.flush()
+                        try:
+                            # TODO if not changed, dont make new object
+                            debye_calc = DebyeCalculator(
+                                device=hardware_button.value,
+                                batch_size=batch_size_box.value,
+                                radiation_type=radtype_button.value,
+                                qmin=qslider.value[0],
+                                qmax=qslider.value[1],
+                                qstep=qstep_box.value, 
+                                qdamp=qdamp_box.value,
+                                rmin=rslider.value[0],
+                                rmax=rslider.value[1], 
+                                rstep=rstep_box.value,
+                                rthres=rthres_box.value, 
+                                biso=biso_box.value,
+                                lorch_mod=lorch_mod_button.value
+                            )
+                            if radii_inputs[name].layout.visibility == 'visible' and radii_inputs[name].value > 8:
+                                print(f'Generating nanoparticle of radius {radii_inputs[name].value} Å, using {name} ...')
+                            if suffix == 'cif':
+                                temp_structure = generate_nanoparticles(temp_filename, radii=radii_inputs[name].value, disable_pbar=True,
+                                                                        _return_ase=True, device=hardware_button.value)[0].ase_structure
+                                download_button.add_file_structure(ase_structure = temp_structure, filename='structure.xyz', subfolder=name)
+                                all_tuple = debye_calc._get_all(temp_structure)
+                            else:
+                                all_tuple = debye_calc._get_all(temp_filename)
+
+                            debye_outputs.append((name, all_tuple))
+
+                            download_button.add_file_csv(x=all_tuple.q, y=all_tuple.i, filename='I(Q).csv', subfolder=name, metadata=metadata)
+                            download_button.add_file_csv(x=all_tuple.q, y=all_tuple.s, filename='S(Q).csv', subfolder=name, metadata=metadata)
+                            download_button.add_file_csv(x=all_tuple.q, y=all_tuple.f, filename='F(Q).csv', subfolder=name, metadata=metadata)
+                            download_button.add_file_csv(x=all_tuple.r, y=all_tuple.g, filename='G(r).csv', subfolder=name, metadata=metadata)
+
+                        except Exception as e:
+                            print(f'FAILED: Could not load data file: {name}', end='\r')
+                            raise e
 
             # Clear and display
             clear_output(wait=True)
             display_tabs()
+            
+            #print(debye_outputs)
 
             if len(debye_outputs) < 1:
                 print('FAILED: Please select data file(s)', end="\r")
@@ -1788,3 +1642,77 @@ class DebyeCalculator:
 
         # Display tabs when function is called
         display_tabs()
+
+class DownloadButton(widgets.Button):
+    def __init__(self, zip_filename: str, **kwargs):
+        super(DownloadButton, self).__init__(**kwargs)
+        self.files = {}  # Dictionary to store filenames and contents by subfolder
+        self.zip_filename = zip_filename
+        self.on_click(self.__on_click)
+
+    def reset(self):
+         self.files = {}
+
+    def add_file_csv(self, x, y, filename: str, subfolder: str, metadata: dict):
+        output = ''
+        content = "\n".join([",".join(map(str, np.around(row,len(str(metadata['qstep']))+5))) for row in np.stack([x, y]).T])
+        for k,v in metadata.items():
+            output += f'{k}:{v}\n'
+        output += '\n'
+        output += content
+
+        if subfolder not in self.files:
+            self.files[subfolder] = []
+        self.files[subfolder].append((filename, output))
+
+    def add_file_structure(self, ase_structure, filename: str, subfolder: str):
+        # Get atomic properties
+        positions = ase_structure.get_positions()
+        elements = ase_structure.get_chemical_symbols()
+        num_atoms = len(ase_structure)
+        
+        # Make header
+        header = str(num_atoms) + "\n\n"
+        
+        # Join content 
+        output = header + "\n".join([el + '\t' + "\t".join(map(str,np.around(row, 5))) for row, el in zip(positions, elements)])
+
+        if subfolder not in self.files:
+            self.files[subfolder] = []
+        self.files[subfolder].append((filename, output))
+
+    def __on_click(self, b):
+        if not self.files:
+            raise ValueError("Files must be added before clicking the button.")
+
+        zip_buffer = BytesIO()
+
+        with zipfile.ZipFile(zip_buffer, 'a', zipfile.ZIP_DEFLATED, False) as zip_file:
+            for subfolder, file_list in self.files.items():
+                for filename, content in file_list:
+                    zip_file.writestr(f"{subfolder}/{filename}", content)
+
+        zip_buffer.seek(0)
+        zip_payload = base64.b64encode(zip_buffer.read()).decode()
+        zip_digest = hashlib.md5(zip_buffer.getvalue()).hexdigest()  # bypass browser cache
+        zip_id = f'dl_{zip_digest}'
+
+        display(
+            HTML(
+                f"""
+                    <html>
+                    <body>
+                    <a id="{zip_id}" download="{self.zip_filename}" href="data:application/zip;base64,{zip_payload}" download>
+                    </a>
+
+                    <script>
+                    (function download() {{
+                    document.getElementById('{zip_id}').click();
+                    }})()
+                    </script>
+
+                    </body>
+                    </html>
+                """
+            )
+        )
