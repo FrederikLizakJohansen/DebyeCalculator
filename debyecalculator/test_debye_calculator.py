@@ -22,7 +22,7 @@ def test_init_defaults():
     #calc = DebyeCalculator()
     assert calc.qmin == 1.0, f"Expected qmin to be 1.0, but got {calc.qmin}"
     assert calc.qmax == 30.0, f"Expected qmax to be 30.0, but got {calc.qmax}"
-    assert calc.qstep == 0.1, f"Expected qstep to be 0.1, but got {calc.qstep}"
+    assert calc.qstep == 0.05, f"Expected qstep to be 0.05, but got {calc.qstep}"
     assert calc.qdamp == 0.04, f"Expected qdamp to be 0.04, but got {calc.qdamp}"
     assert calc.rmin == 0.0, f"Expected rmin to be 0.0, but got {calc.rmin}"
     assert calc.rmax == 20.0, f"Expected rmax to be 20.0, but got {calc.rmax}"
@@ -41,7 +41,6 @@ def test_iq_xyz():
     q_expected, iq_expected = ph[:,0], ph[:,1]
 
     # Calculate the scattering intensity using the DebyeCalculator
-    #calc = DebyeCalculator()
     calc.update_parameters(qstep=0.1)
     q, iq = calc.iq('debyecalculator/unittests_files/icsd_001504_cc_r6_lc_2.85_6_tetragonal.xyz')
 
@@ -57,7 +56,6 @@ def test_iq_cif():
 
     # Calculate the scatering intensity using DebyeCalculator
     calc.update_parameters(qstep=0.05)
-    #calc = DebyeCalculator(qstep=0.05)
     q, iq = calc.iq('data/AntiFluorite_Co2O.cif', radii=10.0)
     
     # Check that the calculated scattering intensity matches the expected value
@@ -78,7 +76,6 @@ def test_iq_tuple():
     structure_tuple_str = (ase_elements, ase_xyz)
     structure_tuple_int = (np.array([element_to_atomic_number[e] for e in ase_elements]), ase_xyz)
 
-    #calc = DebyeCalculator(qstep=0.05)
     calc.update_parameters(qstep=0.05)
     q_str, iq_str = calc.iq(structure_tuple_str)
     q_int, iq_int = calc.iq(structure_tuple_int)
@@ -95,7 +92,6 @@ def test_sq_xyz():
     q_expected, sq_expected = ph[:,0], ph[:,1]
 
     # Calculate the structure factor using the DebyeCalculator
-    #calc = DebyeCalculator()
     calc.update_parameters(qstep=0.1)
     q, sq = calc.sq('debyecalculator/unittests_files/icsd_001504_cc_r6_lc_2.85_6_tetragonal.xyz')
 
@@ -109,7 +105,6 @@ def test_sq_cif():
     q_expected, sq_expected = ph[:,0], ph[:,1]
 
     # Calculate the structure factor using the DebyeCalculator
-    #calc = DebyeCalculator(qstep=0.05)
     calc.update_parameters(qstep=0.05)
     q, sq = calc.sq('data/AntiFluorite_Co2O.cif', radii=10.0)
 
@@ -129,7 +124,6 @@ def test_sq_tuple():
     structure_tuple_str = (ase_elements, ase_xyz)
     structure_tuple_int = (np.array([element_to_atomic_number[e] for e in ase_elements]), ase_xyz)
 
-    #calc = DebyeCalculator(qstep=0.05)
     calc.update_parameters(qstep=0.05)
     q_str, sq_str = calc.sq(structure_tuple_str)
     q_int, sq_int = calc.sq(structure_tuple_int)
@@ -145,7 +139,6 @@ def test_fq_xyz():
     q_expected, fq_expected = ph[:,0], ph[:,1]
 
     # Calculate the atomic form factor using the DebyeCalculator
-    #calc = DebyeCalculator()
     calc.update_parameters(qstep=0.1)
     q, fq = calc.fq('debyecalculator/unittests_files/icsd_001504_cc_r6_lc_2.85_6_tetragonal.xyz')
 
@@ -159,7 +152,6 @@ def test_fq_cif():
     q_expected, fq_expected = ph[:,0], ph[:,1]
 
     # Calculate the structure factor using the DebyeCalculator
-    #calc = DebyeCalculator(qstep=0.05)
     calc.update_parameters(qstep=0.05)
     q, fq = calc.fq('data/AntiFluorite_Co2O.cif', radii=10.0)
 
@@ -179,7 +171,6 @@ def test_fq_tuple():
     structure_tuple_str = (ase_elements, ase_xyz)
     structure_tuple_int = (np.array([element_to_atomic_number[e] for e in ase_elements]), ase_xyz)
 
-    #calc = DebyeCalculator(qstep=0.05)
     calc.update_parameters(qstep=0.05)
     q_str, fq_str = calc.fq(structure_tuple_str)
     q_int, fq_int = calc.fq(structure_tuple_int)
@@ -195,7 +186,6 @@ def test_gr_xyz():
     r_expected, gr_expected = ph[:,0], ph[:,1]
 
     # Calculate the radial distribution function using the DebyeCalculator
-    #calc = DebyeCalculator()
     calc.update_parameters(qstep=0.1)
     r, gr = calc.gr('debyecalculator/unittests_files/icsd_001504_cc_r6_lc_2.85_6_tetragonal.xyz')
 
@@ -209,7 +199,6 @@ def test_gr_cif():
     r_expected, gr_expected = ph[:,0], ph[:,1]
 
     # Calculate the structure factor using the DebyeCalculator
-    #calc = DebyeCalculator(qstep=0.05)
     calc.update_parameters(qstep=0.05)
     r, gr = calc.gr('data/AntiFluorite_Co2O.cif', radii=10.0)
 
@@ -229,7 +218,6 @@ def test_gr_tuple():
     structure_tuple_str = (ase_elements, ase_xyz)
     structure_tuple_int = (np.array([element_to_atomic_number[e] for e in ase_elements]), ase_xyz)
 
-    #calc = DebyeCalculator(qstep=0.05)
     calc.update_parameters(qstep=0.05)
     r_str, gr_str = calc.gr(structure_tuple_str)
     r_int, gr_int = calc.gr(structure_tuple_int)
@@ -241,7 +229,6 @@ def test_gr_tuple():
 
 def test_get_all_xyz():
     # Calculate Iq, Fq, Sq, and Gr using the DebyeCalculator
-    #calc = DebyeCalculator()
     calc.update_parameters(qstep=0.1)
     r, q, iq, sq, fq, gr = calc._get_all('debyecalculator/unittests_files/icsd_001504_cc_r6_lc_2.85_6_tetragonal.xyz')
 
@@ -272,7 +259,6 @@ def test_get_all_xyz():
 def test_get_all_cif():
 
     # Calculate Iq, Fq, Sq, and Gr using the DebyeCalculator
-    #calc = DebyeCalculator(qstep=0.05)
     calc.update_parameters(qstep=0.05)
     r, q, iq, sq, fq, gr = calc._get_all('data/AntiFluorite_Co2O.cif', radii=10.0)
 
@@ -310,7 +296,6 @@ def test_get_all_tuple():
     structure_tuple_str = (ase_elements, ase_xyz)
     structure_tuple_int = (np.array([element_to_atomic_number[e] for e in ase_elements]), ase_xyz)
     
-    #calc = DebyeCalculator(qstep=0.05)
     calc.update_parameters(qstep=0.05)
     r_str, q_str, iq_str, sq_str, fq_str, gr_str = calc._get_all(structure_tuple_str) 
     r_int, q_int, iq_int, sq_int, fq_int, gr_int = calc._get_all(structure_tuple_int) 
@@ -364,7 +349,6 @@ def test_generate_nanoparticle():
 def test_invalid_input():
     # Test that the DebyeCalculator raises a FileNotFoundError when given a non-existent file
     with pytest.raises(IOError):
-        #calc = DebyeCalculator()
         calc.iq('non_existent_file.xyz')
 
     # Test invalid update of parameters
