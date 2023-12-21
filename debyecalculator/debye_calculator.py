@@ -10,7 +10,7 @@ import yaml
 import pkg_resources
 import warnings
 from glob import glob
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Union, Tuple, Any, List, Type
 from collections import namedtuple
 
@@ -913,18 +913,53 @@ class DebyeCalculator:
         spacing_5px = widgets.Text(description='', layout=Layout(visibility='hidden', height='5px'), disabled=True)
 
         """ File Selection Tab """
+
+        # Load examples
+        load_examples = widgets.Button(description='Load Example Data')
         
-        # Load diplay display_assets
-        with open(pkg_resources.resource_filename(__name__, 'display_assets/enter_path.png'), 'rb') as f:
-            enter_path_img = f.read()
-        with open(pkg_resources.resource_filename(__name__, 'display_assets/select_files.png'), 'rb') as f:
-            select_files_img = f.read()
-        with open(pkg_resources.resource_filename(__name__, 'display_assets/radius_a.png'), 'rb') as f:
-            radius_a_img = f.read()
-        with open(pkg_resources.resource_filename(__name__, 'display_assets/file_1.png'), 'rb') as f:
-            file_1_img = f.read()
-        with open(pkg_resources.resource_filename(__name__, 'display_assets/file_2.png'), 'rb') as f:
-            file_2_img = f.read()
+        @load_examples.on_click
+        def update_example_files(change):
+            global global_file_widgets
+            global upload
+        
+            file_widgets = [HBox([
+                widgets.Text("Incl.", disabled=True, layout=Layout(width='7%')),
+                widgets.Text("File Name", disabled=True, layout=Layout(width='70%')),
+                widgets.Text("Particle Radius [Å]", disabled=True, layout=Layout(width='23%')),
+            ], layout=Layout(justify_content='space-around'))]
+            
+            file_list = '<strong>Uploaded Files:</strong><br>'
+
+            # CIF Example
+            with open(pkg_resources.resource_filename(__name__, '../data/AntiFluorite_Co2O.cif'), 'rb') as f:
+                example_dict = {}
+                example_dict['content'] = f.read()
+                example_dict['name'] = 'AntiFluorite_Co2O.cif'
+                example_dict['type'] = ''
+                example_dict['size'] = 1209
+                example_dict['last_modified'] = datetime(2023, 8, 2, 13, 7, 38, 424000, tzinfo=timezone.utc)
+                upload = widgets.FileUpload(value=(example_dict,), accept='.xyz,.cif', multiple=True)
+                create_file_widgets(example_dict, file_widgets)
+
+            # XYZ Example
+            with open(pkg_resources.resource_filename(__name__, '../data/AntiFluorite_Co2O_r10.xyz'), 'rb') as f:
+                example_dict = {}
+                example_dict['content'] = f.read()
+                example_dict['name'] = 'AntiFluorite_Co2O_r10.xyz'
+                example_dict['type'] = ''
+                example_dict['size'] = 1209
+                example_dict['last_modified'] = datetime(2023, 8, 2, 13, 7, 38, 424000, tzinfo=timezone.utc)
+                upload.value += (example_dict,)
+                create_file_widgets(example_dict, file_widgets)
+
+            upload_text.value = file_list
+
+            global_file_widgets = file_widgets
+
+            upload.observe(update_uploaded_files, names='value')
+            
+            clear_output(wait=True)
+            display_tabs()
 
         # Layout
         file_tab_layout = Layout(
@@ -944,6 +979,7 @@ class DebyeCalculator:
         allowed_extensions = ['.cif', '.xyz']
 
         # Create FileUpload widget with the specified extensions
+        global upload
         upload = widgets.FileUpload(accept=','.join(allowed_extensions), multiple=True)
         upload_text = widgets.HTML()
 
@@ -953,16 +989,16 @@ class DebyeCalculator:
         checkboxes = {}
 
         global global_file_widgets
-            
         global_file_widgets = [HBox([
-            widgets.Text("Include", disabled=True, layout=Layout(width='90px')),
-            widgets.Text("Filename", disabled=True, layout=Layout(width='500px')),
-            widgets.Text("Radius [Å] of generated particle", disabled=True, layout=Layout(width='200px')),
-        ], layout=Layout(justify_content='flex-start'))]
+            widgets.Text("Incl.", disabled=True, layout=Layout(width='7%')),
+            widgets.Text("File Name", disabled=True, layout=Layout(width='70%')),
+            widgets.Text("Particle Radius [Å]", disabled=True, layout=Layout(width='23%')),
+        ], layout=Layout(justify_content='space-around'))]
 
         # File selection Tab
         file_tab = VBox([
-            VBox([upload, upload_text], layout=Layout(justify_content='flex-start')),
+            VBox([HBox([upload, load_examples], layout=Layout(justify_content='space-around')), upload_text],
+                 layout=Layout(justify_content='flex-start')),
             VBox(global_file_widgets),
         ], layout = file_tab_layout)
         
@@ -1318,11 +1354,13 @@ class DebyeCalculator:
 
         def display_tabs():
             global global_file_widgets
+            global upload
 
             file_tab = VBox([
-                VBox([upload, upload_text], layout=Layout(justify_content='flex-start')),
-                VBox(global_file_widgets),
-            ], layout = file_tab_layout)
+            VBox([HBox([upload, load_examples], layout=Layout(justify_content='space-around')), upload_text],
+                 layout=Layout(justify_content='flex-start')),
+            VBox(global_file_widgets),
+        ], layout = file_tab_layout)
 
             tabs = widgets.Tab([
                 file_tab,
@@ -1358,14 +1396,14 @@ class DebyeCalculator:
                 button_style='success',
                 tooltip='',
                 icon='check-square-o',
-                layout=Layout(width='90px')
+                layout=Layout(width='7%')
             )
-            file_names[file_name] = widgets.Text(file_name, disabled=True, layout=Layout(width='500px'))
+            file_names[file_name] = widgets.Text(file_name, disabled=True, layout=Layout(width='70%'))
             radii_inputs[file_name] = widgets.FloatText(value=5.0, disabled=not is_cif, 
-                                                layout=Layout(width='200px', visibility = 'hidden' if not is_cif else 'visible'))
+                                                layout=Layout(width='23%', visibility = 'hidden' if not is_cif else 'visible'))
             
             file_widgets.append(HBox([checkboxes[file_name], file_names[file_name], radii_inputs[file_name]],
-                                layout=Layout(justify_content='flex-start')))
+                                layout=Layout(justify_content='space-around')))
             
             # Add an observer for each ToggleButton
             checkboxes[file_name].observe(partial(callback_toggle_button, file_name=file_name), names='value')
@@ -1380,14 +1418,16 @@ class DebyeCalculator:
 
         def update_uploaded_files(change):
             global global_file_widgets
+            global upload
         
             file_widgets = [HBox([
-                widgets.Text("Include", disabled=True, layout=Layout(width='90px')),
-                widgets.Text("Filename", disabled=True, layout=Layout(width='500px')),
-                widgets.Text("Radius [Å] of generated particle", disabled=True, layout=Layout(width='200px')),
-            ], layout=Layout(justify_content='flex-start'))]
+                widgets.Text("Incl.", disabled=True, layout=Layout(width='7%')),
+                widgets.Text("File Name", disabled=True, layout=Layout(width='70%')),
+                widgets.Text("Particle Radius [Å]", disabled=True, layout=Layout(width='23%')),
+            ], layout=Layout(justify_content='space-around'))]
             
             num_files = len(upload.value)
+            #upload.value = change['new']
 
             if num_files > 0:
                 file_list = '<strong>Uploaded Files:</strong><br>'
@@ -1404,7 +1444,6 @@ class DebyeCalculator:
         upload.observe(update_uploaded_files, names='value')
 
         tabs.observe(on_tab_change, names='selected_index')
-        
 
         """ Plotting utility """
 
@@ -1567,6 +1606,7 @@ class DebyeCalculator:
         @plot_button.on_click
         def update_parameters(b=None):
             global debye_outputs
+            global upload
 
             debye_outputs = []
             download_button.reset()
