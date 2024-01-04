@@ -301,7 +301,7 @@ def generate_nanoparticles(
             nanoparticle_tuple_list.append(
                 NanoParticle(
                     elements = elements,
-                    size = nanoparticle_size.item(),
+                    size = len(elements),
                     occupancy = occupancy,
                     xyz = torch.from_numpy(np_cell.get_positions())
                 )
