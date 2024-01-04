@@ -22,7 +22,7 @@ import pkg_resources
 import warnings
 from tqdm import tqdm
 
-NanoParticle = namedtuple('NanoParticle', 'elements np_size occupancy xyz')
+NanoParticle = namedtuple('NanoParticle', 'elements size occupancy xyz')
 NanoParticleASE = namedtuple('NanoParticleASE', 'ase_structure np_size')
 NanoParticleASEGraph = namedtuple('NanoParticleASEGraph', 'ase_structure np_size edges distances')
 NanoParticleType = Union[
@@ -301,7 +301,7 @@ def generate_nanoparticles(
             nanoparticle_tuple_list.append(
                 NanoParticle(
                     elements = elements,
-                    np_size = nanoparticle_size.item(),
+                    size = nanoparticle_size.item(),
                     occupancy = occupancy,
                     xyz = torch.from_numpy(np_cell.get_positions())
                 )
