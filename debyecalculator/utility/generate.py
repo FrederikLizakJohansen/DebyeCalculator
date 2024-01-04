@@ -249,12 +249,6 @@ def generate_nanoparticles(
             
             # Get included atoms
             included_atoms = included_edges.unique()
-
-            # Get included distances for calculating nanoparticle size
-            center_dists = center_dists[included_atoms]
-
-            # Get Atoms object for the NP
-            np_cell = cell[included_atoms.cpu()]
             
         else:
             # Mask all metal atoms outside of the radius
@@ -275,11 +269,11 @@ def generate_nanoparticles(
             # Get included atoms
             included_atoms = included_edges.unique()
 
-            # Get included distances for calculating nanoparticle size
-            np_dists = center_dists[included_atoms]
+        # Get included distances
+        np_dists = cell_dists[included_edges[0], included_edges[1]]
 
-            # Get Atoms object for the NP
-            np_cell = cell[included_atoms.cpu()]
+        # Get Atoms object for the NP
+        np_cell = cell[included_atoms.cpu()]
 
         # Remove NPs with only one atom
         if len(np_cell) == 1:
@@ -287,7 +281,7 @@ def generate_nanoparticles(
             continue
 
         # Determine NP size
-        nanoparticle_size = torch.amax(np_dists) * 2
+        nanoparticle_size = torch.amax(np_dists)# * 2
         
         # Sort the atoms
         if sort_atoms:
