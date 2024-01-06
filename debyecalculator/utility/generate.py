@@ -269,9 +269,6 @@ def generate_nanoparticles(
             # Get included atoms
             included_atoms = included_edges.unique()
 
-        # Get included distances
-        np_dists = cell_dists[included_edges[0], included_edges[1]]
-
         # Get Atoms object for the NP
         np_cell = cell[included_atoms.cpu()]
 
@@ -310,11 +307,18 @@ def generate_nanoparticles(
             if return_graph_elements:
                 if sort_atoms:
                     raise NotImplementedError('FAILED: return_graph_elements is not yet implemented for sorted atoms')
+        
+                # Get included distances
+                np_dists = cell_dists[included_edges[0], included_edges[1]]
+
+                # Reorganise the included edges
+                reorganised_edges = transform_edge_indices(included_edges)
+
                 nanoparticle_tuple_list.append(
                     NanoParticleASEGraph(
                         ase_structure = np_cell,
                         np_size = nanoparticle_size.item(),
-                        edges = included_edges,
+                        edges = reorganised_edges,
                         distances = np_dists
                     )
                 )
@@ -329,3 +333,17 @@ def generate_nanoparticles(
         pbar.update(1)
     pbar.close()
     return nanoparticle_tuple_list
+
+def transform_edge_indices(edge_indices):
+
+    # Extract unique nodes from the edge indices
+    edge_indices = edge_indices.T
+    unique_nodes = torch.unique(edge_indices)
+
+    # Create a mapping from old indices to new indices
+    node_mapping = {old_index.item(): new_index for new_index, old_index in enumerate(unique_nodes)}
+
+    # Transform edge indices using the mapping
+    transformed_edges = torch.tensor([[node_mapping[edge[0].item()], node_mapping[edge[1].item()]] for edge in edge_indices])
+
+    return transformed_edges.T
