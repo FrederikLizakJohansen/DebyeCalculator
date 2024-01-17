@@ -20,7 +20,7 @@ from collections import namedtuple
 import yaml
 import pkg_resources
 import warnings
-from tqdm import tqdm
+from tqdm.auto import tqdm
 
 NanoParticle = namedtuple('NanoParticle', 'elements size occupancy xyz')
 NanoParticleASE = namedtuple('NanoParticleASE', 'ase_structure np_size')
@@ -101,6 +101,7 @@ def generate_nanoparticles(
     _override_device: bool = False,
     _lightweight_mode: bool = False,
     _return_ase: bool = False,
+    _reverse_order: bool = True,
 ) -> NanoParticleType:
     """
     Generate spherical nanoparticles from a given CIF and radii.
@@ -236,7 +237,7 @@ def generate_nanoparticles(
     pbar = tqdm(desc=f'Generating nanoparticles in range: [{np.amin(radii)},{np.amax(radii)}]', leave=False, total=len(radii), disable=disable_pbar)
 
     # Generate nanoparticles for each radius
-    for r in sorted(radii, reverse=True):
+    for r in sorted(radii, reverse=_reverse_order):
         if _lightweight_mode:
             # Mask all atoms within radius
             incl_mask = (center_dists <= r)
@@ -300,7 +301,7 @@ def generate_nanoparticles(
                     elements = elements,
                     size = len(elements),
                     occupancy = occupancy,
-                    xyz = torch.from_numpy(np_cell.get_positions())
+                    xyz = torch.from_numpy(np_cell.get_positions()).to(device=device)
                 )
             )
         else:
