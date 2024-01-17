@@ -15,7 +15,8 @@ Here, we provide an optimised code for the calculation of the Debye scattering e
     5. [GPU support](#gpu-support)
 3. [Usage](#usage)
     1. [Interactive mode](#interactive-mode-at-google-colab)
-    3. [Example usage](#example-usage)
+    2. [Example usage](#example-usage)
+    3. [Partial Gr](#partial-gr)
 4. [Additional implementation details](#additional-implementation-details)
 5. [Authors](#authors)
 6. [Cite](#cite)
@@ -144,7 +145,7 @@ r, G = calc.gr(structure_source=xyz_file)
 
 ```
 
-### Partial Gr
+## Partial Gr
 ```
 # Create a mask for oxygen atoms
 mask = [atom == "O" for atom in structure_tuple[0]]
@@ -156,7 +157,7 @@ structure_tuple = (
 )
 
 # Calculate Pair Distribution Function
-Q_truncatedStructure, I_truncatedStructure = calc.iq(structure_source=structure_tuple)
+r_partial, Gr_partial = calc.gr(structure_source=structure_tuple)
 ```
 
 # Additional implementation details
