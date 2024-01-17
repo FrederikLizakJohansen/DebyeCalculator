@@ -18,7 +18,43 @@ from typing import Union, List, Any
 from collections import namedtuple
 
 class Statistics:
-    def __init__(self, means, stds, name, radii, num_atoms, cuda_mem, device, batch_size):
+    """
+    A class to store and represent benchmark statistics.
+
+    Attributes:
+    - means (List[float]): List of mean values.
+    - stds (List[float]): List of standard deviation values.
+    - name (str): Name of the statistics.
+    - radii (List[float]): List of radii.
+    - num_atoms (List[int]): List of number of atoms.
+    - cuda_mem (List[float]): List of CUDA memory values.
+    - device (str): Device used for benchmarking.
+    - batch_size (int): Batch size used for benchmarking.
+    """
+    def __init__(
+        self,
+        means: List[float],
+        stds: List[float],
+        name: str,
+        radii: List[float],
+        num_atoms: List[int],
+        cuda_mem: List[float],
+        device: str,
+        batch_size: int
+    ) -> None:
+        """
+        Initialize Statistics with benchmarking results.
+
+        Parameters:
+        - means (List[float]): List of mean values.
+        - stds (List[float]): List of standard deviation values.
+        - name (str): Name of the statistics.
+        - radii (List[float]): List of radii.
+        - num_atoms (List[int]): List of number of atoms.
+        - cuda_mem (List[float]): List of CUDA memory values.
+        - device (str): Device used for benchmarking.
+        - batch_size (int): Batch size used for benchmarking.
+        """
 
         self.means = means
         self.stds = stds
@@ -39,13 +75,29 @@ class Statistics:
         for d in self.data:
             self.pt.add_row(d)
 
-    def __str__(self):
+    def __str__(self) -> str:
+        """
+        Return a PrettyTable Statistics table.
+        """
         return str(self.pt)
 
-    def __repr__(self):
+    def __repr__(self) -> str:
+        """
+        Return a detailed string representation of the Statistics object.
+        """
         return f'Statistics (\n\tname = {self.name},\n\tradii = {self.radii},\n\tnum_atoms = {self.num_atoms},\n\tmeans = {self.means},\n\tstds = {self.stds},\n\tcuda_mem = {self.cuda_mem},\n\tbatch_size = {self.batch_size},\n\tdevice = {self.device}\n)'
 
 class DebyeBenchmarker:
+    """
+    A class for benchmarking Debye calculations.
+
+    Attributes:
+    - radii (List[float]): List of radii for benchmarking.
+    - cif (str): Path to reference CIF file used for benchmarking.
+    - custom_cif (str): Custom CIF file path (if provided).
+    - show_progress_bar (bool): Flag to control progress bar display.
+    - debye_calc (DebyeCalculator): Debye calculator instance.
+    """
     def __init__(
         self,
         radii: Union[List, np.ndarray, torch.Tensor] = [5],
@@ -53,6 +105,15 @@ class DebyeBenchmarker:
         custom_cif: str = None,
         **kwargs,
     ) -> None:
+        """
+        Initialize DebyeBenchmarker.
+
+        Parameters:
+        - radii (Union[List, np.ndarray, torch.Tensor]): List of radii for benchmarking.
+        - show_progress_bar (bool): Flag to control progress bar display.
+        - custom_cif (str): Custom CIF file path (if provided).
+        - **kwargs: Additional keyword arguments for DebyeCalculator.
+        """
 
         self.set_radii(list(radii))
         self.cif = pkg_resources.resource_filename(__name__, 'benchmark_structure.cif')
@@ -63,24 +124,57 @@ class DebyeBenchmarker:
             warnings.simplefilter("ignore")
             self.debye_calc = DebyeCalculator(**kwargs)
 
-    def set_debye_parameters(self, **debye_parameters: Any):
+    def set_debye_parameters(self, **debye_parameters: Any) -> None:
+        """
+        Set Debye parameters for the calculator.
+
+        Parameters:
+        - **debye_parameters: Keyword arguments for Debye parameters.
+        """
         self.debye_calc.update_parameters(debye_parameters)
 
-    def set_device(self, device: str):
+    def set_device(self, device: str) -> None:
+        """
+        Set the device for Debye calculations.
+
+        Parameters:
+        - device (str): Device to be set for calculations.
+        """
         self.debye_calc.update_parameters(device=device)
 
-    def set_batch_size(self, batch_size: int):
+    def set_batch_size(self, batch_size: int) -> None:
+        """
+        Set the batch size for Debye calculations.
+
+        Parameters:
+        - batch_size (int): Batch size for calculations.
+        """
         self.debye_calc.update_parameters(batch_size=batch_size)
 
-    def set_radii(self, radii: Union[List, np.ndarray, torch.Tensor]):
+    def set_radii(self, radii: Union[List, np.ndarray, torch.Tensor]) -> None:
+        """
+        Set the radii for benchmarking.
+
+        Parameters:
+        - radii (Union[List, np.ndarray, torch.Tensor]): List of radii for benchmarking.
+        """
         self.radii = list(radii)
     
     def benchmark_generation(
         self,
         individually: bool = False,
         repetitions: int = 1,
-        csv_output: Union[None, str] = None,
     ) -> Statistics:
+        """
+        Benchmark nanoparticle generation.
+
+        Parameters:
+        - individually (bool): Flag to benchmark individually for each radius.
+        - repetitions (int): Number of repetitions for benchmarking.
+
+        Returns:
+        - Statistics: Benchmark statistics.
+        """
         
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
@@ -149,8 +243,17 @@ class DebyeBenchmarker:
     def benchmark_calculator(
         self,
         repetitions: int = 1,
-        csv_output: Union[None, str] = None,
     ) -> Statistics:
+        """
+        Benchmark Debye calculator.
+
+        Parameters:
+        - repetitions (int): Number of repetitions for benchmarking.
+        - csv_output (Union[None, str]): Path to save CSV output (if provided).
+
+        Returns:
+        - Statistics: Benchmark statistics.
+        """
         
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
@@ -197,12 +300,28 @@ class DebyeBenchmarker:
 
         return Statistics(list(means), list(stds), name, self.radii, list(num_atoms), list(cuda_mem), self.debye_calc.device, self.debye_calc.batch_size)
 
-def table_from_csv(csv_path: str):
-    with open(csv_path, 'r') as f:
+def table_from_csv(path: str) -> PrettyTable:
+    """
+    Create a PrettyTable from a CSV file.
+
+    Parameters:
+    - csv_path (str): Path to the CSV file.
+
+    Returns:
+    - PrettyTable: PrettyTable instance.
+    """
+    with open(path, 'r') as f:
         pt = from_csv(f)
     return pt
 
-def stat_to_csv(stat: Statistics, path: str):
+def stat_to_csv(stat: Statistics, path: str) -> None:
+    """
+    Save Statistics instance to a CSV file.
+
+    Parameters:
+    - stat (Statistics): Statistics instance to be saved.
+    - path (str): Path to save the CSV file.
+    """
     metadata = []
     metadata.insert(0, f'# NAME {stat.name}')
     metadata.insert(1, f'# DEVICE {stat.device}')
@@ -213,7 +332,16 @@ def stat_to_csv(stat: Statistics, path: str):
             f.writelines(md + '\n')
         f.write(stat.pt.get_csv_string())
 
-def stat_from_csv(path: str):
+def stat_from_csv(path: str) -> Statistics:
+    """
+    Load Statistics instance from a CSV file.
+
+    Parameters:
+    - path (str): Path to the CSV file.
+
+    Returns:
+    - Statistics: Loaded Statistics instance.
+    """
     name = 'N/A'
     device = 'N/A'
     batch_size = 0
@@ -231,7 +359,10 @@ def stat_from_csv(path: str):
                 break
         data_lines = f.readlines()
 
-    csv_reader = csv.reader(data_lines, delimiter=',')
+    try:
+        csv_reader = csv.reader(data_lines, delimiter=',')
+    except:
+        raise IOError('Error in reading CSV file')
     radii = []
     num_atoms = []
     means = []
