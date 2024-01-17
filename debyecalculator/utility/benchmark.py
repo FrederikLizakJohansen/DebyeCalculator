@@ -300,21 +300,7 @@ class DebyeBenchmarker:
 
         return Statistics(list(means), list(stds), name, self.radii, list(num_atoms), list(cuda_mem), self.debye_calc.device, self.debye_calc.batch_size)
 
-def table_from_csv(path: str) -> PrettyTable:
-    """
-    Create a PrettyTable from a CSV file.
-
-    Parameters:
-    - csv_path (str): Path to the CSV file.
-
-    Returns:
-    - PrettyTable: PrettyTable instance.
-    """
-    with open(path, 'r') as f:
-        pt = from_csv(f)
-    return pt
-
-def stat_to_csv(stat: Statistics, path: str) -> None:
+def to_csv(stat: Statistics, path: str) -> None:
     """
     Save Statistics instance to a CSV file.
 
@@ -332,7 +318,7 @@ def stat_to_csv(stat: Statistics, path: str) -> None:
             f.writelines(md + '\n')
         f.write(stat.pt.get_csv_string())
 
-def stat_from_csv(path: str) -> Statistics:
+def from_csv(path: str) -> Statistics:
     """
     Load Statistics instance from a CSV file.
 
