@@ -6,3 +6,4 @@ local/
 runtime_tests/local_timings/
 dist/
 poetry.lock
+benchmarks/
