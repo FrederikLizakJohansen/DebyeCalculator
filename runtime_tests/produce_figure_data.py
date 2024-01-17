@@ -1,17 +1,24 @@
 import tempfile
 import os
+import pkg_resources
 import argparse
 import torch
 from time import time
 import numpy as np
 from tqdm.auto import tqdm, trange
 import matplotlib.pyplot as plt
-from ase.io import write
-from diffpy.structure import loadStructure
-from diffpy.srreal.pdfcalculator import DebyePDFCalculator
+from ase.io import write, read
 from debyecalculator import DebyeCalculator
+from debyecalculator.utility.generate import generate_nanoparticles
+from prettytable import PrettyTable, from_csv
+from debyecalculator import StructureSourceType
 
 def time_methods(args):
+
+    if args['gen_diffpy']:
+        from diffpy.structure import loadStructure
+        from diffpy.srreal.pdfcalculator import DebyePDFCalculator
+    
     print('Generating data for timing')
     structure_path = args['cif']
     radii = list(np.arange(args['min_radius'], args['max_radius'], args['step_radius']))
@@ -25,32 +32,57 @@ def time_methods(args):
     def time_debye_calculator(device, batch_size, output_folder):
         mu, sigma = [], []
         debye_calc = DebyeCalculator(device=device, qmin=1, qmax=25, qstep=0.1, biso=0.3, batch_size=batch_size)
-        nps, sizes = debye_calc.generate_nanoparticles(structure_path, radii)
-        n_atoms = [len(np) for np in nps]
+        nps = generate_nanoparticles(structure_path, radii, _reverse_order=False)
+        sizes = [r * 2 for r in radii]
+        n_atoms = [nano.size for nano in nps]
 
-        for i in trange(len(radii), leave=False):
-            with tempfile.TemporaryDirectory() as tmpdirname:
-                tmp_structure_path = os.path.join(tmpdirname,'tmp_struc.xyz')
-                write(tmp_structure_path, nps[i], 'xyz')
-
-                timings = []
-                for j in range(args['reps']+2):
-                    t = time()
-                    debye_calc.gr(tmp_structure_path);
-                    t = time() - t
-                    if j > 1: 
-                        timings.append(t)
+        pbar = tqdm(desc='Benchmarking...', total=len(radii))
+        for i,nano in enumerate(nps):
+            timings = []
+            for j in range(args['reps']+2):
+                t = time()
+                debye_calc.gr((nano.elements, nano.xyz))
+                t = time() - t
+                if j > 1:
+                    timings.append(t)
             mu.append(np.mean(timings))
             sigma.append(np.std(timings))
-        
-            if device == 'cpu':
-                out = np.array([sizes[:(i+1)], n_atoms[:(i+1)], np.array(mu), np.array(sigma)]).T
-                np.savetxt(os.path.join(output_folder,f'timings_cpu_bs{batch_size}.csv'), out, delimiter=',', header='diameter, n_atoms, mu, sigma', fmt='%f')
-            elif device == 'cuda':
-                out = np.array([sizes[:(i+1)], n_atoms[:(i+1)], np.array(mu), np.array(sigma)]).T
-                gpu_id = torch.cuda.get_device_name()
-                np.savetxt(os.path.join(output_folder,f'timings_cuda_{gpu_id}_bs{batch_size}.csv'), out, delimiter=',', header='diameter, n_atoms, mu, sigma', fmt='%f')
+            pbar.update(1)
+        pbar.close()
 
+        return sizes, n_atoms, mu, sigma
+
+    def save_csv(sizes, n_atoms, means, stds, batch_size, device):
+        if device.lower() == 'cpu':
+            name = f'timings_cpu_bs{batch_size}.csv'
+        elif device.lower() == 'cuda':
+            gpu_id = torch.cuda.get_device_name()
+            name = f'timings_cuda_{gpu_id}_bs{batch_size}.csv'
+        else:
+            raise ValueError("Device not recognised")
+        
+        pt = create_pt(sizes, n_atoms, means, stds, batch_size, device)
+        with open(os.path.join(args['output_folder'], name), 'w', newline='') as f:
+            f.write(pt.get_csv_string())
+
+    def create_pt(sizes, n_atoms, means, stds, batch_size, device):
+
+        # Create table
+        table_fields = ['Diameter [Å]', 'Num. atoms', 'Mean [s]', 'Std [s]']
+        pt = PrettyTable(table_fields)
+        pt.align = 'r'
+        pt.padding_width = 1
+        pt.title = device + ' / Batch Size ' + str(batch_size)
+        data = [[str(s), str(n), f'{m:1.5f}', f'{std:1.5f}'] for s,n,m,std in zip(sizes, n_atoms, means, stds)]
+        for d in data:
+            pt.add_row(d)
+        
+        return pt
+
+    def print_pt_from_csv(csv_path):
+        with open(csv_path, 'r') as f:
+            print(from_csv(f))
+        
     def time_diffpy(output_folder):
         mu, sigma = [], []
         debye_calc = DebyeCalculator(qmin=1, qmax=25, qstep=0.1, biso=0.3)
@@ -100,7 +132,11 @@ def time_methods(args):
 
     # Run CUDA and save
     if args['gen_cuda'] and torch.cuda.is_available():
-        time_debye_calculator(device='cuda', batch_size=args['batch_size_cuda'], output_folder=args['output_folder'])
+        sizes, n_atoms, means, stds = time_debye_calculator(device='cuda', batch_size=args['batch_size_cuda'], output_folder=args['output_folder'])
+        if args['print_table']:
+            print(create_pt(sizes, n_atoms, means, stds, batch_size=args['batch_size_cuda'], device='CUDA'))
+        if args['save_csv']:
+            save_csv(sizes, n_atoms, means, stds, batch_size=args['batch_size_cuda'], device='CUDA')
 
     # Run Diffpy and save
     if args['gen_diffpy']:
@@ -111,7 +147,7 @@ def time_methods(args):
 def produce_figures(args):
     time_methods(args)
 
-if __name__ == '__main__':	
+if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--cif', type=str, required=True)
     parser.add_argument('--output_folder', type=str, required=True)
@@ -124,5 +160,7 @@ if __name__ == '__main__':
     parser.add_argument('--gen_cuda', action='store_true')
     parser.add_argument('--gen_diffpy', action='store_true')
     parser.add_argument('--reps', type=int, default=1)
+    parser.add_argument('--print_table', action='store_true')
+    parser.add_argument('--save_csv', action='store_true')
     args = parser.parse_args()
     produce_figures(vars(args))
