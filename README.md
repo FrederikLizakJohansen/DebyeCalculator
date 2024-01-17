@@ -144,6 +144,21 @@ r, G = calc.gr(structure_source=xyz_file)
 
 ```
 
+### Partial Gr
+```
+# Create a mask for oxygen atoms
+mask = [atom == "O" for atom in structure_tuple[0]]
+
+# Apply the mask to the structure_tuple
+structure_tuple = (
+    [atom for atom, m in zip(structure_tuple[0], mask) if m],
+    structure_tuple[1][mask]
+)
+
+# Calculate Pair Distribution Function
+Q_truncatedStructure, I_truncatedStructure = calc.iq(structure_source=structure_tuple)
+```
+
 # Additional implementation details
 See the [docs](/docs) folder. 
 
