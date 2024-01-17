@@ -16,10 +16,10 @@ class Profiler:
         total(): Calculate the total time taken for all recorded sections.
         summary(prefix=""): Generate a summary of the profiling data with mean time, standard deviation, and percentage of total time for each recorded section.
 
-    Usage:
+    Usage::
         The Profiler object can be used to measure the execution time of different parts of a code by calling the `time` method with a descriptive name for each section. After profiling, the `summary` method can be used to print a summary of the profiling data.
 
-    Example:
+    Example::
         profiler = Profiler()
         for i in range(10):
             # Code segment to be profiled

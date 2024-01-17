@@ -1,0 +1,22 @@
+.. DebyeCalculator documentation master file, created by
+   sphinx-quickstart on Wed Jan 17 10:06:14 2024.
+   You can adapt this file completely to your liking, but it should at least
+   contain the root `toctree` directive.
+
+Welcome to DebyeCalculator's documentation!
+===========================================
+
+.. toctree::
+   :maxdepth: 2
+   :caption: Contents:
+
+   debyecalculator
+
+
+
+..   Indices and tables
+   ==================
+
+   * :ref:`genindex`
+   * :ref:`modindex`
+   * :ref:`search`
