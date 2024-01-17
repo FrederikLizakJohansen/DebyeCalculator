@@ -1,6 +1,8 @@
-[ChemRxiv](https://chemrxiv.org/engage/chemrxiv/article-details/651ec9668bab5d2055b2d009)  |  [Paper]
-
-![DebyeCalculator](https://raw.githubusercontent.com/FrederikLizakJohansen/DebyeCalculator/main/logo.png)
+[![pypi](https://img.shields.io/pypi/v/Debyecalculator?label=pypi)](https://pypi.org/project/DebyeCalculator/)
+[![Python](https://img.shields.io/badge/python-%3E%3D3.7-blue)](https://www.python.org/downloads/)
+[![License](https://img.shields.io/github/license/FrederikLizakJohansen/DebyeCalculator)]([https://github.com/lfwa/carbontracker/blob/master/LICENSE](https://github.com/FrederikLizakJohansen/DebyeCalculator/blob/main/LICENSE.txt))
+[![ChemRxiv](https://img.shields.io/badge/ChemRxiv%20%20-8A2BE2)](https://chemrxiv.org/engage/chemrxiv/article-details/651ec9668bab5d2055b2d009)
+[![ReadTheDocs](https://img.shields.io/readthedocs/debyecalculator)](https://debyecalculator.readthedocs.io/en/latest/)
 
 # DebyeCalculator
 Welcome to `DebyeCalculator`! This is a simple tool for calculating the scattering intensity $I(Q)$ through the Debye scattering equation, the Total Scattering Structure Function $S(Q)$, the Reduced Total Scattering Function $F(Q)$, and the Reduced Atomic Pair Distribution Function $G(r)$ from an atomic structure. 
