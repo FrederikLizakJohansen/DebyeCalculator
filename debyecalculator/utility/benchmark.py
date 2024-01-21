@@ -64,6 +64,10 @@ class Statistics:
         self.function_name = function_name
         self.device = device
         self.batch_size = batch_size
+        if self.batch_size == 0:
+            self.batch_size_str = 'N/A'
+        else:
+            self.batch_size_str = str(self.batch_size) 
         self.means = means
         self.stds = stds
         self.radii = radii
@@ -76,7 +80,7 @@ class Statistics:
         self.pt = PrettyTable(self.table_fields)
         self.pt.align = 'r'
         self.pt.padding_width = 1
-        self.pt.title = 'Benchmark / ' + self.function_name + ' / ' + self.device.capitalize() + ' / Batch Size: ' + str(self.batch_size)
+        self.pt.title = self.name + ' / ' + self.function_name + ' / DEVICE:' + self.device.upper() + ' / BATCH SIZE: ' + self.batch_size_str
         self.data = [[str(float(r)), str(int(n)), f'{m:1.5f}', f'{s:1.5f}', f'{cs:1.5f}', f'{cc:1.5f}'] for r,n,m,s,cs,cc in zip(self.radii, list(num_atoms), list(means), list(stds), list(cuda_mem_structure), list(cuda_mem_calculations))]
         for d in self.data:
             self.pt.add_row(d)
@@ -142,9 +146,9 @@ class DebyeBenchmarker:
 
         self.show_progress_bar = show_progress_bar
 
-        self.ref_stat_csv_titan = pkg_resources.resource_filename(__name__, 'benchmark_reference_TITANRTX.csv')
-        self.reference_stat_titan = from_csv(self.ref_stat_csv_titan)
-        self.reference_stat_titan.name = 'TITAN RTX'
+        self.ref_stat_csv_titan_10k = pkg_resources.resource_filename(__name__, 'benchmark_reference_TITANRTX_10k.csv')
+        self.reference_stat_titan_10k = from_csv(self.ref_stat_csv_titan_10k)
+        self.reference_stat_titan_10k.name = 'TITAN RTX'
         
         self.ref_stat_csv_diffpy = pkg_resources.resource_filename(__name__, 'benchmark_reference_DiffPy.csv')
         self.reference_stat_diffpy = from_csv(self.ref_stat_csv_diffpy)
@@ -196,6 +200,7 @@ class DebyeBenchmarker:
         self,
         generate_individually: bool = True,
         repetitions: int = 1,
+        dummy_repititions: int = 2,
     ) -> Statistics:
         """
         Benchmark DebyeCalculator.
@@ -253,7 +258,7 @@ class DebyeBenchmarker:
                 # Lists
                 times = []
                 mems_calculations = []
-                for j in range(repetitions+2):
+                for j in range(repetitions+dummy_repititions):
                 
                     # Reset allocation
                     if on_cuda: torch.cuda.reset_max_memory_allocated()
@@ -264,7 +269,7 @@ class DebyeBenchmarker:
                     t = time() - t
 
                     # Append only after dummy repetitions
-                    if j > 1:
+                    if j > dummy_repititions-1:
                         times.append(t)
 
                     # Append memory allocation
@@ -373,3 +378,134 @@ def from_csv(path: str) -> Statistics:
         cuda_mem_structure = cuda_mem_structure,
         cuda_mem_calculations = cuda_mem_calculations,
     )
+
+def plot_time_statistics(
+    statistics: List[Statistics] = [],
+    labels: Union[List[str], None] = None,
+    figsize: tuple = (8,6),
+    include_references: bool = False,
+    log_scale: bool = True,
+    return_fig: bool = False,
+) -> Union[None, plt.figure]:
+    fig, (ax1, ax2) = plt.subplots(2,1,figsize=figsize)
+    
+    if include_references:
+        benchmarker = DebyeBenchmarker()
+        loaded_stats_diffpy = benchmarker.get_reference_stat_diffpy()
+        loaded_stats_titan = benchmarker.get_reference_stat_titan()
+        
+        means_diffpy = np.array(loaded_stats_diffpy.means)
+        stds_diffpy = np.array(loaded_stats_diffpy.stds)
+        means_titan = np.array(loaded_stats_titan.means)
+        stds_titan = np.array(loaded_stats_titan.stds)
+        
+        p = ax1.plot(loaded_stats_diffpy.radii, means_diffpy, label='DiffPy', marker='o')
+        ax1.fill_between(loaded_stats_diffpy.radii, means_diffpy - stds_diffpy, means_diffpy + stds_diffpy, 
+                         color=p[0].get_color(), alpha=0.2)
+
+        p = ax1.plot(loaded_stats_titan.radii, means_titan, label='TITAN RTX, Batch size: 10k', marker='o')
+        ax1.fill_between(loaded_stats_titan.radii, means_titan - stds_titan, means_titan + stds_titan, 
+                         color=p[0].get_color(), alpha=0.2)
+        
+        p = ax2.plot(loaded_stats_diffpy.num_atoms, means_diffpy, label='DiffPy', marker='o')
+        ax2.fill_between(loaded_stats_diffpy.num_atoms, means_diffpy - stds_diffpy, means_diffpy + stds_diffpy, 
+                         color=p[0].get_color(), alpha=0.2)
+
+        p = ax2.plot(loaded_stats_titan.num_atoms, means_titan, label='TITAN RTX, Batch size: 10k', marker='o')
+        ax2.fill_between(loaded_stats_titan.num_atoms, means_titan - stds_titan, means_titan + stds_titan, 
+                         color=p[0].get_color(), alpha=0.2)
+        
+    if labels == None:
+        labels = [' '.join([stat.function_name, stat.device.upper(), stat.batch_size_str]) for stat in statistics]
+
+    for stat,label in zip(statistics, labels):
+        means = np.array(stat.means)
+        stds = np.array(stat.stds)
+        
+        p = ax1.plot(stat.radii, means, label=label, marker='o')
+        ax1.fill_between(stat.radii, means - stds, means + stds, color=p[0].get_color(), alpha=0.2)
+        
+        p = ax2.plot(stat.num_atoms, means, label=label, marker='o')
+        ax2.fill_between(stat.num_atoms, means - stds, means + stds, color=p[0].get_color(), alpha=0.2)
+
+    ax1.set_xlabel('Nanoparticle Radius (Å)')
+    ax2.set_xlabel('Number of atoms')
+    
+    for ax in [ax1, ax2]:
+        ax.set_ylabel('Calculation Time (s)')
+        ax.legend()
+        ax.grid(alpha=0.2)
+        if log_scale:
+            ax.set_yscale('log')
+            
+    fig.tight_layout()
+    
+    if return_fig:
+        plt.close(fig)
+        return fig
+    else:
+        plt.show()
+        return
+
+def plot_memory_statistics(
+    statistics: List[Statistics] = [],
+    labels: Union[List[str], None] = None,
+    figsize: tuple = (8,8),
+    include_references: bool = False,
+    log_scale: bool = True,
+    return_fig: bool = False,
+) -> Union[None, plt.figure]:
+    
+    fig, (ax1, ax2) = plt.subplots(2,1,figsize=figsize)
+    
+    if include_references:
+        benchmarker = DebyeBenchmarker()
+        loaded_stats_titan = benchmarker.get_reference_stat_titan()
+        
+        cuda_mem_structure_titan = loaded_stats_titan.cuda_mem_structure
+        cuda_mem_calculations_titan = loaded_stats_titan.cuda_mem_calculations
+        
+        radii_titan = np.array(loaded_stats_titan.radii)
+        
+        ax1.plot(radii_titan, cuda_mem_structure_titan, label='TITAN RTX, Batch size: 10k', marker='o')
+        ax1.legend()
+        ax1.grid(alpha=0.2)
+        
+        ax2.plot(radii_titan, cuda_mem_calculations_titan, label='TITAN RTX, Batch size: 10k', marker='o')
+        ax2.legend()
+        ax2.grid(alpha=0.2)
+        
+    if labels == None:
+        labels = [' '.join([stat.function_name, stat.device.upper(), stat.batch_size_str]) for stat in statistics]
+        
+    for stat, label in zip(statistics, labels):
+        cuda_mem_structure = stat.cuda_mem_structure
+        cuda_mem_calculations = stat.cuda_mem_calculations
+        
+        radii = np.array(stat.radii)
+        
+        ax1.plot(radii, cuda_mem_structure, label=label, marker='o')
+        ax1.legend()
+        ax1.grid(alpha=0.2)
+        
+        ax2.plot(radii, cuda_mem_calculations, label=label, marker='o')
+        ax2.legend()
+        ax2.grid(alpha=0.2)
+        
+    ax1.set_title('Comparison of Maximum CUDA Memory Usage (Generation)')
+    ax2.set_title('Comparison of Maximum CUDA Memory Usage (Calculation)')
+    
+    for ax in [ax1, ax2]:
+        ax.set_xlabel('Nanoparticle Radius (Å)')
+        ax.set_ylabel('Max CUDA Memory Usage (MB)')
+        if log_scale:
+            ax.set_yscale('log')
+    
+    fig.tight_layout()
+    
+    if return_fig:
+        plt.close(fig)
+        return fig
+    else:
+        plt.show()
+        return
