@@ -33,46 +33,50 @@ class Statistics:
     """
     def __init__(
         self,
-        means: List[float],
-        stds: List[float],
         name: str,
+        function_name: str,
+        device: str,
+        batch_size: int,
         radii: List[float],
         num_atoms: List[int],
+        means: List[float],
+        stds: List[float],
         cuda_mem_structure: List[float],
         cuda_mem_calculations: List[float],
-        device: str,
-        batch_size: int
     ) -> None:
         """
         Initialize Statistics with benchmarking results.
 
         Parameters:
-        - means (List[float]): List of mean values.
-        - stds (List[float]): List of standard deviation values.
         - name (str): Name of the statistics.
-        - radii (List[float]): List of radii.
-        - num_atoms (List[int]): List of number of atoms.
-        - cuda_mem (List[float]): List of CUDA memory values.
+        - function_name (str) Name of function to be benchmarked
         - device (str): Device used for benchmarking.
         - batch_size (int): Batch size used for benchmarking.
+        - means (List[float]): List of mean values.
+        - stds (List[float]): List of standard deviation values.
+        - radii (List[float]): List of radii.
+        - num_atoms (List[int]): List of number of atoms.
+        - cuda_mem_structure (List[float]): List of CUDA memory values for generating structures.
+        - cuda_mem_calculations (List[float]): List of CUDA memory values for calculating the function.
         """
 
+        self.name = name
+        self.function_name = function_name
+        self.device = device
+        self.batch_size = batch_size
         self.means = means
         self.stds = stds
-        self.name = name
         self.radii = radii
         self.num_atoms = num_atoms
         self.cuda_mem_structure = cuda_mem_structure
         self.cuda_mem_calculations = cuda_mem_calculations
-        self.device = device
-        self.batch_size = batch_size
         
         # Create table
-        self.table_fields = ['Radius [Å]', 'Num. atoms', 'Mean [s]', 'Std [s]', 'MaxAlloc. CUDA Memory (Structure) [MB]', 'MaxAlloc. CUDA Memory (Calc) [MB]']
+        self.table_fields = ['Radius [Å]', 'Num. atoms', 'Mean [s]', 'Std [s]', 'MaxAllocCUDAMem (Gen.) [MB]', 'MaxAllocCUDAMem (Calc.) [MB]']
         self.pt = PrettyTable(self.table_fields)
-        self.pt.align = 'r'
+        self.pt.align = 'c'
         self.pt.padding_width = 1
-        self.pt.title = 'Benchmark Generator / ' + self.device + ' / Batch Size: ' + str(self.batch_size)
+        self.pt.title = 'Benchmark / ' + self.function_name + ' / ' + self.device.capitalize() + ' / Batch Size: ' + str(self.batch_size)
         self.data = [[str(float(r)), str(int(n)), f'{m:1.5f}', f'{s:1.5f}', f'{cs:1.5f}', f'{cc:1.5f}'] for r,n,m,s,cs,cc in zip(self.radii, list(num_atoms), list(means), list(stds), list(cuda_mem_structure), list(cuda_mem_calculations))]
         for d in self.data:
             self.pt.add_row(d)
@@ -87,7 +91,7 @@ class Statistics:
         """
         Return a detailed string representation of the Statistics object.
         """
-        return f'Statistics (\n\tname = {self.name},\n\tradii = {self.radii},\n\tnum_atoms = {self.num_atoms},\n\tmeans = {self.means},\n\tstds = {self.stds},\n\tcuda_mem_structure = {self.cuda_mem_structure},\n\tcuda_mem_calculations = {self.cuda_mem_calculations},\n\tbatch_size = {self.batch_size},\n\tdevice = {self.device}\n)'
+        return f'Statistics (\n\tname = {self.name},\n\tfunction_name = {self.function_name},\n\tdevice = {self.device},\n\tbatch_size = {self.batch_size},\n\tradii = {self.radii},\n\tnum_atoms = {self.num_atoms},\n\tmeans = {self.means},\n\tstds = {self.stds},\n\tcuda_mem_structure = {self.cuda_mem_structure},\n\tcuda_mem_calculations = {self.cuda_mem_calculations},\n)'
 
 class DebyeBenchmarker:
     """
@@ -126,6 +130,7 @@ class DebyeBenchmarker:
             warnings.simplefilter("ignore")
             self.debye_calc = DebyeCalculator(**kwargs)
             
+        self.function_name = function
         if function == 'gr':
             self.func = self.debye_calc.gr
         elif function == 'iq':
@@ -260,7 +265,18 @@ class DebyeBenchmarker:
                 pbar.update(1)
             pbar.close()
 
-        return Statistics(list(means), list(stds), name, self.radii, list(num_atoms), list(cuda_mem_structure), list(cuda_mem_calculations), self.debye_calc.device, self.debye_calc.batch_size)
+        return Statistics(
+            name = name,
+            function_name = self.function_name,
+            device = self.debye_calc.device,
+            batch_size = self.debye_calc.batch_size,
+            radii = self.radii, 
+            num_atoms = list(num_atoms),
+            means = list(means),
+            stds = list(stds),
+            cuda_mem_structure = list(cuda_mem_structure),
+            cuda_mem_calculations = list(cuda_mem_calculations)
+        )
 
 def to_csv(stat: Statistics, path: str) -> None:
     """
@@ -272,8 +288,9 @@ def to_csv(stat: Statistics, path: str) -> None:
     """
     metadata = []
     metadata.insert(0, f'# NAME {stat.name}')
-    metadata.insert(1, f'# DEVICE {stat.device}')
-    metadata.insert(2, f'# BATCH SIZE {stat.batch_size}')
+    metadata.insert(1, f'# FUNCTION NAME {stat.function_name}')
+    metadata.insert(2, f'# DEVICE {stat.device}')
+    metadata.insert(3, f'# BATCH SIZE {stat.batch_size}')
 
     with open(path, 'w', newline='') as f:
         for md in metadata:
@@ -291,6 +308,7 @@ def from_csv(path: str) -> Statistics:
     - Statistics: Loaded Statistics instance.
     """
     name = 'N/A'
+    function_name = 'N/A'
     device = 'N/A'
     batch_size = 0
 
@@ -299,6 +317,8 @@ def from_csv(path: str) -> Statistics:
             line = f.readline().strip()
             if line.startswith('# NAME'):
                 name = line.split('# NAME')[-1]
+            elif line.startswith('# FUNCTION NAME'):
+                function_name = line.split('# FUNCTION NAME')[-1]
             elif line.startswith('# DEVICE'):
                 device = line.split('# DEVICE')[-1]
             elif line.startswith('# BATCH SIZE'):
@@ -311,12 +331,14 @@ def from_csv(path: str) -> Statistics:
         csv_reader = csv.reader(data_lines, delimiter=',')
     except:
         raise IOError('Error in reading CSV file')
+
     radii = []
     num_atoms = []
     means = []
     stds = []
     cuda_mem_structure = []
     cuda_mem_calculations = []
+
     for row in csv_reader:
         radii.append(float(row[0]))
         num_atoms.append(int(row[1]))
@@ -324,4 +346,16 @@ def from_csv(path: str) -> Statistics:
         stds.append(float(row[3]))
         cuda_mem_structure.append(float(row[4]))
         cuda_mem_calculations.append(float(row[5]))
-    return Statistics(means, stds, name, radii, num_atoms, cuda_mem_structure, cuda_mem_calculations, device, batch_size)
+
+    return Statistics(
+        name = name,
+        function_name = function_name,
+        device = device,
+        batch_size = batch_size,
+        radii = radii,
+        num_atoms = num_atoms,
+        means = means,
+        stds = stds,
+        cuda_mem_structure = cuda_mem_structure,
+        cuda_mem_calculations = cuda_mem_calculations,
+    )
