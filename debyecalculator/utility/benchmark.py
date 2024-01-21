@@ -387,6 +387,20 @@ def plot_time_statistics(
     log_scale: bool = True,
     return_fig: bool = False,
 ) -> Union[None, plt.figure]:
+    """
+    Plots time statistics
+
+    Parameters:
+    - statistics (List[Statistics]): List of Statistics objects
+    - labels (Union[List[str], None]): List of labels for the plot. If None, labels are generated from statistics.
+    - figsize (tuple): Figure size, default is (8, 6).
+    - include_references (bool): Whether to include reference data, default is False.
+    - log_scale (bool): Whether to use a logarithmic scale for the y-axis, default is True.
+    - return_fig (bool): If True, returns the matplotlib figure instead of displaying it, default is False.
+
+    Returns:
+    - Union[None, plt.figure]: If return_fig is True, returns the matplotlib figure. Otherwise, displays the plot.
+    """
     fig, (ax1, ax2) = plt.subplots(2,1,figsize=figsize)
     
     if include_references:
@@ -455,7 +469,20 @@ def plot_memory_statistics(
     log_scale: bool = True,
     return_fig: bool = False,
 ) -> Union[None, plt.figure]:
+    """
+    Plots memory statistics
     
+    Parameters:
+    - statistics (List[Statistics]): List of Statistics objects
+    - labels (Union[List[str], None]): List of labels for the plot. If None, labels are generated from statistics.
+    - figsize (tuple): Figure size, default is (8, 8).
+    - include_references (bool): Whether to include reference data, default is False.
+    - log_scale (bool): Whether to use a logarithmic scale for the y-axis, default is True.
+    - return_fig (bool): If True, returns the matplotlib figure instead of displaying it, default is False.
+
+    Returns:
+    - Union[None, plt.figure]: If return_fig is True, returns the matplotlib figure. Otherwise, displays the plot.
+    """
     fig, (ax1, ax2) = plt.subplots(2,1,figsize=figsize)
     
     if include_references:
