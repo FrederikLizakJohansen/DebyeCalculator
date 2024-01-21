@@ -244,11 +244,13 @@ class DebyeCalculator:
 
         # Run constrain assertion
         self.parameter_constraint_assertion()
-            
+
         # Re-initialise ranges
-        if np.any([k in ['qmin','qmax','qstep','rmin', 'rmax', 'rstep'] for k in kwargs.keys()]):
+        if np.any([k in ['qmin','qmax','qstep','rmin', 'rmax', 'rstep', 'device'] for k in kwargs.keys()]):
             self.q = torch.arange(self.qmin, self.qmax, self.qstep).unsqueeze(-1).to(device=self.device)
             self.r = torch.arange(self.rmin, self.rmax, self.rstep).unsqueeze(-1).to(device=self.device)
+            for key,val in self.FORM_FACTOR_COEF.items():
+                self.FORM_FACTOR_COEF[key] = val.to(device=self.device)
 
     def _initialise_structure(
         self,

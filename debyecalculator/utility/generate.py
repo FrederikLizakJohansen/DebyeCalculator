@@ -20,7 +20,7 @@ from collections import namedtuple
 import yaml
 import pkg_resources
 import warnings
-from tqdm import tqdm
+from tqdm.auto import tqdm
 
 NanoParticle = namedtuple('NanoParticle', 'elements size occupancy xyz')
 NanoParticleASE = namedtuple('NanoParticleASE', 'ase_structure np_size')
@@ -101,6 +101,8 @@ def generate_nanoparticles(
     _override_device: bool = False,
     _lightweight_mode: bool = False,
     _return_ase: bool = False,
+    _reverse_order: bool = True,
+    _benchmarking: bool = False,
 ) -> NanoParticleType:
     """
     Generate spherical nanoparticles from a given CIF and radii.
@@ -117,6 +119,8 @@ def generate_nanoparticles(
         _override_device (bool): Ignore object device and run on CPU.
         _lightweight_mode (bool): Whether to use lightweight mode. Defaults to False.
         _return_ase (bool): Whether to return ASE objects. Defaults to False.
+        _reverse_order (bool): Whether to generate particles in reverse radii order
+        _benchmarking (bool): Stripped down version for benchmarking
 
     Returns:
         NanoParticleType: List of nanoparticle tuples or ASE objects.
@@ -193,6 +197,27 @@ def generate_nanoparticles(
 
     # Convert positions to torch and send to device
     positions = torch.from_numpy(cell.get_positions()).to(dtype = torch.float32, device = device)
+    
+    # Benchmarking
+    if _benchmarking:
+        nanoparticle_tuple_list = []
+        for r in sorted(radii, reverse=_reverse_order):
+            cell_norms = torch.norm(positions, p=2, dim=-1).cpu()
+            np_cell = cell[cell_norms <= r]
+            elements = np_cell.get_chemical_symbols()
+            try:
+                occupancy = np_cell.info['occupancy']
+            except:
+                occupancy = torch.ones((np_cell.get_global_number_of_atoms()), dtype=torch.float32)
+            nanoparticle_tuple_list.append(
+                NanoParticle(
+                    elements = elements,
+                    size = len(elements),
+                    occupancy = occupancy,
+                    xyz = torch.from_numpy(np_cell.get_positions()).to(device=device)
+                )
+            )
+        return nanoparticle_tuple_list
 
     # Find atomic radii
     atomic_radii = torch.tensor(np.array([
@@ -236,7 +261,7 @@ def generate_nanoparticles(
     pbar = tqdm(desc=f'Generating nanoparticles in range: [{np.amin(radii)},{np.amax(radii)}]', leave=False, total=len(radii), disable=disable_pbar)
 
     # Generate nanoparticles for each radius
-    for r in sorted(radii, reverse=True):
+    for r in sorted(radii, reverse=_reverse_order):
         if _lightweight_mode:
             # Mask all atoms within radius
             incl_mask = (center_dists <= r)
@@ -300,7 +325,7 @@ def generate_nanoparticles(
                     elements = elements,
                     size = len(elements),
                     occupancy = occupancy,
-                    xyz = torch.from_numpy(np_cell.get_positions())
+                    xyz = torch.from_numpy(np_cell.get_positions()).to(device=device)
                 )
             )
         else:
