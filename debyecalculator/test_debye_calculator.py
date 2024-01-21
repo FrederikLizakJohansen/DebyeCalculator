@@ -341,9 +341,9 @@ def test_generate_nanoparticle():
 
     # Generate xyz from utility function
     structure = generate_nanoparticles('data/AntiFluorite_Co2O.cif', radii=10.0)[0]
-    
+
     # Assert
-    assert np.allclose(xyz, structure.xyz, atol=1e-04, rtol=1e-03), f"Expected xyz to be {xyz}, but got {structure.xyz}"
+    assert np.allclose(xyz, structure.xyz.cpu(), atol=1e-04, rtol=1e-03), f"Expected xyz to be {xyz}, but got {structure.xyz}"
     assert elements == structure.elements, f"Expected elements to be {elements}, but got {structure.elements}"
 
 def test_invalid_input():
