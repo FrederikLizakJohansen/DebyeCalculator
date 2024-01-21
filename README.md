@@ -100,6 +100,9 @@ calc = DebyeCalculator(device='cuda')
 ## Interactive mode at Google Colab
 Follow the instructions in our [Interactive Google Colab notebook](https://github.com/FrederikLizakJohansen/DebyeCalculator/blob/main/InteractiveMode_Colab.ipynb) and try to play around. 
 
+<b>IMPORTANT: </b> CHANGES TO INTERACTIVE MODE AS OF JANUARY 2024 (DebyeCalculator version >=1.0.5)
+In the lastest version of DebyeCalculator, we are unfortunately experiences some issues with Google Colab that does not allow the package to display the <tt>interact()</tt> widget. If you experience any related issues, please refer to this [statement](https://github.com/FrederikLizakJohansen/DebyeCalculator/issues/15#issuecomment-1873764451 'here') for further clarification and workarounds. 
+
 ## Example usage
 ```python
 from debyecalculator import DebyeCalculator
