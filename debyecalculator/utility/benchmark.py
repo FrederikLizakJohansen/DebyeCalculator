@@ -74,7 +74,7 @@ class Statistics:
         # Create table
         self.table_fields = ['Radius [Å]', 'Num. atoms', 'Mean [s]', 'Std [s]', 'MaxAllocCUDAMem (Gen.) [MB]', 'MaxAllocCUDAMem (Calc.) [MB]']
         self.pt = PrettyTable(self.table_fields)
-        self.pt.align = 'c'
+        self.pt.align = 'r'
         self.pt.padding_width = 1
         self.pt.title = 'Benchmark / ' + self.function_name + ' / ' + self.device.capitalize() + ' / Batch Size: ' + str(self.batch_size)
         self.data = [[str(float(r)), str(int(n)), f'{m:1.5f}', f'{s:1.5f}', f'{cs:1.5f}', f'{cc:1.5f}'] for r,n,m,s,cs,cc in zip(self.radii, list(num_atoms), list(means), list(stds), list(cuda_mem_structure), list(cuda_mem_calculations))]
@@ -142,6 +142,14 @@ class DebyeBenchmarker:
 
         self.show_progress_bar = show_progress_bar
 
+        self.ref_stat_csv_titan = pkg_resources.resource_filename(__name__, 'benchmark_reference_TITANRTX.csv')
+        self.reference_stat_titan = from_csv(self.ref_stat_csv_titan)
+        self.reference_stat_titan.name = 'TITAN RTX'
+        
+        self.ref_stat_csv_diffpy = pkg_resources.resource_filename(__name__, 'benchmark_reference_DiffPy.csv')
+        self.reference_stat_diffpy = from_csv(self.ref_stat_csv_diffpy)
+        self.reference_stat_diffpy.name = 'DiffPy'
+
     def set_debye_parameters(self, **debye_parameters: Any) -> None:
         """
         Set Debye parameters for the calculator.
@@ -177,6 +185,12 @@ class DebyeBenchmarker:
         - radii (Union[List, np.ndarray, torch.Tensor]): List of radii for benchmarking.
         """
         self.radii = list(radii)
+
+    def get_reference_stat_titan(self):
+        return self.reference_stat_titan
+
+    def get_reference_stat_diffpy(self):
+        return self.reference_stat_diffpy
     
     def benchmark(
         self,
@@ -214,10 +228,10 @@ class DebyeBenchmarker:
             
             # Iterator
             if generate_individually:
-                nanoparticles = lambda i: generate_nanoparticles(cif_file, self.radii[i], _reverse_order=False, disable_pbar = True, device = self.debye_calc.device)
+                nanoparticles = lambda i: generate_nanoparticles(cif_file, self.radii[i], _reverse_order=False, disable_pbar = True, device = self.debye_calc.device, _benchmarking=True)
             else:
                 if on_cuda: torch.cuda.reset_max_memory_allocated()
-                nanoparticles = generate_nanoparticles(cif_file, self.radii, _reverse_order=False, disable_pbar = True, device=self.debye_calc.device)
+                nanoparticles = generate_nanoparticles(cif_file, self.radii, _reverse_order=False, disable_pbar = True, device=self.debye_calc.device, _benchmarking=True)
                 mean_cuda_mem_structure = torch.cuda.max_memory_allocated() / 1_000_000 if on_cuda else 0
 
             # Benchmark
