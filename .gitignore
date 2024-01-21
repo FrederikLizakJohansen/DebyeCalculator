@@ -3,7 +3,7 @@
 **/__pycache__/
 **/*output/
 local/
-runtime_tests/local_timings/
+runtime_tests/
 dist/
 poetry.lock
 benchmarks/
