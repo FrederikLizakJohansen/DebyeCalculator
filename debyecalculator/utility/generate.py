@@ -1,5 +1,5 @@
 
-'''
+
 # Handle import of torch (prerequisite)
 try:
     import torch
@@ -13,7 +13,7 @@ except ModuleNotFoundError:
         "For more information about DebyeCalculator, visit the GitHub repository: "
         "https://github.com/FrederikLizakJohansen/DebyeCalculator"
     )
-'''
+
 
 import numpy as np
 from ase.io import read
