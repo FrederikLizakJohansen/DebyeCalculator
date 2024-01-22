@@ -2,6 +2,9 @@
 #
 # For the full list of built-in configuration values, see the documentation:
 # https://www.sphinx-doc.org/en/master/usage/configuration.html
+import warnings
+warnings.filterwarnings("ignore", category=UserWarning, module="debyecalculator")
+autodoc_mock_imports = ["torch", "debyecalculator"]
 
 import os
 import sys
@@ -10,9 +13,6 @@ sys.path.insert(0, os.path.abspath('..'))
 import sphinx_rtd_theme
 html_theme = "sphinx_rtd_theme"
 html_theme_path = [sphinx_rtd_theme.get_html_theme_path()]
-
-import warnings
-warnings.filterwarnings("ignore", category=UserWarning, module="debyecalculator")
 # -- Project information -----------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information
 
