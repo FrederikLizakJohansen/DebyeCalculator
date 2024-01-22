@@ -6,3 +6,8 @@ numpy
 pandas
 matplotlib
 scipy
+setuptools
+tqdm
+ase
+debyecalculator
+torch
