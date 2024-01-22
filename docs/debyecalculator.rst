@@ -16,3 +16,9 @@ Profiling Functions
 
 .. automodule:: debyecalculator.utility.profiling
     :members:
+
+Benchmark Functions
+===================
+
+.. automodule:: debyecalculator.utility.benchmark
+    :members:
