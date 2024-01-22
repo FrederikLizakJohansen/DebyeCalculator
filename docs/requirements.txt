@@ -10,4 +10,4 @@ setuptools
 tqdm
 ase
 debyecalculator
-torch
+
