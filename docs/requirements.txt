@@ -1,3 +1,8 @@
 sphinx
 sphinx_rtd_theme
 PyYAML
+prettytable
+numpy
+pandas
+matplotlib
+scipy
