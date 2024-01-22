@@ -20,16 +20,6 @@ from collections import namedtuple
 class Statistics:
     """
     A class to store and represent benchmark statistics.
-
-    Attributes:
-    - means (List[float]): List of mean values.
-    - stds (List[float]): List of standard deviation values.
-    - name (str): Name of the statistics.
-    - radii (List[float]): List of radii.
-    - num_atoms (List[int]): List of number of atoms.
-    - cuda_mem (List[float]): List of CUDA memory values.
-    - device (str): Device used for benchmarking.
-    - batch_size (int): Batch size used for benchmarking.
     """
     def __init__(
         self,
@@ -48,16 +38,16 @@ class Statistics:
         Initialize Statistics with benchmarking results.
 
         Parameters:
-        - name (str): Name of the statistics.
-        - function_name (str) Name of function to be benchmarked
-        - device (str): Device used for benchmarking.
-        - batch_size (int): Batch size used for benchmarking.
-        - means (List[float]): List of mean values.
-        - stds (List[float]): List of standard deviation values.
-        - radii (List[float]): List of radii.
-        - num_atoms (List[int]): List of number of atoms.
-        - cuda_mem_structure (List[float]): List of CUDA memory values for generating structures.
-        - cuda_mem_calculations (List[float]): List of CUDA memory values for calculating the function.
+            name (str): Name of the statistics.
+            function_name (str) Name of function to be benchmarked
+            device (str): Device used for benchmarking.
+            batch_size (int): Batch size used for benchmarking.
+            radii (List[float]): List of radii.
+            num_atoms (List[int]): List of number of atoms.
+            means (List[float]): List of mean values.
+            stds (List[float]): List of standard deviation values.
+            cuda_mem_structure (List[float]): List of CUDA memory values for generating structures.
+            cuda_mem_calculations (List[float]): List of CUDA memory values for calculating the function.
         """
 
         self.name = name
@@ -87,27 +77,23 @@ class Statistics:
 
     def __str__(self) -> str:
         """
-        Return a PrettyTable Statistics table.
+        Returns:
+            A PrettyTable Statistics table.
         """
         return str(self.pt)
 
     def __repr__(self) -> str:
         """
-        Return a detailed string representation of the Statistics object.
+        Returns:
+            A detailed string representation of the Statistics object.
         """
         return f'Statistics (\n\tname = {self.name},\n\tfunction_name = {self.function_name},\n\tdevice = {self.device},\n\tbatch_size = {self.batch_size},\n\tradii = {self.radii},\n\tnum_atoms = {self.num_atoms},\n\tmeans = {self.means},\n\tstds = {self.stds},\n\tcuda_mem_structure = {self.cuda_mem_structure},\n\tcuda_mem_calculations = {self.cuda_mem_calculations},\n)'
 
 class DebyeBenchmarker:
     """
     A class for benchmarking Debye calculations.
-
-    Attributes:
-    - radii (List[float]): List of radii for benchmarking.
-    - cif (str): Path to reference CIF file used for benchmarking.
-    - custom_cif (str): Custom CIF file path (if provided).
-    - show_progress_bar (bool): Flag to control progress bar display.
-    - debye_calc (DebyeCalculator): Debye calculator instance.
     """
+
     def __init__(
         self,
         function: str = 'gr',
@@ -120,10 +106,12 @@ class DebyeBenchmarker:
         Initialize DebyeBenchmarker.
 
         Parameters:
-        - radii (Union[List, np.ndarray, torch.Tensor]): List of radii for benchmarking.
-        - show_progress_bar (bool): Flag to control progress bar display.
-        - custom_cif (str): Custom CIF file path (if provided).
-        - **kwargs: Additional keyword arguments for DebyeCalculator.
+            radii (Union[List, np.ndarray, torch.Tensor]): List of radii for benchmarking.
+            show_progress_bar (bool): Flag to control progress bar display.
+            custom_cif (str): Custom CIF file path (if provided).
+            **kwargs: Additional keyword arguments for DebyeCalculator.
+        Raises:
+            ValueError: If an invalid function name is parsed to the class.
         """
 
         self.set_radii(list(radii))
@@ -159,7 +147,7 @@ class DebyeBenchmarker:
         Set Debye parameters for the calculator.
 
         Parameters:
-        - **debye_parameters: Keyword arguments for Debye parameters.
+            **debye_parameters: Keyword arguments for Debye parameters.
         """
         self.debye_calc.update_parameters(debye_parameters)
 
@@ -168,7 +156,7 @@ class DebyeBenchmarker:
         Set the device for Debye calculations.
 
         Parameters:
-        - device (str): Device to be set for calculations.
+            device (str): Device to be set for calculations.
         """
         self.debye_calc.update_parameters(device=device)
 
@@ -177,7 +165,7 @@ class DebyeBenchmarker:
         Set the batch size for Debye calculations.
 
         Parameters:
-        - batch_size (int): Batch size for calculations.
+            batch_size (int): Batch size for calculations.
         """
         self.debye_calc.update_parameters(batch_size=batch_size)
 
@@ -186,14 +174,26 @@ class DebyeBenchmarker:
         Set the radii for benchmarking.
 
         Parameters:
-        - radii (Union[List, np.ndarray, torch.Tensor]): List of radii for benchmarking.
+            radii (Union[List, np.ndarray, torch.Tensor]): List of radii for benchmarking.
         """
         self.radii = list(radii)
 
-    def get_reference_stat_titan(self):
+    def get_reference_stat_titan(self) -> Statistics:
+        """
+        Get the reference statistics for TITAN RTX
+        
+        Returns:
+            Statistics: TITAN RTX
+        """
         return self.reference_stat_titan
 
-    def get_reference_stat_diffpy(self):
+    def get_reference_stat_diffpy(self) -> Statistics:
+        """
+        Get the reference statistics for DiffPy-CMI
+        
+        Returns:
+            Statistics: DiffPy-CMI
+        """
         return self.reference_stat_diffpy
     
     def benchmark(
@@ -206,11 +206,11 @@ class DebyeBenchmarker:
         Benchmark DebyeCalculator.
 
         Parameters:
-        - generate_individually (bool): Flag to benchmark individually for each radius.
-        - repetitions (int): Number of repetitions for benchmarking.
+            generate_individually (bool): Flag to benchmark individually for each radius.
+            repetitions (int): Number of repetitions for benchmarking.
 
         Returns:
-        - Statistics: Benchmark statistics.
+            Statistics: Benchmark statistics.
         """
         
         # Ignore warnings concerning CUDA availability
@@ -302,8 +302,8 @@ def to_csv(stat: Statistics, path: str) -> None:
     Save Statistics instance to a CSV file.
 
     Parameters:
-    - stat (Statistics): Statistics instance to be saved.
-    - path (str): Path to save the CSV file.
+        stat (Statistics): Statistics instance to be saved.
+        path (str): Path to save the CSV file.
     """
     metadata = []
     metadata.insert(0, f'# NAME {stat.name}')
@@ -321,10 +321,13 @@ def from_csv(path: str) -> Statistics:
     Load Statistics instance from a CSV file.
 
     Parameters:
-    - path (str): Path to the CSV file.
+        path (str): Path to the CSV file.
 
     Returns:
-    - Statistics: Loaded Statistics instance.
+        Statistics: Loaded Statistics instance.
+
+    Raises:
+        IOError: If the CSV file cannot be read.
     """
     name = 'N/A'
     function_name = 'N/A'
@@ -391,15 +394,15 @@ def plot_time_statistics(
     Plots time statistics
 
     Parameters:
-    - statistics (List[Statistics]): List of Statistics objects
-    - labels (Union[List[str], None]): List of labels for the plot. If None, labels are generated from statistics.
-    - figsize (tuple): Figure size, default is (8, 6).
-    - include_references (bool): Whether to include reference data, default is False.
-    - log_scale (bool): Whether to use a logarithmic scale for the y-axis, default is True.
-    - return_fig (bool): If True, returns the matplotlib figure instead of displaying it, default is False.
+        statistics (List[Statistics]): List of Statistics objects
+        labels (Union[List[str], None]): List of labels for the plot. If None, labels are generated from statistics.
+        figsize (tuple): Figure size, default is (8, 6).
+        include_references (bool): Whether to include reference data, default is False.
+        log_scale (bool): Whether to use a logarithmic scale for the y-axis, default is True.
+        return_fig (bool): If True, returns the matplotlib figure instead of displaying it, default is False.
 
     Returns:
-    - Union[None, plt.figure]: If return_fig is True, returns the matplotlib figure. Otherwise, displays the plot.
+        Union[None, plt.figure]: If return_fig is True, returns the matplotlib figure. Otherwise, displays the plot.
     """
     fig, (ax1, ax2) = plt.subplots(2,1,figsize=figsize)
     
@@ -473,15 +476,15 @@ def plot_memory_statistics(
     Plots memory statistics
     
     Parameters:
-    - statistics (List[Statistics]): List of Statistics objects
-    - labels (Union[List[str], None]): List of labels for the plot. If None, labels are generated from statistics.
-    - figsize (tuple): Figure size, default is (8, 8).
-    - include_references (bool): Whether to include reference data, default is False.
-    - log_scale (bool): Whether to use a logarithmic scale for the y-axis, default is True.
-    - return_fig (bool): If True, returns the matplotlib figure instead of displaying it, default is False.
+        statistics (List[Statistics]): List of Statistics objects
+        labels (Union[List[str], None]): List of labels for the plot. If None, labels are generated from statistics.
+        figsize (tuple): Figure size, default is (8, 8).
+        include_references (bool): Whether to include reference data, default is False.
+        log_scale (bool): Whether to use a logarithmic scale for the y-axis, default is True.
+        return_fig (bool): If True, returns the matplotlib figure instead of displaying it, default is False.
 
     Returns:
-    - Union[None, plt.figure]: If return_fig is True, returns the matplotlib figure. Otherwise, displays the plot.
+        Union[None, plt.figure]: If return_fig is True, returns the matplotlib figure. Otherwise, displays the plot.
     """
     fig, (ax1, ax2) = plt.subplots(2,1,figsize=figsize)
     
