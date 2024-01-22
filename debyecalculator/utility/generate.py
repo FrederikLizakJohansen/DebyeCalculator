@@ -14,17 +14,6 @@ except ModuleNotFoundError:
         "https://github.com/FrederikLizakJohansen/DebyeCalculator"
     )
 '''
-try:
-    import torch
-except ImportError:
-    torch = None
-if torch is None:
-    raise RuntimeError("\n\nDebyeCalculator requires PyTorch, which is not installed. "
-                        "Please install PyTorch before using DebyeCalculator. "
-                        "Follow the instructions on the official PyTorch website: "
-                        "https://pytorch.org/get-started/locally/. "
-                        "For more information about DebyeCalculator, visit the GitHub repository: "
-                        "https://github.com/FrederikLizakJohansen/DebyeCalculator")
 
 import numpy as np
 from ase.io import read
