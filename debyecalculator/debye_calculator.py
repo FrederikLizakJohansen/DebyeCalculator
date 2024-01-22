@@ -15,6 +15,7 @@ from typing import Union, Tuple, Any, List, Type
 from collections import namedtuple
 
 # Handle import of torch (prerequisite)
+'''
 try:
     import torch
     from torch.nn.functional import pdist
@@ -27,7 +28,7 @@ except ModuleNotFoundError:
         "For more information about DebyeCalculator, visit the GitHub repository: "
         "https://github.com/FrederikLizakJohansen/DebyeCalculator"
     )
-
+'''
 import numpy as np
 import matplotlib.pyplot as plt
 
