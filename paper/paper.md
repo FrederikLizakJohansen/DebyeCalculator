@@ -17,7 +17,7 @@ authors:
     orcid: 0000-0002-7403-6642
     corresponding: true # (This is how to denote the corresponding author)
     equal-contrib: true # (This is how you can denote equal contributions between multiple authors)
-    affiliation: 1
+    affiliation: 3,4
   - name: Ulrik Friis-Jensen
     orcid: 0000-0001-6154-1167
     affiliation: "1, 2"
@@ -31,16 +31,20 @@ authors:
   - name: Raghavendra Selvan
     orcid: 0000-0003-4302-0207
     corresponding: true # (This is how to denote the corresponding author)
-    affiliation: "2, 3"
+    affiliation: "2, 5"
 
 affiliations:
  - name: Department of Chemistry & Nano-Science Center, University of Copenhagen, Denmark
    index: 1
  - name: Department of Computer Science, University of Copenhagen, Denmark
    index: 2
- - name: Department of Neuroscience, University of Copenhagen, Denmark
+ - name: Department of Energy Conversation and Storage, Technical University of Denmark, Denmark
    index: 3
-date: 5 October 2023
+ - name: Department of Chemistry, University of Oxford, United Kingdom
+   index: 4
+ - name: Department of Neuroscience, University of Copenhagen, Denmark
+   index: 5
+date: 14 February 2024
 bibliography: paper.bib
 
 # Optional fields if submitting to a AAS journal too, see this blog post:
