@@ -31,7 +31,7 @@ authors:
   - name: Raghavendra Selvan
     orcid: 0000-0003-4302-0207
     corresponding: true # (This is how to denote the corresponding author)
-    affiliation: "2, 5"
+    affiliation: "2"
 
 affiliations:
  - name: Department of Chemistry & Nano-Science Center, University of Copenhagen, Denmark
@@ -42,8 +42,6 @@ affiliations:
    index: 3
  - name: Department of Chemistry, University of Oxford, United Kingdom
    index: 4
- - name: Department of Neuroscience, University of Copenhagen, Denmark
-   index: 5
 date: 14 February 2024
 bibliography: paper.bib
 
