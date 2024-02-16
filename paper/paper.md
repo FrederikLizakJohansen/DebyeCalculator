@@ -17,7 +17,7 @@ authors:
     orcid: 0000-0002-7403-6642
     corresponding: true # (This is how to denote the corresponding author)
     equal-contrib: true # (This is how you can denote equal contributions between multiple authors)
-    affiliation: 3,4
+    affiliation: "3, 4" (Multiple affiliations must be quoted)
   - name: Ulrik Friis-Jensen
     orcid: 0000-0001-6154-1167
     affiliation: "1, 2"
