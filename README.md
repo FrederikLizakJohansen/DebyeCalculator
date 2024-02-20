@@ -4,6 +4,7 @@
 [![ChemRxiv](https://img.shields.io/badge/ChemRxiv%20%20-8A2BE2)](https://chemrxiv.org/engage/chemrxiv/article-details/651ec9668bab5d2055b2d009)
 [![ReadTheDocs](https://img.shields.io/readthedocs/debyecalculator)](https://debyecalculator.readthedocs.io/en/latest/)
 ![DebyeCalculator](https://raw.githubusercontent.com/FrederikLizakJohansen/DebyeCalculator/main/logo.png)
+[![DOI](https://joss.theoj.org/papers/10.21105/joss.06024/status.svg)](https://doi.org/10.21105/joss.06024)
 
 # DebyeCalculator
 Welcome to `DebyeCalculator`! This is a simple tool for calculating the scattering intensity $I(Q)$ through the Debye scattering equation, the Total Scattering Structure Function $S(Q)$, the Reduced Total Scattering Function $F(Q)$, and the Reduced Atomic Pair Distribution Function $G(r)$ from an atomic structure. 
