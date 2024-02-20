@@ -183,7 +183,7 @@ through email: __frjo@di.ku.dk__ and __ansoan@dtu.dk__.
 If you use our code or our results, please consider citing our paper. Thanks in advance!
 
 ```
-@article{Johansen_anker2023debye,
+@article{Johansen_anker2024debye,
 title={A GPU-Accelerated Open-Source Python Package for Calculating Powder Diffraction, Small-Angle-, and Total Scattering with the Debye Scattering Equation},
 author={Frederik L. Johansen, Andy S. Anker, Ulrik Friis-Jensen, Erik B. Dam, Kirsten M. Ø. Jensen, Raghavendra Selvan},
 journal={Journal of Open Source Software},
