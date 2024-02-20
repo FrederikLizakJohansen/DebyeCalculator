@@ -180,7 +180,7 @@ Should there be any questions, desired improvements or bugs please contact us on
 through email: __frjo@di.ku.dk__ and __ansoan@dtu.dk__.
 
 # Cite
-If you use our code or our results, please consider citing our paper. Thanks in advance!
+If you use our code or our results, please consider citing our [paper](https://doi.org/10.21105/joss.06024). Thanks in advance!
 
 ```
 @article{Johansen_anker2024debye,
