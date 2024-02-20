@@ -1,0 +1,73 @@
+cff-version: "1.2.0"
+authors:
+- family-names: Johansen
+  given-names: Frederik L.
+  orcid: "https://orcid.org/0000-0002-8049-8624"
+- family-names: Anker
+  given-names: Andy S.
+  orcid: "https://orcid.org/0000-0002-7403-6642"
+- family-names: Friis-Jensen
+  given-names: Ulrik
+  orcid: "https://orcid.org/0000-0001-6154-1167"
+- family-names: Dam
+  given-names: Erik B.
+  orcid: "https://orcid.org/0000-0002-8888-2524"
+- family-names: Jensen
+  given-names: Kirsten M. Ø.
+  orcid: "https://orcid.org/0000-0003-0291-217X"
+- family-names: Selvan
+  given-names: Raghavendra
+  orcid: "https://orcid.org/0000-0003-4302-0207"
+contact:
+- family-names: Johansen
+  given-names: Frederik L.
+  orcid: "https://orcid.org/0000-0002-8049-8624"
+- family-names: Anker
+  given-names: Andy S.
+  orcid: "https://orcid.org/0000-0002-7403-6642"
+- family-names: Jensen
+  given-names: Kirsten M. Ø.
+  orcid: "https://orcid.org/0000-0003-0291-217X"
+- family-names: Selvan
+  given-names: Raghavendra
+  orcid: "https://orcid.org/0000-0003-4302-0207"
+doi: 10.5281/zenodo.10659528
+message: If you use this software, please cite our article in the
+  Journal of Open Source Software.
+preferred-citation:
+  authors:
+  - family-names: Johansen
+    given-names: Frederik L.
+    orcid: "https://orcid.org/0000-0002-8049-8624"
+  - family-names: Anker
+    given-names: Andy S.
+    orcid: "https://orcid.org/0000-0002-7403-6642"
+  - family-names: Friis-Jensen
+    given-names: Ulrik
+    orcid: "https://orcid.org/0000-0001-6154-1167"
+  - family-names: Dam
+    given-names: Erik B.
+    orcid: "https://orcid.org/0000-0002-8888-2524"
+  - family-names: Jensen
+    given-names: Kirsten M. Ø.
+    orcid: "https://orcid.org/0000-0003-0291-217X"
+  - family-names: Selvan
+    given-names: Raghavendra
+    orcid: "https://orcid.org/0000-0003-4302-0207"
+  date-published: 2024-02-20
+  doi: 10.21105/joss.06024
+  issn: 2475-9066
+  issue: 94
+  journal: Journal of Open Source Software
+  publisher:
+    name: Open Journals
+  start: 6024
+  title: A GPU-Accelerated Open-Source Python Package for Calculating
+    Powder Diffraction, Small-Angle-, and Total Scattering with the
+    Debye Scattering Equation
+  type: article
+  url: "https://joss.theoj.org/papers/10.21105/joss.06024"
+  volume: 9
+title: A GPU-Accelerated Open-Source Python Package for Calculating
+  Powder Diffraction, Small-Angle-, and Total Scattering with the Debye
+  Scattering Equation
