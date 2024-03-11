@@ -274,7 +274,7 @@ def generate_nanoparticles(
             incl_indices = torch.nonzero(incl_mask).flatten()
 
             # Get edges to be included
-            included_edges = direction[:,~(torch.isin(direction[0], ~incl_indices) + torch.isin(direction[1], ~incl_indices))]
+            included_edges = direction[:,(torch.isin(direction[0], incl_indices) + torch.isin(direction[1], incl_indices))]
             
             # Get included atoms
             included_atoms = included_edges.unique()
