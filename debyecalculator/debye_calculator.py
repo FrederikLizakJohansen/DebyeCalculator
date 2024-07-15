@@ -150,9 +150,21 @@ class DebyeCalculator:
         self.q = torch.arange(self.qmin, self.qmax, self.qstep).unsqueeze(-1).to(device=self.device)
         self.r = torch.arange(self.rmin, self.rmax, self.rstep).unsqueeze(-1).to(device=self.device)
 
-        # Form factor coefficients
-        with open(pkg_resources.resource_filename(__name__, 'utility/elements_info.yaml'), 'r') as yaml_file:
+        # Determine the YAML file based on radiation type
+        if radiation_type.lower() in ['xray', 'x']:
+            yaml_file_name = 'utility/elements_info_xrays.yaml'
+        elif radiation_type.lower() in ['neutron', 'n']:
+            yaml_file_name = 'utility/elements_info_neutrons.yaml'
+        else:
+            raise ValueError("Invalid radiation type")
+
+        # Load form factor coefficients from the selected YAML file
+        with open(pkg_resources.resource_filename(__name__, yaml_file_name), 'r') as yaml_file:
             self.FORM_FACTOR_COEF = yaml.safe_load(yaml_file)
+
+        # Form factor coefficients
+        #with open(pkg_resources.resource_filename(__name__, 'utility/elements_info.yaml'), 'r') as yaml_file:
+        #    self.FORM_FACTOR_COEF = yaml.safe_load(yaml_file)
         self.atomic_numbers_to_elements = {}
         for i, (key, value) in enumerate(self.FORM_FACTOR_COEF.items()):
             if i > 97:
