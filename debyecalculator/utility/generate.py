@@ -147,7 +147,7 @@ def generate_nanoparticles(
             device = device
 
     # Fetch atomic numbers and radii
-    with open(pkg_resources.resource_filename(__name__, 'elements_info.yaml'), 'r') as yaml_file:
+    with open(pkg_resources.resource_filename(__name__, 'elements_info_xrays.yaml'), 'r') as yaml_file:
         elements_info = yaml.safe_load(yaml_file)
 
     # Fix radii type

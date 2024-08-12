@@ -7,7 +7,7 @@ import pkg_resources
 import yaml
 
 # Elements to atomic numbers map
-with open(pkg_resources.resource_filename(__name__, 'utility/elements_info.yaml'), 'r') as yaml_file:
+with open(pkg_resources.resource_filename(__name__, 'utility/elements_info_xrays.yaml'), 'r') as yaml_file:
     element_info = yaml.safe_load(yaml_file)
 element_to_atomic_number = {}
 for i, (key, value) in enumerate(element_info.items()):
