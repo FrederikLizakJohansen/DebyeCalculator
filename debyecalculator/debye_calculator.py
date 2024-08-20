@@ -18,6 +18,7 @@ from collections import namedtuple
 # Handle import of torch (prerequisite)
 try:
     import torch
+    from torch import cdist
     from torch.nn.functional import pdist
 except ModuleNotFoundError:
     raise ImportError(
@@ -471,8 +472,12 @@ class DebyeCalculator:
             # Calculate distances and batch
             if self.batch_size is None:
                 self.batch_size = self._max_batch_size
+            
+            N = structure.xyz.size(0)
+            dists_indices = torch.triu_indices(N, N, offset=1)
+            dists_indices = N * dists_indices[0] + dists_indices[1]
+            dists = cdist(structure.xyz, structure.xyz).flatten(-2)[..., dists_indices].split(self.batch_size)
 
-            dists = pdist(structure.xyz).split(self.batch_size)
             indices = structure.triu_indices.split(self.batch_size, dim=1)
             inverse_indices = structure.unique_inverse.split(self.batch_size, dim=1)
 
@@ -553,7 +558,12 @@ class DebyeCalculator:
             # Calculate distances and batch
             if self.batch_size is None:
                 self.batch_size = self._max_batch_size
-            dists = pdist(structure.xyz).split(self.batch_size)
+
+            N = structure.xyz.size(0)
+            dists_indices = torch.triu_indices(N, N, offset=1)
+            dists_indices = N * dists_indices[0] + dists_indices[1]
+            dists = cdist(structure.xyz, structure.xyz).flatten(-2)[..., dists_indices].split(self.batch_size)
+
             indices = structure.triu_indices.split(self.batch_size, dim=1)
             inverse_indices = structure.unique_inverse.split(self.batch_size, dim=1)
             
@@ -638,7 +648,12 @@ class DebyeCalculator:
             # Calculate distances and batch
             if self.batch_size is None:
                 self.batch_size = self._max_batch_size
-            dists = pdist(structure.xyz).split(self.batch_size)
+
+            N = structure.xyz.size(0)
+            dists_indices = torch.triu_indices(N, N, offset=1)
+            dists_indices = N * dists_indices[0] + dists_indices[1]
+            dists = cdist(structure.xyz, structure.xyz).flatten(-2)[..., dists_indices].split(self.batch_size)
+
             indices = structure.triu_indices.split(self.batch_size, dim=1)
             inverse_indices = structure.unique_inverse.split(self.batch_size, dim=1)
             
@@ -723,7 +738,12 @@ class DebyeCalculator:
             # Calculate distances and batch
             if self.batch_size is None:
                 self.batch_size = self._max_batch_size
-            dists = pdist(structure.xyz).split(self.batch_size)
+
+            N = structure.xyz.size(0)
+            dists_indices = torch.triu_indices(N, N, offset=1)
+            dists_indices = N * dists_indices[0] + dists_indices[1]
+            dists = cdist(structure.xyz, structure.xyz).flatten(-2)[..., dists_indices].split(self.batch_size)
+
             indices = structure.triu_indices.split(self.batch_size, dim=1)
             inverse_indices = structure.unique_inverse.split(self.batch_size, dim=1)
             
@@ -812,7 +832,12 @@ class DebyeCalculator:
             # Calculate distances and batch
             if self.batch_size is None:
                 self.batch_size = self._max_batch_size
-            dists = pdist(structure.xyz).split(self.batch_size)
+
+            N = structure.xyz.size(0)
+            dists_indices = torch.triu_indices(N, N, offset=1)
+            dists_indices = N * dists_indices[0] + dists_indices[1]
+            dists = cdist(structure.xyz, structure.xyz).flatten(-2)[..., dists_indices].split(self.batch_size)
+
             indices = structure.triu_indices.split(self.batch_size, dim=1)
             inverse_indices = structure.unique_inverse.split(self.batch_size, dim=1)
             
