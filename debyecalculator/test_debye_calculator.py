@@ -5,6 +5,7 @@ import numpy as np
 from ase.io import read
 import pkg_resources
 import yaml
+import math
 
 # Elements to atomic numbers map
 with open(pkg_resources.resource_filename(__name__, 'utility/elements_info_xrays.yaml'), 'r') as yaml_file:
@@ -22,7 +23,6 @@ def test_init_defaults():
     #calc = DebyeCalculator()
     assert calc.qmin == 1.0, f"Expected qmin to be 1.0, but got {calc.qmin}"
     assert calc.qmax == 30.0, f"Expected qmax to be 30.0, but got {calc.qmax}"
-    assert calc.qstep == 0.05, f"Expected qstep to be 0.05, but got {calc.qstep}"
     assert calc.qdamp == 0.04, f"Expected qdamp to be 0.04, but got {calc.qdamp}"
     assert calc.rmin == 0.0, f"Expected rmin to be 0.0, but got {calc.rmin}"
     assert calc.rmax == 20.0, f"Expected rmax to be 20.0, but got {calc.rmax}"
@@ -34,6 +34,10 @@ def test_init_defaults():
     assert calc.lorch_mod == False, f"Expected lorch_mod to be False, but got {calc.lorch_mod}"
     assert calc.radiation_type == 'xray', f"Expected radiation_type to be 'xray', but got {calc.radiation_type}"
     assert calc.profile == False, f"Expected profile to be False, but got {calc.profile}"
+    
+    # Optimal qstep, plus small leeway for computational uncertainty
+    optimal_qstep = math.pi / (calc.rmax + calc.rstep) + 1e-5
+    assert calc.qstep <= optimal_qstep, f"Expected qstep <= {optimal_qstep}, but got qstep = {calc.qstep}"
 
 def test_iq_xyz():
     # Load the expected scattering intensity from a file
