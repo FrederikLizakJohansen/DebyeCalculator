@@ -1,4 +1,5 @@
 import os
+import math
 import tempfile
 from io import BytesIO
 import zipfile
@@ -76,7 +77,7 @@ class DebyeCalculator:
         self,
         qmin: float = 1.0,
         qmax: float = 30.0,
-        qstep: float = 0.05,
+        qstep: float = None,
         qdamp: float = 0.04,
         rmin: float = 0.0,
         rmax: float = 20.0,
@@ -97,7 +98,7 @@ class DebyeCalculator:
         Args:
             qmin (float): Minimum q-value for the scattering calculation. Default is 1.0.
             qmax (float): Maximum q-value for the scattering calculation. Default is 30.0.
-            qstep (float): Step size for the q-values in the scattering calculation. Default is 0.1.
+            qstep (float): Step size for the q-values in the scattering calculation. Default is None, and is calculated as [pi / (rmax + rstep)] if not provided.
             qdamp (float): Damping parameter caused by the truncated Q-range of the Fourier transformation. Default is 0.04.
             rmin (float): Minimum r-value for the pair distribution function (PDF) calculation. Default is 0.0.
             rmax (float): Maximum r-value for the PDF calculation. Default is 20.0.
@@ -115,11 +116,17 @@ class DebyeCalculator:
         if device == 'cuda' and not torch.cuda.is_available():
             warnings.warn("Warning: Your system might have a CUDA-enabled GPU, but CUDA is not available. Computations will run on the CPU instead. " \
                           "For optimal performance, please install Pytorch with CUDA support. " \
-                          "If you do not have a CUDA-enabled CPU, you can surpress this warning by specifying the 'device' argument as 'cpu'", stacklevel=2)
+                          "If you do not have a CUDA-enabled CPU, you can surpress this warning by specifying the 'device' argument as 'cpu'", 
+                          UserWarning, 
+                          stacklevel=2
+                         )
             self.device = 'cpu'
         elif device == 'cpu' and torch.cuda.is_available():
             warnings.warn("Warning: Your system has a CUDA-enabled GPU, but CPU was explicitly specified for computations. " \
-                          "To utilise GPU acceleration, omit the 'device' argument or specify 'cuda'", stacklevel=2)
+                          "To utilise GPU acceleration, omit the 'device' argument or specify 'cuda'", 
+                          UserWarning,
+                          stacklevel=2
+                         )
             self.device = 'cpu'
         else:
             self.device = device
@@ -137,6 +144,12 @@ class DebyeCalculator:
         self.batch_size = batch_size
         self.lorch_mod = lorch_mod
         self.radiation_type = radiation_type
+
+        # Set qstep seperately (Nyquist)
+        if qstep is None:
+            self.qstep = math.pi / (self.rmax + self.rstep)
+        else:
+            self.qstep = qstep
 
         # Parameter constraint assertion
         self.parameter_constraint_assertion()
@@ -205,11 +218,14 @@ class DebyeCalculator:
     ) -> None:
         """
         Assert that all parameters meet valid constraints.
+        Provides warning if certain parameters are not within certain constraints
 
         Raises:
             ValueError: If any of the parameters violate the specified constraints.
+            UserWarning: If any of the specified parameters are not within the specified constraints.
         """
 
+        # Positivity constraints
         if self.qmin < 0:
             raise ValueError("qmin must be non-negative.")
         if self.qmax < 0:
@@ -228,12 +244,27 @@ class DebyeCalculator:
             raise ValueError("rthres must be non-negative.")
         if self.biso < 0:
             raise ValueError("biso must be non-negative.")
+
+        # Batch-size constraints
         if self.batch_size is not None and self.batch_size < 0:
             raise ValueError("batch_size must be non-negative.")
+
+        # Device constraints
         if self.device not in ['cpu', 'cuda']:
             raise ValueError("Invalid device")
+
+        # Radiation type constraints
         if self.radiation_type not in ['xray', 'x', 'neutron', 'n']:
             raise ValueError("Invalid radiation type")
+
+        # Optimal qstep UserWarning
+        optimal_qstep = (math.pi / (self.rmax + self.rstep))
+        if self.qstep > optimal_qstep:
+            warnings.warn(
+                f"The qstep that was chosen is too large and might result in unwanted signal artifacts. With rmax={self.rmax} and rstep={self.rstep}, consider using qstep<={optimal_qstep:2.3f}.",
+                UserWarning
+            )
+
     
     def update_parameters(
         self,
