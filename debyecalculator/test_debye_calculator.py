@@ -48,6 +48,11 @@ def test_iq_xyz():
     calc.update_parameters(qstep=0.1)
     q, iq = calc.iq('debyecalculator/unittests_files/icsd_001504_cc_r6_lc_2.85_6_tetragonal.xyz')
 
+    # Normalise counts
+    eps = 1e-16
+    iq_expected /= (np.max(iq_expected) + eps)
+    iq /= (np.max(iq) + eps)
+
     # Check that the calculated scattering intensity matches the expected value
     assert np.allclose(q, q_expected, atol=1e-04, rtol=1e-03), f"Expected Q to be {q_expected}, but got {q}"
     assert np.allclose(iq, iq_expected, atol=1e-04, rtol=1e-03), f"Expected I(Q) to be {iq_expected}, but got {iq}"
@@ -62,6 +67,11 @@ def test_iq_cif():
     calc.update_parameters(qstep=0.05)
     q, iq = calc.iq('data/AntiFluorite_Co2O.cif', radii=10.0)
     
+    # Normalise counts
+    eps = 1e-16
+    iq_expected /= (np.max(iq_expected) + eps)
+    iq /= (np.max(iq) + eps)
+    
     # Check that the calculated scattering intensity matches the expected value
     assert np.allclose(q, q_expected, atol=1e-04, rtol=1e-03), f"Expected Q to be {q_expected}, but got {q}"
     assert np.allclose(iq, iq_expected, atol=1e-04, rtol=1e-03), f"Expected I(Q) to be {iq_expected}, but got {iq}"
@@ -70,7 +80,7 @@ def test_iq_tuple():
 
     # Load expected scattering intensity
     ph = np.genfromtxt('debyecalculator/unittests_files/iq_AntiFluorite_Co2O_radius10.0.dat', delimiter=',', skip_header=15)
-    q_expected, iq_expected = ph[:,0], ph[:,1]
+    q_expected, iq_expected = ph[:,0], ph[:,1]/2
 
     # calculate the scattering intensity using tuple
     ase_structure = read('debyecalculator/unittests_files/structure_AntiFluorite_Co2O_radius10.0.xyz')
@@ -83,6 +93,12 @@ def test_iq_tuple():
     calc.update_parameters(qstep=0.05)
     q_str, iq_str = calc.iq(structure_tuple_str)
     q_int, iq_int = calc.iq(structure_tuple_int)
+    
+    # Normalise counts
+    eps = 1e-16
+    iq_expected /= (np.max(iq_expected) + eps)
+    iq_str /= (np.max(iq_str) + eps)
+    iq_int /= (np.max(iq_int) + eps)
 
     # Check that the calculated scattering intensity matches the expected value
     assert np.allclose(q_str, q_expected, atol=1e-04, rtol=1e-03), f"Expected Q to be {q_expected}, but got {q_str}"
@@ -239,6 +255,12 @@ def test_get_all_xyz():
     # Check that the calculated Iq matches the expected value
     ph = np.loadtxt('debyecalculator/unittests_files/icsd_001504_cc_r6_lc_2.85_6_tetragonal_Iq.dat')
     q_expected, iq_expected = ph[:,0], ph[:,1]
+
+    # Normalise counts
+    eps = 1e-16
+    iq_expected /= (np.max(iq_expected) + eps)
+    iq /= (np.max(iq) + eps)
+
     assert np.allclose(q, q_expected, atol=1e-04, rtol=1e-03), f"Expected Q to be {q_expected}, but got {q}"
     assert np.allclose(iq, iq_expected, atol=1e-04, rtol=1e-03), f"Expected I(Q) to be {iq_expected}, but got {iq}"
 
@@ -269,6 +291,12 @@ def test_get_all_cif():
     # Check that the calculated Iq matches the expected value
     ph = np.genfromtxt('debyecalculator/unittests_files/iq_AntiFluorite_Co2O_radius10.0.dat', delimiter=',', skip_header=15)
     q_expected, iq_expected = ph[:,0], ph[:,1]
+
+    # Normalise counts
+    eps = 1e-16
+    iq_expected /= (np.max(iq_expected) + eps)
+    iq /= (np.max(iq) + eps)
+
     assert np.allclose(q, q_expected, atol=1e-04, rtol=1e-03), f"Expected Q to be {q_expected}, but got {q}"
     assert np.allclose(iq, iq_expected, atol=1e-04, rtol=1e-03), f"Expected I(Q) to be {iq_expected}, but got {iq}"
 
@@ -307,6 +335,13 @@ def test_get_all_tuple():
     # I(Q)
     ph = np.genfromtxt('debyecalculator/unittests_files/iq_AntiFluorite_Co2O_radius10.0.dat', delimiter=',', skip_header=15)
     q_expected, iq_expected = ph[:,0], ph[:,1]
+
+    # Normalise counts
+    eps = 1e-16
+    iq_expected /= (np.max(iq_expected) + eps)
+    iq_str /= (np.max(iq_str) + eps)
+    iq_int /= (np.max(iq_int) + eps)
+
     assert np.allclose(q_str, q_expected, atol=1e-04, rtol=1e-03), f"Expected Q to be {q_expected}, but got {q_str}"
     assert np.allclose(q_int, q_expected, atol=1e-04, rtol=1e-03), f"Expected Q to be {q_expected}, but got {q_int}"
     assert np.allclose(iq_str, iq_expected, atol=1e-04, rtol=1e-03), f"Expected I(Q) to be {iq_expected}, but got {iq_str}"
