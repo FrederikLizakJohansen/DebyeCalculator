@@ -371,6 +371,52 @@ def test_get_all_tuple():
     assert np.allclose(gr_str, gr_expected, atol=1e-04, rtol=1e-03), f"Expected G(r) to be {gr_expected}, but got {gr_str}"
     assert np.allclose(gr_int, gr_expected, atol=1e-04, rtol=1e-03), f"Expected G(r) to be {gr_expected}, but got {gr_int}"
 
+def test_partials():
+    """
+    Testing whether the partials add up
+    """
+    # I(Q)
+    _, iq = calc.iq("data/AntiFluorite_Co2O.cif", radii=5, partial_pattern=None)
+    _, iq_o_o = calc.iq("data/AntiFluorite_Co2O.cif", radii=5, partial_pattern="O-O", include_self_scattering=True)
+    _, iq_co_o = calc.iq("data/AntiFluorite_Co2O.cif", radii=5, partial_pattern="Co-O", include_self_scattering=False)
+    _, iq_co_co = calc.iq("data/AntiFluorite_Co2O.cif", radii=5, partial_pattern="Co-Co", include_self_scattering=True)
+    iq_added = iq_o_o + iq_co_o + iq_co_co
+    assert np.allclose(iq, iq_added, atol=1e-04, rtol=1e-03), f"Partials are not matching for I(Q) calculations"
+    # S(Q)
+    _, sq = calc.sq("data/AntiFluorite_Co2O.cif", radii=5, partial_pattern=None)
+    _, sq_o_o = calc.sq("data/AntiFluorite_Co2O.cif", radii=5, partial_pattern="O-O", )
+    _, sq_co_o = calc.sq("data/AntiFluorite_Co2O.cif", radii=5, partial_pattern="Co-O", )
+    _, sq_co_co = calc.sq("data/AntiFluorite_Co2O.cif", radii=5, partial_pattern="Co-Co", )
+    sq_added = sq_o_o + sq_co_o + sq_co_co
+    assert np.allclose(sq, sq_added, atol=1e-04, rtol=1e-03), f"Partials are not matching for S(Q) calculations"
+    # F(Q)
+    _, fq = calc.fq("data/AntiFluorite_Co2O.cif", radii=5, partial_pattern=None)
+    _, fq_o_o = calc.fq("data/AntiFluorite_Co2O.cif", radii=5, partial_pattern="O-O", )
+    _, fq_co_o = calc.fq("data/AntiFluorite_Co2O.cif", radii=5, partial_pattern="Co-O", )
+    _, fq_co_co = calc.fq("data/AntiFluorite_Co2O.cif", radii=5, partial_pattern="Co-Co", )
+    fq_added = fq_o_o + fq_co_o + fq_co_co
+    assert np.allclose(fq, fq_added, atol=1e-04, rtol=1e-03), f"Partials are not matching for F(Q) calculations"
+    # G(r)
+    _, gr = calc.gr("data/AntiFluorite_Co2O.cif", radii=5, partial_pattern=None)
+    _, gr_o_o = calc.gr("data/AntiFluorite_Co2O.cif", radii=5, partial_pattern="O-O", )
+    _, gr_co_o = calc.gr("data/AntiFluorite_Co2O.cif", radii=5, partial_pattern="Co-O", )
+    _, gr_co_co = calc.gr("data/AntiFluorite_Co2O.cif", radii=5, partial_pattern="Co-Co", )
+    gr_added = gr_o_o + gr_co_o + gr_co_co
+    assert np.allclose(gr, gr_added, atol=1e-04, rtol=1e-03), f"Partials are not matching for G(r) calculations"
+    # _get_all
+    _, _, iq, sq, fq, gr = calc._get_all('data/AntiFluorite_Co2O.cif', radii=5, partial_pattern=None)
+    _, _, iq_o_o, sq_o_o, fq_o_o, gr_o_o = calc._get_all('data/AntiFluorite_Co2O.cif', radii=5, partial_pattern="O-O", include_self_scattering=True)
+    _, _, iq_co_o, sq_co_o, fq_co_o, gr_co_o = calc._get_all('data/AntiFluorite_Co2O.cif', radii=5, partial_pattern="Co-O", include_self_scattering=False)
+    _, _, iq_co_co, sq_co_co, fq_co_co, gr_co_co = calc._get_all('data/AntiFluorite_Co2O.cif', radii=5, partial_pattern="Co-Co", include_self_scattering=True)
+    iq_added = iq_o_o + iq_co_o + iq_co_co
+    assert np.allclose(iq, iq_added, atol=1e-04, rtol=1e-03), f"Partials are not matching for I(Q) calculations"
+    sq_added = sq_o_o + sq_co_o + sq_co_co
+    assert np.allclose(sq, sq_added, atol=1e-04, rtol=1e-03), f"Partials are not matching for S(Q) calculations"
+    fq_added = fq_o_o + fq_co_o + fq_co_co
+    assert np.allclose(fq, fq_added, atol=1e-04, rtol=1e-03), f"Partials are not matching for F(Q) calculations"
+    gr_added = gr_o_o + gr_co_o + gr_co_co
+    assert np.allclose(gr, gr_added, atol=1e-04, rtol=1e-03), f"Partials are not matching for G(r) calculations"
+
 def test_generate_nanoparticle():
 
     # Load structure from xyz:
