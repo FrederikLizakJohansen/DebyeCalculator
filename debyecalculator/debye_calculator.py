@@ -447,7 +447,7 @@ class DebyeCalculator:
     def generate_partial_masks(
         self,
         structure: StructureTuple,
-        partial_pattern: str,
+        partial: str,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Generates masks for selecting specific atom pairs in a structure based on a given partial pattern.
@@ -458,7 +458,7 @@ class DebyeCalculator:
 
         Parameters:
             structure (StructureTuple): A tuple representing the atomic structure, containing atomic positions, elements, etc.
-            partial_pattern (str): A string in the form 'X-Y', where 'X' and 'Y' are element symbols. If provided, masks are created to isolate interactions between these elements. If None, masks select all elements.
+            partial (str): A string in the form 'X-Y', where 'X' and 'Y' are element symbols. If provided, masks are created to isolate interactions between these elements. If None, masks select all elements.
 
         Returns:
             Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -467,20 +467,20 @@ class DebyeCalculator:
                 - partial_mask_other (torch.Tensor): A boolean mask for selecting atoms of the second element 'Y' in the structure.
 
         Raises:
-            ValueError: If the partial_pattern does not match the expected format 'X-Y', where 'X' and 'Y' are valid element symbols.
+            ValueError: If the partial pattern does not match the expected format 'X-Y', where 'X' and 'Y' are valid element symbols.
         """
             
         # Generate the upper trianfular indices
         N = structure.xyz.size(0)
         triu_indices = torch.triu_indices(N, N, offset=1)
 
-        if partial_pattern is not None:
+        if partial is not None:
 
             # Assert that string matches represetation
             re_pattern = r'^([a-zA-Z]+)-([a-zA-Z]+)$'
-            match = re.match(re_pattern, partial_pattern)
+            match = re.match(re_pattern, partial)
             if not match:
-                raise ValueError("'partial_pattern' does not match the pattern 'X-Y', of elements 'X' and 'Y'.")
+                raise ValueError("'partial' does not match the pattern 'X-Y', of elements 'X' and 'Y'.")
 
             # Extract elements and make sure they are atoms in the structure
             el1, el2 = match.groups()
@@ -489,9 +489,9 @@ class DebyeCalculator:
             elements = np.array(structure.elements)
 
             if not el1 in elements:
-                raise ValueError(f"element {el1} from 'partial_pattern' is not present in structure.")
+                raise ValueError(f"element {el1} from 'partial' is not present in structure.")
             if not el2 in elements:
-                raise ValueError(f"element {el2} from 'partial_pattern' is not present in structure.")
+                raise ValueError(f"element {el2} from 'partial' is not present in structure.")
 
 
             # Construct masks for struc and other using comparison
@@ -515,7 +515,7 @@ class DebyeCalculator:
         self,
         structure_source: StructureSourceType,
         radii: Union[List[float], float, None] = None,
-        partial_pattern: str = None,
+        partial: str = None,
         keep_on_device: bool = False,
         include_self_scattering: bool = True,
     ) -> Union[IqTuple, List[IqTuple]]:
@@ -525,7 +525,7 @@ class DebyeCalculator:
         Parameters:
             structure_source (StructureSourceType): Atomic structure source in XYZ/CIF format, ASE Atoms object, or as a tuple of (atomic_identities, atomic_positions).
             radii (Union[List[float], float, None]): List/float of radii/radius of particle(s) to generate with parsed CIF.
-            partial_pattern (str): String on the form 'X-Y' where 'X' and 'Y' are elements in either structure. Used for calculating partial scattering patterns. Default is None.
+            partial (str): String on the form 'X-Y' where 'X' and 'Y' are elements in either structure. Used for calculating partial scattering patterns. Default is None.
             keep_on_device (bool): Flag to keep the results on the class device. Default is False, and will return numpy arrays on CPU.
             include_self_scattering (bool): Flag to compute self-scattering contribution. Default is True.
 
@@ -551,7 +551,7 @@ class DebyeCalculator:
             dists = torch.norm(structure.xyz[:,None] - structure.xyz, dim=2, p=2)[triu_indices[0], triu_indices[1]].split(self.batch_size)
 
             # Generate partial masks
-            partial_mask_sparse, partial_mask_struc, partial_mask_other = self.generate_partial_masks(structure, partial_pattern)
+            partial_mask_sparse, partial_mask_struc, partial_mask_other = self.generate_partial_masks(structure, partial)
 
             # Batch mask and other indices
             partial_mask_sparse = partial_mask_sparse.to(device=self.device).split(self.batch_size)
@@ -628,7 +628,7 @@ class DebyeCalculator:
         self,
         structure_source: StructureSourceType,
         radii: Union[List[float], float, None] = None,
-        partial_pattern: str = None,
+        partial: str = None,
         keep_on_device: bool = False,
     ) -> Union[SqTuple, List[SqTuple]]:
         """
@@ -637,7 +637,7 @@ class DebyeCalculator:
         Parameters:
             structure_source (StructureSourceType): Atomic structure source in XYZ/CIF format, ASE Atoms object or as a tuple of (atomic_identities, atomic_positions)
             radii (Union[List[float], float, None]): List/float of radii/radius of particle(s) to generate with parsed CIF.
-            partial_pattern (str): String on the form 'X-Y' where 'X' and 'Y' are elements in either structure. Used for calculating partial scattering patterns. Default is None.
+            partial (str): String on the form 'X-Y' where 'X' and 'Y' are elements in either structure. Used for calculating partial scattering patterns. Default is None.
             keep_on_device (bool): Flag to keep the results on the class device. Default is False, and will return numpy arrays on CPU
 
         Returns:
@@ -656,7 +656,7 @@ class DebyeCalculator:
             dists = torch.norm(structure.xyz[:,None] - structure.xyz, dim=2, p=2)[triu_indices[0], triu_indices[1]].split(self.batch_size)
             
             # Generate partial masks
-            partial_mask_sparse, partial_mask_struc, partial_mask_other = self.generate_partial_masks(structure, partial_pattern)
+            partial_mask_sparse, partial_mask_struc, partial_mask_other = self.generate_partial_masks(structure, partial)
 
             # Batch mask and other indices
             partial_mask_sparse = partial_mask_sparse.to(device=self.device).split(self.batch_size)
@@ -726,7 +726,7 @@ class DebyeCalculator:
         self,
         structure_source: StructureSourceType,
         radii: Union[List[float], float, None] = None,
-        partial_pattern: str = None,
+        partial: str = None,
         keep_on_device: bool = False,
     ) -> Union[FqTuple, List[FqTuple]]:
         """
@@ -735,7 +735,7 @@ class DebyeCalculator:
         Parameters:
             structure_source (StructureSourceType): Atomic structure source in XYZ/CIF format, ASE Atoms object, or as a tuple of (atomic_identities, atomic_positions).
             radii (Union[List[float], float, None]): List/float of radii/radius of particle(s) to generate with parsed CIF.
-            partial_pattern (str): String on the form 'X-Y' where 'X' and 'Y' are elements in either structure. Used for calculating partial scattering patterns. Default is None.
+            partial (str): String on the form 'X-Y' where 'X' and 'Y' are elements in either structure. Used for calculating partial scattering patterns. Default is None.
             keep_on_device (bool): Flag to keep the results on the class device. Default is False, and will return numpy arrays on CPU.
 
         Returns:
@@ -760,7 +760,7 @@ class DebyeCalculator:
             dists = torch.norm(structure.xyz[:,None] - structure.xyz, dim=2, p=2)[triu_indices[0], triu_indices[1]].split(self.batch_size)
             
             # Generate partial masks
-            partial_mask_sparse, partial_mask_struc, partial_mask_other = self.generate_partial_masks(structure, partial_pattern)
+            partial_mask_sparse, partial_mask_struc, partial_mask_other = self.generate_partial_masks(structure, partial)
 
             # Batch mask and other indices
             partial_mask_sparse = partial_mask_sparse.to(device=self.device).split(self.batch_size)
@@ -831,7 +831,7 @@ class DebyeCalculator:
         self,
         structure_source: StructureSourceType,
         radii: Union[List[float], float, None] = None,
-        partial_pattern: str = None,
+        partial: str = None,
         keep_on_device: bool = False,
     ) -> Union[GrTuple, List[GrTuple]]:
         """
@@ -840,7 +840,7 @@ class DebyeCalculator:
         Parameters:
             structure_source (StructureSourceType): Atomic structure source in XYZ/CIF format, ASE Atoms object, or as a tuple of (atomic_identities, atomic_positions).
             radii (Union[List[float], float, None]): List/float of radii/radius of particle(s) to generate with parsed CIF.
-            partial_pattern (str): String on the form 'X-Y' where 'X' and 'Y' are elements in either structure. Used for calculating partial scattering patterns. Default is None.
+            partial (str): String on the form 'X-Y' where 'X' and 'Y' are elements in either structure. Used for calculating partial scattering patterns. Default is None.
             keep_on_device (bool): Flag to keep the results on the class device. Default is False, and will return numpy arrays on CPU.
 
         Returns:
@@ -864,7 +864,7 @@ class DebyeCalculator:
             dists = torch.norm(structure.xyz[:,None] - structure.xyz, dim=2, p=2)[triu_indices[0], triu_indices[1]].split(self.batch_size)
             
             # Generate partial masks
-            partial_mask_sparse, partial_mask_struc, partial_mask_other = self.generate_partial_masks(structure, partial_pattern)
+            partial_mask_sparse, partial_mask_struc, partial_mask_other = self.generate_partial_masks(structure, partial)
 
             # Batch mask and other indices
             partial_mask_sparse = partial_mask_sparse.to(device=self.device).split(self.batch_size)
@@ -939,7 +939,7 @@ class DebyeCalculator:
         self,
         structure_source: StructureSourceType,
         radii: Union[List[float], float, None] = None,
-        partial_pattern: str = None,
+        partial: str = None,
         keep_on_device: bool = False,
         include_self_scattering: bool = True,
     ) -> Union[AllTuple, List[AllTuple]]:
@@ -949,7 +949,7 @@ class DebyeCalculator:
         Parameters:
             structure_source (StructureSourceType): Atomic structure source in XYZ/CIF format, ASE Atoms object, or as a tuple of (atomic_identities, atomic_positions).
             radii (Union[List[float], float, None]): List/float of radii/radius of particle(s) to generate with parsed CIF.
-            partial_pattern (str): String on the form 'X-Y' where 'X' and 'Y' are elements in either structure. Used for calculating partial scattering patterns. Default is None.
+            partial (str): String on the form 'X-Y' where 'X' and 'Y' are elements in either structure. Used for calculating partial scattering patterns. Default is None.
             keep_on_device (bool): Flag to keep the results on the class device. Default is False, and will return numpy arrays on CPU.
             include_self_scattering (bool): Flag to compute self-scattering contribution. Default is True.
 
@@ -974,7 +974,7 @@ class DebyeCalculator:
             dists = torch.norm(structure.xyz[:,None] - structure.xyz, dim=2, p=2)[triu_indices[0], triu_indices[1]].split(self.batch_size)
             
             # Generate partial masks
-            partial_mask_sparse, partial_mask_struc, partial_mask_other = self.generate_partial_masks(structure, partial_pattern)
+            partial_mask_sparse, partial_mask_struc, partial_mask_other = self.generate_partial_masks(structure, partial)
 
             # Batch mask and other indices
             partial_mask_sparse = partial_mask_sparse.to(device=self.device).split(self.batch_size)
