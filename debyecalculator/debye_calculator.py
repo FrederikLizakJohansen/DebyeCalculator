@@ -1,4 +1,5 @@
 import os
+import re
 import math
 import tempfile
 from io import BytesIO
@@ -18,6 +19,7 @@ from collections import namedtuple
 # Handle import of torch (prerequisite)
 try:
     import torch
+    from torch import cdist
     from torch.nn.functional import pdist
 except ModuleNotFoundError:
     raise ImportError(
@@ -47,6 +49,7 @@ from ipywidgets import HBox, VBox, Layout
 from functools import partial
 from tqdm.auto import tqdm
 
+# NamedTuple definitions
 StructureTuple = namedtuple('StructureTuple', 'elements size occupancy xyz triu_indices unique_inverse unique_form_factors form_avg_sq structure_inverse')
 IqTuple = namedtuple('IqTuple', 'q i')
 SqTuple = namedtuple('SqTuple', 'q s')
@@ -264,7 +267,6 @@ class DebyeCalculator:
                 f"The qstep that was chosen is too large and might result in unwanted signal artifacts. With rmax={self.rmax} and rstep={self.rstep}, consider using qstep<={optimal_qstep:2.3f}.",
                 UserWarning
             )
-
     
     def update_parameters(
         self,
@@ -442,12 +444,80 @@ class DebyeCalculator:
         else:
             raise TypeError('Encountered unknown structure source')
 
+    def generate_partial_masks(
+        self,
+        structure: StructureTuple,
+        partial: str,
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """
+        Generates masks for selecting specific atom pairs in a structure based on a given partial pattern.
+
+        This function creates boolean masks that identify specific atom pairs within a structure, allowing for the calculation of partial scattering patterns. 
+        The masks are generated based on a specified pattern indicating two elements (e.g., 'X-Y'), where 'X' and 'Y' represent different elements in the structure.
+        The function supports both specified patterns and a default behavior when no pattern is provided.
+
+        Parameters:
+            structure (StructureTuple): A tuple representing the atomic structure, containing atomic positions, elements, etc.
+            partial (str): A string in the form 'X-Y', where 'X' and 'Y' are element symbols. If provided, masks are created to isolate interactions between these elements. If None, masks select all elements.
+
+        Returns:
+            Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+                - partial_mask_sparse (torch.Tensor): A boolean mask indicating the selected pairs of atoms in the upper triangular portion of the distance matrix.
+                - partial_mask_struc (torch.Tensor): A boolean mask for selecting atoms of the first element 'X' in the structure.
+                - partial_mask_other (torch.Tensor): A boolean mask for selecting atoms of the second element 'Y' in the structure.
+
+        Raises:
+            ValueError: If the partial pattern does not match the expected format 'X-Y', where 'X' and 'Y' are valid element symbols.
+        """
+            
+        # Generate the upper trianfular indices
+        N = structure.xyz.size(0)
+        triu_indices = torch.triu_indices(N, N, offset=1)
+
+        if partial is not None:
+
+            # Assert that string matches represetation
+            re_pattern = r'^([a-zA-Z]+)-([a-zA-Z]+)$'
+            match = re.match(re_pattern, partial)
+            if not match:
+                raise ValueError("'partial' does not match the pattern 'X-Y', of elements 'X' and 'Y'.")
+
+            # Extract elements and make sure they are atoms in the structure
+            el1, el2 = match.groups()
+
+            # Convert elements to a numpy array
+            elements = np.array(structure.elements)
+
+            if not el1 in elements:
+                raise ValueError(f"element {el1} from 'partial' is not present in structure.")
+            if not el2 in elements:
+                raise ValueError(f"element {el2} from 'partial' is not present in structure.")
+
+
+            # Construct masks for struc and other using comparison
+            partial_mask_struc = torch.from_numpy(np.argwhere(elements == el1)).T.squeeze(0)
+            partial_mask_other = torch.from_numpy(np.argwhere(elements == el2)).T.squeeze(0)
+
+            # Construct boolean masks for the sparse represenation
+            is_i_in_struc = torch.isin(triu_indices[0], partial_mask_struc)
+            is_j_in_other = torch.isin(triu_indices[1], partial_mask_other)
+            is_j_in_struc = torch.isin(triu_indices[1], partial_mask_struc)
+            is_i_in_other = torch.isin(triu_indices[0], partial_mask_other)
+            partial_mask_sparse = (is_i_in_struc & is_j_in_other) | (is_j_in_struc & is_i_in_other)
+        else:
+            partial_mask_struc = torch.ones((N,), dtype=torch.bool)
+            partial_mask_other = torch.ones((N,), dtype=torch.bool)
+            partial_mask_sparse = torch.ones((int((N*(N-1))/2),), dtype=torch.bool)
+
+        return partial_mask_sparse, partial_mask_struc, partial_mask_other
+
     def iq(
         self,
         structure_source: StructureSourceType,
         radii: Union[List[float], float, None] = None,
+        partial: str = None,
         keep_on_device: bool = False,
-        _self_scattering: bool = True,
+        include_self_scattering: bool = True,
     ) -> Union[IqTuple, List[IqTuple]]:
         """
         Calculate the scattering intensity I(Q) for the given atomic structure(s).
@@ -455,8 +525,9 @@ class DebyeCalculator:
         Parameters:
             structure_source (StructureSourceType): Atomic structure source in XYZ/CIF format, ASE Atoms object, or as a tuple of (atomic_identities, atomic_positions).
             radii (Union[List[float], float, None]): List/float of radii/radius of particle(s) to generate with parsed CIF.
+            partial (str): String on the form 'X-Y' where 'X' and 'Y' are elements in either structure. Used for calculating partial scattering patterns. Default is None.
             keep_on_device (bool): Flag to keep the results on the class device. Default is False, and will return numpy arrays on CPU.
-            _self_scattering (bool): Flag to compute self-scattering contribution. Default is True.
+            include_self_scattering (bool): Flag to compute self-scattering contribution. Default is True.
 
         Returns:
             Union[IqTuple, List[IqTuple]]: IqTuple containing Q-values and scattering intensity I(Q) or a list of such tuples.
@@ -472,7 +543,18 @@ class DebyeCalculator:
             if self.batch_size is None:
                 self.batch_size = self._max_batch_size
 
-            dists = pdist(structure.xyz).split(self.batch_size)
+            # Generate the upper trianfular indices
+            N = structure.xyz.size(0)
+            triu_indices = torch.triu_indices(N, N, offset=1)
+
+            # Generate all distances, and batch
+            dists = torch.norm(structure.xyz[:,None] - structure.xyz, dim=2, p=2)[triu_indices[0], triu_indices[1]].split(self.batch_size)
+
+            # Generate partial masks
+            partial_mask_sparse, partial_mask_struc, partial_mask_other = self.generate_partial_masks(structure, partial)
+
+            # Batch mask and other indices
+            partial_mask_sparse = partial_mask_sparse.to(device=self.device).split(self.batch_size)
             indices = structure.triu_indices.split(self.batch_size, dim=1)
             inverse_indices = structure.unique_inverse.split(self.batch_size, dim=1)
 
@@ -481,8 +563,13 @@ class DebyeCalculator:
 
             # Calculate scattering using Debye Equation
             iq = torch.zeros((len(self.q))).to(device=self.device, dtype=torch.float32)
-            for d, inv_idx, idx in zip(dists, inverse_indices, indices):
-                mask = d >= self.rthres
+            for d, inv_idx, idx, partial_mask in zip(dists, inverse_indices, indices, partial_mask_sparse):
+                
+                # Construct mask
+                threshold_mask = d >= self.rthres
+                mask = threshold_mask & partial_mask
+
+                # Calcualte scattering
                 occ_product = structure.occupancy[idx[0]] * structure.occupancy[idx[1]]
                 sinc = torch.sinc(d[mask] * self.q / torch.pi)
                 ffp = structure.unique_form_factors[inv_idx[0]] * structure.unique_form_factors[inv_idx[1]]
@@ -493,10 +580,13 @@ class DebyeCalculator:
                 iq *= torch.exp(-self.q.squeeze(-1).pow(2) * self.biso/(8*torch.pi**2))
             
             # Self-scattering contribution
-            if _self_scattering:
-                sinc = torch.ones((structure.size, len(self.q))).to(device=self.device)
-                iq += torch.sum((structure.occupancy.unsqueeze(-1) * structure.unique_form_factors[structure.structure_inverse])**2 * sinc, dim=0) / 2
-                iq *= 2
+            if include_self_scattering:
+                self_scattering_mask = torch.zeros((N,), dtype=bool)
+                self_scattering_mask[partial_mask_struc] = True
+                self_scattering_mask[partial_mask_other] = True
+
+                sinc = torch.ones((structure.size, len(self.q))).to(device=self.device)[self_scattering_mask]
+                iq += torch.sum((structure.occupancy[self_scattering_mask].unsqueeze(-1) * structure.unique_form_factors[structure.structure_inverse][self_scattering_mask])**2 * sinc, dim=0) / 2
 
             if self.profile:
                 self.profiler.time('I(Q)')
@@ -523,6 +613,7 @@ class DebyeCalculator:
 
         output = []
         for structure in structures:
+
             output_tuple = IqTuple(self.q.squeeze(-1), compute_iq(structure))
             if not keep_on_device:
                 output_tuple = output_tuple._replace(
@@ -537,6 +628,7 @@ class DebyeCalculator:
         self,
         structure_source: StructureSourceType,
         radii: Union[List[float], float, None] = None,
+        partial: str = None,
         keep_on_device: bool = False,
     ) -> Union[SqTuple, List[SqTuple]]:
         """
@@ -544,6 +636,8 @@ class DebyeCalculator:
 
         Parameters:
             structure_source (StructureSourceType): Atomic structure source in XYZ/CIF format, ASE Atoms object or as a tuple of (atomic_identities, atomic_positions)
+            radii (Union[List[float], float, None]): List/float of radii/radius of particle(s) to generate with parsed CIF.
+            partial (str): String on the form 'X-Y' where 'X' and 'Y' are elements in either structure. Used for calculating partial scattering patterns. Default is None.
             keep_on_device (bool): Flag to keep the results on the class device. Default is False, and will return numpy arrays on CPU
 
         Returns:
@@ -553,7 +647,19 @@ class DebyeCalculator:
             # Calculate distances and batch
             if self.batch_size is None:
                 self.batch_size = self._max_batch_size
-            dists = pdist(structure.xyz).split(self.batch_size)
+
+            # Generate the upper trianfular indices
+            N = structure.xyz.size(0)
+            triu_indices = torch.triu_indices(N, N, offset=1)
+
+            # Generate all distances, and batch
+            dists = torch.norm(structure.xyz[:,None] - structure.xyz, dim=2, p=2)[triu_indices[0], triu_indices[1]].split(self.batch_size)
+            
+            # Generate partial masks
+            partial_mask_sparse, partial_mask_struc, partial_mask_other = self.generate_partial_masks(structure, partial)
+
+            # Batch mask and other indices
+            partial_mask_sparse = partial_mask_sparse.to(device=self.device).split(self.batch_size)
             indices = structure.triu_indices.split(self.batch_size, dim=1)
             inverse_indices = structure.unique_inverse.split(self.batch_size, dim=1)
             
@@ -562,8 +668,13 @@ class DebyeCalculator:
 
             # Calculate scattering using Debye Equation
             iq = torch.zeros((len(self.q))).to(device=self.device, dtype=torch.float32)
-            for d, inv_idx, idx in zip(dists, inverse_indices, indices):
-                mask = d >= self.rthres
+            for d, inv_idx, idx, partial_mask in zip(dists, inverse_indices, indices, partial_mask_sparse):
+
+                # Construct mask
+                threshold_mask = d >= self.rthres
+                mask = threshold_mask & partial_mask
+
+                # Calculate scattering
                 occ_product = structure.occupancy[idx[0]] * structure.occupancy[idx[1]]
                 sinc = torch.sinc(d[mask] * self.q / torch.pi)
                 ffp = structure.unique_form_factors[inv_idx[0]] * structure.unique_form_factors[inv_idx[1]]
@@ -615,6 +726,7 @@ class DebyeCalculator:
         self,
         structure_source: StructureSourceType,
         radii: Union[List[float], float, None] = None,
+        partial: str = None,
         keep_on_device: bool = False,
     ) -> Union[FqTuple, List[FqTuple]]:
         """
@@ -623,6 +735,7 @@ class DebyeCalculator:
         Parameters:
             structure_source (StructureSourceType): Atomic structure source in XYZ/CIF format, ASE Atoms object, or as a tuple of (atomic_identities, atomic_positions).
             radii (Union[List[float], float, None]): List/float of radii/radius of particle(s) to generate with parsed CIF.
+            partial (str): String on the form 'X-Y' where 'X' and 'Y' are elements in either structure. Used for calculating partial scattering patterns. Default is None.
             keep_on_device (bool): Flag to keep the results on the class device. Default is False, and will return numpy arrays on CPU.
 
         Returns:
@@ -638,7 +751,19 @@ class DebyeCalculator:
             # Calculate distances and batch
             if self.batch_size is None:
                 self.batch_size = self._max_batch_size
-            dists = pdist(structure.xyz).split(self.batch_size)
+
+            # Generate the upper trianfular indices
+            N = structure.xyz.size(0)
+            triu_indices = torch.triu_indices(N, N, offset=1)
+
+            # Generate all distances, and batch
+            dists = torch.norm(structure.xyz[:,None] - structure.xyz, dim=2, p=2)[triu_indices[0], triu_indices[1]].split(self.batch_size)
+            
+            # Generate partial masks
+            partial_mask_sparse, partial_mask_struc, partial_mask_other = self.generate_partial_masks(structure, partial)
+
+            # Batch mask and other indices
+            partial_mask_sparse = partial_mask_sparse.to(device=self.device).split(self.batch_size)
             indices = structure.triu_indices.split(self.batch_size, dim=1)
             inverse_indices = structure.unique_inverse.split(self.batch_size, dim=1)
             
@@ -647,8 +772,13 @@ class DebyeCalculator:
 
             # Calculate scattering using Debye Equation
             iq = torch.zeros((len(self.q))).to(device=self.device, dtype=torch.float32)
-            for d, inv_idx, idx in zip(dists, inverse_indices, indices):
-                mask = d >= self.rthres
+            for d, inv_idx, idx, partial_mask in zip(dists, inverse_indices, indices, partial_mask_sparse):
+
+                # Construct mask
+                threshold_mask = d >= self.rthres
+                mask = threshold_mask & partial_mask
+
+                # Calculate scattering
                 occ_product = structure.occupancy[idx[0]] * structure.occupancy[idx[1]]
                 sinc = torch.sinc(d[mask] * self.q / torch.pi)
                 ffp = structure.unique_form_factors[inv_idx[0]] * structure.unique_form_factors[inv_idx[1]]
@@ -701,6 +831,7 @@ class DebyeCalculator:
         self,
         structure_source: StructureSourceType,
         radii: Union[List[float], float, None] = None,
+        partial: str = None,
         keep_on_device: bool = False,
     ) -> Union[GrTuple, List[GrTuple]]:
         """
@@ -709,6 +840,7 @@ class DebyeCalculator:
         Parameters:
             structure_source (StructureSourceType): Atomic structure source in XYZ/CIF format, ASE Atoms object, or as a tuple of (atomic_identities, atomic_positions).
             radii (Union[List[float], float, None]): List/float of radii/radius of particle(s) to generate with parsed CIF.
+            partial (str): String on the form 'X-Y' where 'X' and 'Y' are elements in either structure. Used for calculating partial scattering patterns. Default is None.
             keep_on_device (bool): Flag to keep the results on the class device. Default is False, and will return numpy arrays on CPU.
 
         Returns:
@@ -723,7 +855,19 @@ class DebyeCalculator:
             # Calculate distances and batch
             if self.batch_size is None:
                 self.batch_size = self._max_batch_size
-            dists = pdist(structure.xyz).split(self.batch_size)
+
+            # Generate the upper trianfular indices
+            N = structure.xyz.size(0)
+            triu_indices = torch.triu_indices(N, N, offset=1)
+
+            # Generate all distances, and batch
+            dists = torch.norm(structure.xyz[:,None] - structure.xyz, dim=2, p=2)[triu_indices[0], triu_indices[1]].split(self.batch_size)
+            
+            # Generate partial masks
+            partial_mask_sparse, partial_mask_struc, partial_mask_other = self.generate_partial_masks(structure, partial)
+
+            # Batch mask and other indices
+            partial_mask_sparse = partial_mask_sparse.to(device=self.device).split(self.batch_size)
             indices = structure.triu_indices.split(self.batch_size, dim=1)
             inverse_indices = structure.unique_inverse.split(self.batch_size, dim=1)
             
@@ -732,8 +876,13 @@ class DebyeCalculator:
 
             # Calculate scattering using Debye Equation
             iq = torch.zeros((len(self.q))).to(device=self.device, dtype=torch.float32)
-            for d, inv_idx, idx in zip(dists, inverse_indices, indices):
-                mask = d >= self.rthres
+            for d, inv_idx, idx, partial_mask in zip(dists, inverse_indices, indices, partial_mask_sparse):
+
+                # Construct mask
+                threshold_mask = d >= self.rthres
+                mask = threshold_mask & partial_mask
+
+                # Calculate scattering
                 occ_product = structure.occupancy[idx[0]] * structure.occupancy[idx[1]]
                 sinc = torch.sinc(d[mask] * self.q / torch.pi)
                 ffp = structure.unique_form_factors[inv_idx[0]] * structure.unique_form_factors[inv_idx[1]]
@@ -790,7 +939,9 @@ class DebyeCalculator:
         self,
         structure_source: StructureSourceType,
         radii: Union[List[float], float, None] = None,
+        partial: str = None,
         keep_on_device: bool = False,
+        include_self_scattering: bool = True,
     ) -> Union[AllTuple, List[AllTuple]]:
         """
         Calculate I(Q), S(Q), F(Q), and G(r) for the given atomic structure(s).
@@ -798,7 +949,9 @@ class DebyeCalculator:
         Parameters:
             structure_source (StructureSourceType): Atomic structure source in XYZ/CIF format, ASE Atoms object, or as a tuple of (atomic_identities, atomic_positions).
             radii (Union[List[float], float, None]): List/float of radii/radius of particle(s) to generate with parsed CIF.
+            partial (str): String on the form 'X-Y' where 'X' and 'Y' are elements in either structure. Used for calculating partial scattering patterns. Default is None.
             keep_on_device (bool): Flag to keep the results on the class device. Default is False, and will return numpy arrays on CPU.
+            include_self_scattering (bool): Flag to compute self-scattering contribution. Default is True.
 
         Returns:
             Union[AllTuple, List[AllTuple]]: AllTuple containing r-values, Q-values, I(Q), S(Q), F(Q), and G(r) or a list of such tuples.
@@ -812,7 +965,19 @@ class DebyeCalculator:
             # Calculate distances and batch
             if self.batch_size is None:
                 self.batch_size = self._max_batch_size
-            dists = pdist(structure.xyz).split(self.batch_size)
+
+            # Generate the upper trianfular indices
+            N = structure.xyz.size(0)
+            triu_indices = torch.triu_indices(N, N, offset=1)
+
+            # Generate all distances, and batch
+            dists = torch.norm(structure.xyz[:,None] - structure.xyz, dim=2, p=2)[triu_indices[0], triu_indices[1]].split(self.batch_size)
+            
+            # Generate partial masks
+            partial_mask_sparse, partial_mask_struc, partial_mask_other = self.generate_partial_masks(structure, partial)
+
+            # Batch mask and other indices
+            partial_mask_sparse = partial_mask_sparse.to(device=self.device).split(self.batch_size)
             indices = structure.triu_indices.split(self.batch_size, dim=1)
             inverse_indices = structure.unique_inverse.split(self.batch_size, dim=1)
             
@@ -821,8 +986,13 @@ class DebyeCalculator:
 
             # Calculate scattering using Debye Equation
             iq = torch.zeros((len(self.q))).to(device=self.device, dtype=torch.float32)
-            for d, inv_idx, idx in zip(dists, inverse_indices, indices):
-                mask = d >= self.rthres
+            for d, inv_idx, idx, partial_mask in zip(dists, inverse_indices, indices, partial_mask_sparse):
+
+                # Construct mask
+                threshold_mask = d >= self.rthres
+                mask = threshold_mask & partial_mask
+
+                # Calculate scattering
                 occ_product = structure.occupancy[idx[0]] * structure.occupancy[idx[1]]
                 sinc = torch.sinc(d[mask] * self.q / torch.pi)
                 ffp = structure.unique_form_factors[inv_idx[0]] * structure.unique_form_factors[inv_idx[1]]
@@ -841,9 +1011,13 @@ class DebyeCalculator:
             gr = (2 / torch.pi) * torch.sum(fq.unsqueeze(-1) * torch.sin(self.q * self.r.permute(1,0))*self.qstep * lorch_mod, dim=0) * damp
             
             # Self-scattering contribution
-            sinc = torch.ones((structure.size, len(self.q))).to(device=self.device)
-            iq += torch.sum((structure.occupancy.unsqueeze(-1) * structure.unique_form_factors[structure.structure_inverse])**2 * sinc, dim=0) / 2
-            iq *= 2
+            if include_self_scattering:
+                self_scattering_mask = torch.zeros((N,), dtype=bool)
+                self_scattering_mask[partial_mask_struc] = True
+                self_scattering_mask[partial_mask_other] = True
+
+                sinc = torch.ones((structure.size, len(self.q))).to(device=self.device)[self_scattering_mask]
+                iq += torch.sum((structure.occupancy[self_scattering_mask].unsqueeze(-1) * structure.unique_form_factors[structure.structure_inverse][self_scattering_mask])**2 * sinc, dim=0) / 2
             
             if self.profile:
                 self.profiler.time('All')
