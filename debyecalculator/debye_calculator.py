@@ -1,6 +1,7 @@
 import os
 import re
 import math
+import bisect
 import tempfile
 from io import BytesIO
 import zipfile
@@ -15,6 +16,8 @@ from glob import glob
 from datetime import datetime, timezone
 from typing import Union, Tuple, Any, List, Type
 from collections import namedtuple
+
+from scipy.interpolate import UnivariateSpline
 
 # Handle import of torch (prerequisite)
 try:
@@ -174,13 +177,87 @@ class DebyeCalculator:
         else:
             raise ValueError("Invalid radiation type")
 
+        # Load dispersive form-factor terms (chantler)
+        self.CHANTLER_FORM_FACTOR_COEF = {}
+        for name in pkg_resources.resource_listdir(__name__, 'utility/chantler_fine'):
+            path = pkg_resources.resource_filename(__name__, f"utility/chantler_fine/{name}")
+
+            with open(path, 'r') as file:
+                file_content = file.readlines()
+
+            # Extract the atom symbol
+            atom_symbol = None
+            for line in file_content:
+                match = re.search(r'#\s+(\w+):\s+Z\s+=\s+\d+', line)
+                if match:
+                    atom_symbol = match.groups(1)[0]
+                    break
+
+            # Find where the data starts
+            data_start_line = 0
+            for i, line in enumerate(file_content):
+                if re.match(r'^\s*\d', line):
+                    data_start_line = i
+                    break
+
+            # Extract the data
+            energies = []
+            f1_values = []
+            f2_values = []
+            for line in file_content[data_start_line:]:
+                parsed_line = re.split(r'\s+', line.strip())
+                if len(parsed_line) >= 3:
+                    energy = float(parsed_line[0])
+                    f1 = float(parsed_line[1])
+                    f2 = float(parsed_line[2])
+                    energies.append(energy)
+                    f1_values.append(f1)
+                    f2_values.append(f2)
+        
+            self.CHANTLER_FORM_FACTOR_COEF[atom_symbol] = {'energy': energies, 'f1': f1_values, 'f2': f2_values}
+    
+        def dispersive_form_factors(
+            element: str,
+            energy: float,
+        ) -> float:
+            
+            f1 = self.CHANTLER_FORM_FACTOR_COEF[element]['f1']
+            f2 = self.CHANTLER_FORM_FACTOR_COEF[element]['f2']
+            energies = self.CHANTLER_FORM_FACTOR_COEF[element]['energy']
+
+            # Ensure that the energy value is within the data range
+            if energy < min(energies) or energy > max(energies):
+                raise ValueError("Energy out of known range")
+
+            # Do a binary search to find the closest energies to the provided one
+            idx = bisect.bisect_left(energies, energy)
+            if idx == 0:
+                x1, x2 = energies[0], energies[1]
+                f1_1, f1_2 = f1_values[0], f1_values[1]
+                f2_1, f2_2 = f2_values[0], f2_values[1]
+            elif idx == len(energies):
+                x1, x2 = energies[-2], energies[-1]
+                f1_1, f1_2 = f1_values[-2], f1_values[-1]
+                f2_1, f2_2 = f2_values[-2], f2_values[-1]
+            else:
+                x1, x2 = energies[idx - 1], energies[idx]
+                f1_1, f1_2 = f1_values[idx - 1], f1_values[idx]
+                f2_1, f2_2 = f2_values[idx - 1], f2_values[idx]
+
+            # Perform manual linear interpolation
+            f1_value = f1_1 + (energy - x1) * (f1_2 - f1_1) / (x2 - x1)
+            f2_value = f2_1 + (energy - x1) * (f2_2 - f2_1) / (x2 - x1)
+
+            return f1_value, f2_value
+
+        # Dispersive form factor retrieval lambdas
+        self.f1_chantler = lambda el, en: dispersive_form_factors(el, en)[0] if en is not None else 0
+        self.f2_chantler = lambda el, en: dispersive_form_factors(el, en)[1] if en is not None else 0
+
         # Load form factor coefficients from the selected YAML file
         with open(pkg_resources.resource_filename(__name__, yaml_file_name), 'r') as yaml_file:
             self.FORM_FACTOR_COEF = yaml.safe_load(yaml_file)
 
-        # Form factor coefficients
-        #with open(pkg_resources.resource_filename(__name__, 'utility/elements_info.yaml'), 'r') as yaml_file:
-        #    self.FORM_FACTOR_COEF = yaml.safe_load(yaml_file)
         self.atomic_numbers_to_elements = {}
         for i, (key, value) in enumerate(self.FORM_FACTOR_COEF.items()):
             if i > 97:
@@ -205,7 +282,6 @@ class DebyeCalculator:
         
         # Lightweight mode
         self._lightweight_mode = _lightweight_mode
-
 
     def __repr__(
         self,
@@ -303,6 +379,7 @@ class DebyeCalculator:
         self,
         structure_source: StructureSourceType,
         radii: Union[List[float], float, None] = None,
+        energy: float = None,
         disable_pbar: bool = False,
     ) -> Union[None, StructureTuple, List[StructureTuple]]:
 
@@ -312,6 +389,7 @@ class DebyeCalculator:
         Parameters:
             structure_source (StructureSourceType): Atomic structure source in XYZ/CIF format, ASE Atoms object, or as a tuple of (atomic_identities, atomic_positions).
             radii (Union[List[float], float, None]): List/float of radii/radius of particle(s) to generate with parsed CIF.
+            energy (float): Energy in keV for calculation of anomalous dispersion part of form factors using Chantler coefficients. Default is None. If None, no dispersive terms will be used. 
             disable_pbar (bool): Flag to disable the progress bar during nanoparticle generation. Default is False.
 
         Returns:
@@ -337,18 +415,22 @@ class DebyeCalculator:
 
             return check_len and check_type and check_shape
 
-        def parse_elements(elements, size):
-            # Get unique elements and construc form factor stacks
+        def parse_elements(elements, size, energy=None):
+            # Get unique elements and construct form factor stacks
             unique_elements, inverse, counts = np.unique(elements, return_counts=True, return_inverse=True)
 
             triu_indices = torch.triu_indices(size, size, 1)
             unique_inverse = torch.from_numpy(inverse[triu_indices]).to(device=self.device)
-            unique_form_factors = torch.stack([self.form_factor_func(self.FORM_FACTOR_COEF[el]) for el in unique_elements])
+            unique_form_factors = torch.stack(
+                [self.form_factor_func(self.FORM_FACTOR_COEF[el]) + self.f1_chantler(el, energy) - 1j*self.f2_chantler(el, energy) for el in unique_elements]
+            )
 
             # Calculate average squared form factor and self scattering inverse indices
             counts = torch.from_numpy(counts).to(device=self.device)
             compositional_fractions = counts / torch.sum(counts)
-            form_avg_sq = torch.sum(compositional_fractions.reshape(-1,1) * unique_form_factors, dim=0)**2
+            #form_avg_sq = torch.sum(compositional_fractions.reshape(-1,1) * unique_form_factors, dim=0)**2
+            form_avg = torch.sum(compositional_fractions.reshape(-1,1) * unique_form_factors, dim=0)
+            form_avg_sq = (form_avg * form_avg.conj()).real
             structure_inverse = torch.from_numpy(np.array([inverse[i] for i in range(size)])).to(device=self.device)
 
             return triu_indices, unique_inverse, unique_form_factors, form_avg_sq, structure_inverse
@@ -361,7 +443,7 @@ class DebyeCalculator:
                     xyz = torch.from_numpy(xyz)
                 xyz = xyz.to(device=self.device, dtype=torch.float32)
                 occupancy = torch.ones(xyz.shape[0]).to(device=self.device, dtype=torch.float32)
-                triu_indices, unique_inverse, unique_form_factors, form_avg_sq, structure_inverse = parse_elements(elements, size)
+                triu_indices, unique_inverse, unique_form_factors, form_avg_sq, structure_inverse = parse_elements(elements, size, energy)
 
                 return StructureTuple(elements, size, occupancy, xyz, triu_indices, unique_inverse, unique_form_factors, form_avg_sq, structure_inverse)
 
@@ -374,7 +456,7 @@ class DebyeCalculator:
                     xyz = torch.from_numpy(xyz)
                 xyz = xyz.to(device=self.device, dtype=torch.float32)
                 occupancy = torch.ones(xyz.shape[0]).to(device=self.device, dtype=torch.float32)
-                triu_indices, unique_inverse, unique_form_factors, form_avg_sq, structure_inverse = parse_elements(elements, size)
+                triu_indices, unique_inverse, unique_form_factors, form_avg_sq, structure_inverse = parse_elements(elements, size, energy)
 
                 return StructureTuple(elements, size, occupancy, xyz, triu_indices, unique_inverse, unique_form_factors, form_avg_sq, structure_inverse)
             else:
@@ -400,7 +482,7 @@ class DebyeCalculator:
                 except:
                     raise IOError(f'Encountered invalid file format when trying to load structure from {structure_source}')
                     
-                triu_indices, unique_inverse, unique_form_factors, form_avg_sq, structure_inverse = parse_elements(elements, size)
+                triu_indices, unique_inverse, unique_form_factors, form_avg_sq, structure_inverse = parse_elements(elements, size, energy)
 
                 return StructureTuple(elements, size, occupancy, xyz, triu_indices, unique_inverse, unique_form_factors, form_avg_sq, structure_inverse)
 
@@ -409,7 +491,7 @@ class DebyeCalculator:
                     structures = generate_nanoparticles(structure_source, radii, disable_pbar=disable_pbar, _lightweight_mode=self._lightweight_mode, device=self.device)
                     structure_tuple_list = []
                     for structure in structures:
-                        triu_indices, unique_inverse, unique_form_factors, form_avg_sq, structure_inverse = parse_elements(structure.elements, structure.size)
+                        triu_indices, unique_inverse, unique_form_factors, form_avg_sq, structure_inverse = parse_elements(structure.elements, structure.size, energy)
                         structure_tuple_list.append(
                             StructureTuple(
                                 elements = structure.elements,
@@ -438,7 +520,7 @@ class DebyeCalculator:
             except:
                 raise ValueError(f'Encountered invalid Atoms object')
                 
-            triu_indices, unique_inverse, unique_form_factors, form_avg_sq, structure_inverse = parse_elements(elements, size)
+            triu_indices, unique_inverse, unique_form_factors, form_avg_sq, structure_inverse = parse_elements(elements, size, energy)
 
             return StructureTuple(elements, size, occupancy, xyz, triu_indices, unique_inverse, unique_form_factors, form_avg_sq, structure_inverse)
         else:
@@ -515,6 +597,7 @@ class DebyeCalculator:
         self,
         structure_source: StructureSourceType,
         radii: Union[List[float], float, None] = None,
+        energy: float = None,
         partial: str = None,
         keep_on_device: bool = False,
         include_self_scattering: bool = True,
@@ -525,6 +608,7 @@ class DebyeCalculator:
         Parameters:
             structure_source (StructureSourceType): Atomic structure source in XYZ/CIF format, ASE Atoms object, or as a tuple of (atomic_identities, atomic_positions).
             radii (Union[List[float], float, None]): List/float of radii/radius of particle(s) to generate with parsed CIF.
+            energy (float): Energy in keV for calculation of anomalous dispersion part of form factors using Chantler coefficients. Default is None. If None, no dispersive terms will be used. 
             partial (str): String on the form 'X-Y' where 'X' and 'Y' are elements in either structure. Used for calculating partial scattering patterns. Default is None.
             keep_on_device (bool): Flag to keep the results on the class device. Default is False, and will return numpy arrays on CPU.
             include_self_scattering (bool): Flag to compute self-scattering contribution. Default is True.
@@ -572,7 +656,7 @@ class DebyeCalculator:
                 # Calcualte scattering
                 occ_product = structure.occupancy[idx[0]] * structure.occupancy[idx[1]]
                 sinc = torch.sinc(d[mask] * self.q / torch.pi)
-                ffp = structure.unique_form_factors[inv_idx[0]] * structure.unique_form_factors[inv_idx[1]]
+                ffp = (structure.unique_form_factors[inv_idx[0]] * structure.unique_form_factors[inv_idx[1]].conj()).real
                 iq += torch.sum(occ_product.unsqueeze(-1)[mask] * ffp[mask] * sinc.permute(1,0), dim=0)
 
             # Apply Debye-Weller Isotropic Atomic Displacement
@@ -586,7 +670,9 @@ class DebyeCalculator:
                 self_scattering_mask[partial_mask_other] = True
 
                 sinc = torch.ones((structure.size, len(self.q))).to(device=self.device)[self_scattering_mask]
-                iq += torch.sum((structure.occupancy[self_scattering_mask].unsqueeze(-1) * structure.unique_form_factors[structure.structure_inverse][self_scattering_mask])**2 * sinc, dim=0) / 2
+                ffp = structure.unique_form_factors[structure.structure_inverse][self_scattering_mask]
+                ffp = (ffp * ffp.conj()).real
+                iq += torch.sum(structure.occupancy[self_scattering_mask].unsqueeze(-1) * ffp * sinc, dim=0) / 2
 
             if self.profile:
                 self.profiler.time('I(Q)')
@@ -601,7 +687,7 @@ class DebyeCalculator:
 
         structures = []
         for i, item in enumerate(structure_source):
-            structure_output = self._initialise_structure(item, radii, disable_pbar = True)
+            structure_output = self._initialise_structure(item, radii, energy, disable_pbar = True)
 
             if isinstance(structure_output, list):
                 structures.extend(structure_output)
@@ -628,6 +714,7 @@ class DebyeCalculator:
         self,
         structure_source: StructureSourceType,
         radii: Union[List[float], float, None] = None,
+        energy: float = None,
         partial: str = None,
         keep_on_device: bool = False,
     ) -> Union[SqTuple, List[SqTuple]]:
@@ -637,6 +724,7 @@ class DebyeCalculator:
         Parameters:
             structure_source (StructureSourceType): Atomic structure source in XYZ/CIF format, ASE Atoms object or as a tuple of (atomic_identities, atomic_positions)
             radii (Union[List[float], float, None]): List/float of radii/radius of particle(s) to generate with parsed CIF.
+            energy (float): Energy in keV for calculation of anomalous dispersion part of form factors using Chantler coefficients. Default is None. If None, no dispersive terms will be used. 
             partial (str): String on the form 'X-Y' where 'X' and 'Y' are elements in either structure. Used for calculating partial scattering patterns. Default is None.
             keep_on_device (bool): Flag to keep the results on the class device. Default is False, and will return numpy arrays on CPU
 
@@ -677,7 +765,7 @@ class DebyeCalculator:
                 # Calculate scattering
                 occ_product = structure.occupancy[idx[0]] * structure.occupancy[idx[1]]
                 sinc = torch.sinc(d[mask] * self.q / torch.pi)
-                ffp = structure.unique_form_factors[inv_idx[0]] * structure.unique_form_factors[inv_idx[1]]
+                ffp = (structure.unique_form_factors[inv_idx[0]] * structure.unique_form_factors[inv_idx[1]].conj()).real
                 iq += torch.sum(occ_product.unsqueeze(-1)[mask] * ffp[mask] * sinc.permute(1,0), dim=0)
 
             # Apply Debye-Weller Isotropic Atomic Displacement
@@ -700,7 +788,7 @@ class DebyeCalculator:
 
         structures = []
         for i, item in enumerate(structure_source):
-            structure_output = self._initialise_structure(item, radii, disable_pbar = True)
+            structure_output = self._initialise_structure(item, radii, energy, disable_pbar = True)
 
             if isinstance(structure_output, list):
                 structures.extend(structure_output)
@@ -726,6 +814,7 @@ class DebyeCalculator:
         self,
         structure_source: StructureSourceType,
         radii: Union[List[float], float, None] = None,
+        energy: float = None,
         partial: str = None,
         keep_on_device: bool = False,
     ) -> Union[FqTuple, List[FqTuple]]:
@@ -735,6 +824,7 @@ class DebyeCalculator:
         Parameters:
             structure_source (StructureSourceType): Atomic structure source in XYZ/CIF format, ASE Atoms object, or as a tuple of (atomic_identities, atomic_positions).
             radii (Union[List[float], float, None]): List/float of radii/radius of particle(s) to generate with parsed CIF.
+            energy (float): Energy in keV for calculation of anomalous dispersion part of form factors using Chantler coefficients. Default is None. If None, no dispersive terms will be used. 
             partial (str): String on the form 'X-Y' where 'X' and 'Y' are elements in either structure. Used for calculating partial scattering patterns. Default is None.
             keep_on_device (bool): Flag to keep the results on the class device. Default is False, and will return numpy arrays on CPU.
 
@@ -781,7 +871,7 @@ class DebyeCalculator:
                 # Calculate scattering
                 occ_product = structure.occupancy[idx[0]] * structure.occupancy[idx[1]]
                 sinc = torch.sinc(d[mask] * self.q / torch.pi)
-                ffp = structure.unique_form_factors[inv_idx[0]] * structure.unique_form_factors[inv_idx[1]]
+                ffp = (structure.unique_form_factors[inv_idx[0]] * structure.unique_form_factors[inv_idx[1]].conj()).real
                 iq += torch.sum(occ_product.unsqueeze(-1)[mask] * ffp[mask] * sinc.permute(1,0), dim=0)
 
             # Apply Debye-Weller Isotropic Atomic Displacement
@@ -805,7 +895,7 @@ class DebyeCalculator:
 
         structures = []
         for i, item in enumerate(structure_source):
-            structure_output = self._initialise_structure(item, radii, disable_pbar = True)
+            structure_output = self._initialise_structure(item, radii, energy, disable_pbar = True)
 
             if isinstance(structure_output, list):
                 structures.extend(structure_output)
@@ -831,6 +921,7 @@ class DebyeCalculator:
         self,
         structure_source: StructureSourceType,
         radii: Union[List[float], float, None] = None,
+        energy: float = None,
         partial: str = None,
         keep_on_device: bool = False,
     ) -> Union[GrTuple, List[GrTuple]]:
@@ -840,6 +931,7 @@ class DebyeCalculator:
         Parameters:
             structure_source (StructureSourceType): Atomic structure source in XYZ/CIF format, ASE Atoms object, or as a tuple of (atomic_identities, atomic_positions).
             radii (Union[List[float], float, None]): List/float of radii/radius of particle(s) to generate with parsed CIF.
+            energy (float): Energy in keV for calculation of anomalous dispersion part of form factors using Chantler coefficients. Default is None. If None, no dispersive terms will be used. 
             partial (str): String on the form 'X-Y' where 'X' and 'Y' are elements in either structure. Used for calculating partial scattering patterns. Default is None.
             keep_on_device (bool): Flag to keep the results on the class device. Default is False, and will return numpy arrays on CPU.
 
@@ -885,7 +977,7 @@ class DebyeCalculator:
                 # Calculate scattering
                 occ_product = structure.occupancy[idx[0]] * structure.occupancy[idx[1]]
                 sinc = torch.sinc(d[mask] * self.q / torch.pi)
-                ffp = structure.unique_form_factors[inv_idx[0]] * structure.unique_form_factors[inv_idx[1]]
+                ffp = (structure.unique_form_factors[inv_idx[0]] * structure.unique_form_factors[inv_idx[1]].conj()).real
                 iq += torch.sum(occ_product.unsqueeze(-1)[mask] * ffp[mask] * sinc.permute(1,0), dim=0)
 
             # Apply Debye-Weller Isotropic Atomic Displacement
@@ -913,7 +1005,7 @@ class DebyeCalculator:
 
         structures = []
         for i, item in enumerate(structure_source):
-            structure_output = self._initialise_structure(item, radii, disable_pbar = True)
+            structure_output = self._initialise_structure(item, radii, energy, disable_pbar = True)
 
             if isinstance(structure_output, list):
                 structures.extend(structure_output)
@@ -939,6 +1031,7 @@ class DebyeCalculator:
         self,
         structure_source: StructureSourceType,
         radii: Union[List[float], float, None] = None,
+        energy: float = None,
         partial: str = None,
         keep_on_device: bool = False,
         include_self_scattering: bool = True,
@@ -949,6 +1042,7 @@ class DebyeCalculator:
         Parameters:
             structure_source (StructureSourceType): Atomic structure source in XYZ/CIF format, ASE Atoms object, or as a tuple of (atomic_identities, atomic_positions).
             radii (Union[List[float], float, None]): List/float of radii/radius of particle(s) to generate with parsed CIF.
+            energy (float): Energy in keV for calculation of anomalous dispersion part of form factors using Chantler coefficients. Default is None. If None, no dispersive terms will be used. 
             partial (str): String on the form 'X-Y' where 'X' and 'Y' are elements in either structure. Used for calculating partial scattering patterns. Default is None.
             keep_on_device (bool): Flag to keep the results on the class device. Default is False, and will return numpy arrays on CPU.
             include_self_scattering (bool): Flag to compute self-scattering contribution. Default is True.
@@ -995,7 +1089,7 @@ class DebyeCalculator:
                 # Calculate scattering
                 occ_product = structure.occupancy[idx[0]] * structure.occupancy[idx[1]]
                 sinc = torch.sinc(d[mask] * self.q / torch.pi)
-                ffp = structure.unique_form_factors[inv_idx[0]] * structure.unique_form_factors[inv_idx[1]]
+                ffp = (structure.unique_form_factors[inv_idx[0]] * structure.unique_form_factors[inv_idx[1]].conj()).real
                 iq += torch.sum(occ_product.unsqueeze(-1)[mask] * ffp[mask] * sinc.permute(1,0), dim=0)
 
             # Apply Debye-Weller Isotropic Atomic Displacement
@@ -1015,9 +1109,11 @@ class DebyeCalculator:
                 self_scattering_mask = torch.zeros((N,), dtype=bool)
                 self_scattering_mask[partial_mask_struc] = True
                 self_scattering_mask[partial_mask_other] = True
-
+                
                 sinc = torch.ones((structure.size, len(self.q))).to(device=self.device)[self_scattering_mask]
-                iq += torch.sum((structure.occupancy[self_scattering_mask].unsqueeze(-1) * structure.unique_form_factors[structure.structure_inverse][self_scattering_mask])**2 * sinc, dim=0) / 2
+                ffp = structure.unique_form_factors[structure.structure_inverse][self_scattering_mask]
+                ffp = (ffp * ffp.conj()).real
+                iq += torch.sum(structure.occupancy[self_scattering_mask].unsqueeze(-1) * ffp * sinc, dim=0) / 2
             
             if self.profile:
                 self.profiler.time('All')
@@ -1032,7 +1128,7 @@ class DebyeCalculator:
 
         structures = []
         for i, item in enumerate(structure_source):
-            structure_output = self._initialise_structure(item, radii, disable_pbar = True)
+            structure_output = self._initialise_structure(item, radii, energy, disable_pbar = True)
 
             if isinstance(structure_output, list):
                 structures.extend(structure_output)
