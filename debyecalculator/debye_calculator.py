@@ -90,7 +90,8 @@ class DebyeCalculator:
         device: str = 'cuda',
         batch_size: Union[int, None] = 10000,
         lorch_mod: bool = False,
-        radiation_type: str = 'xray',
+        radiation_type: str = None,
+        rad_type: str = None,
         profile: bool = False,
         _max_batch_size: int = 4000,
         _lightweight_mode: bool = False,
@@ -111,7 +112,8 @@ class DebyeCalculator:
             device (str): Device to use for computations ('cuda' for CUDA-enabled GPU's or 'cpu' for CPU)
             batch_size (int or None): Batch size for computation. If None, the batch size will be automatically set. Default is None.
             lorch_mod (bool): Flag to enable Lorch modification. Default is False.
-            radiation_type (str): Type of radiation for form factor calculations ('xray' or 'neutron'). Default is 'xray'.
+            radiation_type (str): Type of radiation for form factor calculations ('xray' or 'neutron'). Default is 'xray'
+            rad_type (str): Alias for 'radiation_type'. Default is 'xray'.
             profile (bool): Activate profiler. Default is False.
         """
 
@@ -146,7 +148,13 @@ class DebyeCalculator:
         self.biso = biso
         self.batch_size = batch_size
         self.lorch_mod = lorch_mod
-        self.radiation_type = radiation_type
+
+        if radiation_type is not None:
+            self.radiation_type = radiation_type
+        elif rad_type is not None:
+            self.radiation_type = rad_type
+        else:
+            self.radiation_type = 'xray'
 
         # Set qstep seperately (Nyquist)
         if qstep is None:
@@ -166,21 +174,11 @@ class DebyeCalculator:
         self.q = torch.arange(self.qmin, self.qmax, self.qstep).unsqueeze(-1).to(device=self.device)
         self.r = torch.arange(self.rmin, self.rmax, self.rstep).unsqueeze(-1).to(device=self.device)
 
-        # Determine the YAML file based on radiation type
-        if radiation_type.lower() in ['xray', 'x']:
-            yaml_file_name = 'utility/elements_info_xrays.yaml'
-        elif radiation_type.lower() in ['neutron', 'n']:
-            yaml_file_name = 'utility/elements_info_neutrons.yaml'
-        else:
-            raise ValueError("Invalid radiation type")
-
-        # Load form factor coefficients from the selected YAML file
-        with open(pkg_resources.resource_filename(__name__, yaml_file_name), 'r') as yaml_file:
+        # Load form factor coefficients
+        with open(pkg_resources.resource_filename(__name__, 'utility/elements_info_neutrons.yaml'), 'r') as yaml_file:
             self.FORM_FACTOR_COEF = yaml.safe_load(yaml_file)
 
         # Form factor coefficients
-        #with open(pkg_resources.resource_filename(__name__, 'utility/elements_info.yaml'), 'r') as yaml_file:
-        #    self.FORM_FACTOR_COEF = yaml.safe_load(yaml_file)
         self.atomic_numbers_to_elements = {}
         for i, (key, value) in enumerate(self.FORM_FACTOR_COEF.items()):
             if i > 97:
@@ -192,9 +190,9 @@ class DebyeCalculator:
             if None in v:
                 v = [value if value is not None else np.nan for value in v]
             self.FORM_FACTOR_COEF[k] = torch.tensor(v).to(device=self.device, dtype=torch.float32)
-        if radiation_type.lower() in ['xray', 'x']:
+        if self.radiation_type.lower() in ['xray', 'x']:
             self.form_factor_func = lambda p: torch.sum(p[:5] * torch.exp(-1*p[6:11] * (self.q / (4*torch.pi)).pow(2)), dim=1) + p[5]
-        elif radiation_type.lower() in ['neutron', 'n']:
+        elif self.radiation_type.lower() in ['neutron', 'n']:
             self.form_factor_func = lambda p: p[11].unsqueeze(-1)
         else:
             # Should not reach this point, here for safety
@@ -206,15 +204,28 @@ class DebyeCalculator:
         # Lightweight mode
         self._lightweight_mode = _lightweight_mode
 
-
-    def __repr__(
-        self,
-    ):
-        parameters = {'qmin': self.qmin, 'qmax': self.qmax, 'qdamp': self.qdamp, 'qstep': self.qstep,
-                      'rmin': self.rmin, 'rmax': self.rmax, 'rstep': self.rstep, 'rthres': self.rthres,
-                      'biso': self.biso}
-
-        return f"DebyeCalculator{parameters}"
+    def __repr__(self):
+        return (
+            f"{self.__class__.__name__} instance:\n"
+            f"{'Q-min:':<12} {self.qmin:5.2f}\n"
+            f"{'Q-max:':<12} {self.qmax:5.2f}\n"
+            f"{'Q-step:':<12} {self.qstep:5.2f}\n"
+            f"{'Q-damp:':<12} {self.qdamp:5.2f}\n"
+            f"\n"
+            f"{'r-min:':<12} {self.rmin:5.2f}\n"
+            f"{'r-max:':<12} {self.rmax:5.2f}\n"
+            f"{'r-step:':<12} {self.rstep:5.2f}\n"
+            f"{'r-thres:':<12} {self.rthres:5.2f}\n"
+            f"\n"
+            f"{'B-iso:':<12} {self.biso:5.2f}\n"
+            f"\n"
+            f"{'rad_type:':<12} {self.radiation_type}\n"
+            f"{'lorch_mod:':<12} {self.lorch_mod}\n"
+            f"\n"
+            f"{'batch_size:':<12} {self.batch_size}\n"
+            f"{'device:':<12} {self.device}\n"
+            f"{'profile:':<12} {self.profile}\n"
+        )
 
     def parameter_constraint_assertion(
         self,
@@ -285,6 +296,8 @@ class DebyeCalculator:
         for k,v in kwargs.items():
             try:
                 setattr(self, k, v)
+                if k == 'rad_type':
+                    setattr(self, 'radiation_type', v)
             except:
                 print("Failed to update parameters because of unexpected parameter names")
                 return
@@ -298,6 +311,16 @@ class DebyeCalculator:
             self.r = torch.arange(self.rmin, self.rmax, self.rstep).unsqueeze(-1).to(device=self.device)
             for key,val in self.FORM_FACTOR_COEF.items():
                 self.FORM_FACTOR_COEF[key] = val.to(device=self.device)
+
+        if np.any([k in ['rad_type', 'radiation_type'] for k in kwargs.keys()]):
+            if self.radiation_type.lower() in ['xray', 'x']:
+                self.form_factor_func = lambda p: torch.sum(p[:5] * torch.exp(-1*p[6:11] * (self.q / (4*torch.pi)).pow(2)), dim=1) + p[5]
+            elif self.radiation_type.lower() in ['neutron', 'n']:
+                self.form_factor_func = lambda p: p[11].unsqueeze(-1)
+            else:
+                # Should not reach this point, here for safety
+                raise ValueError("Invalid radiation type")
+
 
     def _initialise_structure(
         self,
