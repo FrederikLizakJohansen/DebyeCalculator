@@ -104,9 +104,9 @@ In the lastest version of DebyeCalculator, we are unfortunately experiences some
 
 This section provides quick examples on how to use the `DebyeCalculator` class for generating both total and partial scattering intensities from particle structures defined in `.xyz` files, `.cif` files, or directly from structure tuples.
 
-### Generating Total Scattering
+### Generating Scattering
 
-To calculate the total scattering intensity $I(Q)$ for a particle, you can use different structure sources:
+To calculate the scattering intensity $I(Q)$ for a particle, you can use different structure sources:
 
 ```python
 from debyecalculator import DebyeCalculator
