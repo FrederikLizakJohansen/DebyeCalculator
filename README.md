@@ -6,6 +6,7 @@
 [![DOI](https://joss.theoj.org/papers/10.21105/joss.06024/status.svg)](https://doi.org/10.21105/joss.06024)
 
 <img src="https://raw.githubusercontent.com/FrederikLizakJohansen/DebyeCalculator/main/logo_DebyeCalculator.png" alt="DebyeCalculator" width="350"/>
+
 Welcome to `DebyeCalculator`! This is a simple tool for calculating the scattering intensity $I(Q)$ through the Debye scattering equation, the Total Scattering Structure Function $S(Q)$, the Reduced Total Scattering Function $F(Q)$, and the Reduced Atomic Pair Distribution Function $G(r)$ from an atomic structure. 
 The Debye scattering equation can be used to compute the scattering pattern of any atomic structure and is commonly used to study both crystalline and non-crystalline materials with a range of scattering techniques like powder diffraction, total scattering with pair distribution function and small-angle scattering. Although the Debye scattering equation is extremely versatile, the computation of the double sum, which scales O(N<sup>2</sup>), has limited the practical use of the equation.
 Here, we provide an optimised code for the calculation of the Debye scattering equation on Graphics processing units (GPUs) which accelerate the calculations with orders of magnitudes.
@@ -16,9 +17,8 @@ Here, we provide an optimised code for the calculation of the Debye scattering e
     3. [Install locally](#install-locally)
     5. [GPU support](#gpu-support)
 3. [Usage](#usage)
-    1. [Interactive mode](#interactive-mode-at-google-colab)
+    1. [Interactive mode](#interactive-mode)
     2. [Example usage](#example-usage)
-    3. [Partial Gr](#partial-gr)
 4. [Additional implementation details](#additional-implementation-details)
 5. [Authors](#authors)
 6. [Cite](#cite)
