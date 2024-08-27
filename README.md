@@ -19,6 +19,7 @@ Here, we provide an optimised code for the calculation of the Debye scattering e
 3. [Usage](#usage)
     1. [Interactive mode](#interactive-mode)
     2. [Example usage](#example-usage)
+3. [Demo](#demo)
 4. [Additional implementation details](#additional-implementation-details)
 5. [Authors](#authors)
 6. [Cite](#cite)
@@ -149,8 +150,8 @@ q, iq_XY = calc.iq("path/to/nanoparticle.xyz", partial="X-Y")
 ```
 **Note:** When combining signals from partial scattering, be cautious to avoid double-counting interactions between atoms.
 
-### Demo
-For a more detailed demonstration, including additional examples, please refer to the `demo.ipynb` notebook available in the repository.
+# Demo
+For a more detailed demonstration on how `DebyeCalulator` works, including additional examples, please refer to the `Demo.ipynb` notebook available in the repository, or visit [Colab-Demo](https://tinyurl.com/debyedemo)
 
 # Additional implementation details
 See the [docs](/docs) folder. 
