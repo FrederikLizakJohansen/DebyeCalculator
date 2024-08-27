@@ -9,7 +9,7 @@ import base64
 import hashlib
 import time
 import yaml
-import pkg_resources
+import importlib.resources
 import warnings
 from glob import glob
 from datetime import datetime, timezone
@@ -174,8 +174,7 @@ class DebyeCalculator:
         self.q = torch.arange(self.qmin, self.qmax, self.qstep).unsqueeze(-1).to(device=self.device)
         self.r = torch.arange(self.rmin, self.rmax, self.rstep).unsqueeze(-1).to(device=self.device)
 
-        # Load form factor coefficients
-        with open(pkg_resources.resource_filename(__name__, 'utility/elements_info_neutrons.yaml'), 'r') as yaml_file:
+        with importlib.resources.open_text('debyecalculator.utility', 'elements_info.yaml') as yaml_file:
             self.FORM_FACTOR_COEF = yaml.safe_load(yaml_file)
 
         # Form factor coefficients
@@ -1145,9 +1144,9 @@ class DebyeCalculator:
         radiation_type = self.radiation_type
         profile = False
 
-        with open(pkg_resources.resource_filename(__name__, 'display_assets/choose_hardware.png'), 'rb') as f:
+        with importlib.resources.open_binary('debyecalculator.display_assets', 'choose_hardware.png') as f:
             choose_hardware_img = f.read()
-        with open(pkg_resources.resource_filename(__name__, 'display_assets/batch_size.png'), 'rb') as f:
+        with importlib.resources.open_binary('debyecalculator.display_assets', 'batch_size.png') as f:
             batch_size_img = f.read()
         
         """ Utility widgets """
@@ -1175,7 +1174,7 @@ class DebyeCalculator:
             file_list = '<strong>Uploaded Files:</strong><br>'
 
             # CIF Example
-            with open(pkg_resources.resource_filename(__name__, '../data/AntiFluorite_Co2O.cif'), 'rb') as f:
+            with importlib.resources.open_binary('data', 'AntiFluorite_Co2O.cif') as f:
                 example_dict = {}
                 example_dict['content'] = f.read()
                 example_dict['name'] = 'AntiFluorite_Co2O.cif'
@@ -1186,7 +1185,7 @@ class DebyeCalculator:
                 create_file_widgets(example_dict, file_widgets)
 
             # XYZ Example
-            with open(pkg_resources.resource_filename(__name__, '../data/AntiFluorite_Co2O_r10.xyz'), 'rb') as f:
+            with importlib.resources.open_binary('data', 'AntiFluorite_Co2O_r10.xyz') as f:
                 example_dict = {}
                 example_dict['content'] = f.read()
                 example_dict['name'] = 'AntiFluorite_Co2O_r10.xyz'
@@ -1249,31 +1248,31 @@ class DebyeCalculator:
         """ Scattering Options Tab """
 
         # Load display_assets
-        with open(pkg_resources.resource_filename(__name__, 'display_assets/qslider.png'), 'rb') as f:
+        with importlib.resources.open_binary('debyecalculator.display_assets', 'qslider.png') as f:
             qslider_img = f.read()
-        with open(pkg_resources.resource_filename(__name__, 'display_assets/rslider.png'), 'rb') as f:
+        with importlib.resources.open_binary('debyecalculator.display_assets', 'rslider.png') as f:
             rslider_img = f.read()
-        with open(pkg_resources.resource_filename(__name__, 'display_assets/qdamp.png'), 'rb') as f:
+        with importlib.resources.open_binary('debyecalculator.display_assets', 'qdamp.png') as f:
             qdamp_img = f.read()
-        with open(pkg_resources.resource_filename(__name__, 'display_assets/global_biso.png'), 'rb') as f:
+        with importlib.resources.open_binary('debyecalculator.display_assets', 'global_biso.png') as f:
             global_biso_img = f.read()
-        with open(pkg_resources.resource_filename(__name__, 'display_assets/a.png'), 'rb') as f:
+        with importlib.resources.open_binary('debyecalculator.display_assets', 'a.png') as f:
             a_img = f.read()
-        with open(pkg_resources.resource_filename(__name__, 'display_assets/a_inv.png'), 'rb') as f:
+        with importlib.resources.open_binary('debyecalculator.display_assets', 'a_inv.png') as f:
             a_inv_img = f.read()
-        with open(pkg_resources.resource_filename(__name__, 'display_assets/a_sq.png'), 'rb') as f:
+        with importlib.resources.open_binary('debyecalculator.display_assets', 'a_sq.png') as f:
             a_sq_img = f.read()
-        with open(pkg_resources.resource_filename(__name__, 'display_assets/qstep.png'), 'rb') as f:
+        with importlib.resources.open_binary('debyecalculator.display_assets', 'qstep.png') as f:
             qstep_img = f.read()
-        with open(pkg_resources.resource_filename(__name__, 'display_assets/rstep.png'), 'rb') as f:
+        with importlib.resources.open_binary('debyecalculator.display_assets', 'rstep.png') as f:
             rstep_img = f.read()
-        with open(pkg_resources.resource_filename(__name__, 'display_assets/rthres.png'), 'rb') as f:
+        with importlib.resources.open_binary('debyecalculator.display_assets', 'rthres.png') as f:
             rthres_img = f.read()
-        with open(pkg_resources.resource_filename(__name__, 'display_assets/radiation_type.png'), 'rb') as f:
+        with importlib.resources.open_binary('debyecalculator.display_assets', 'radiation_type.png') as f:
             radiation_type_img = f.read()
-        with open(pkg_resources.resource_filename(__name__, 'display_assets/scattering_parameters.png'), 'rb') as f:
+        with importlib.resources.open_binary('debyecalculator.display_assets', 'scattering_parameters.png') as f:
             scattering_parameters_img = f.read()
-        with open(pkg_resources.resource_filename(__name__, 'display_assets/presets.png'), 'rb') as f:
+        with importlib.resources.open_binary('debyecalculator.display_assets', 'presets.png') as f:
             presets_img = f.read()
 
         # Radiation 
@@ -1465,19 +1464,19 @@ class DebyeCalculator:
         """ Plotting Options """
 
         # Load display display_assets
-        with open(pkg_resources.resource_filename(__name__, 'display_assets/iq_scaling.png'), 'rb') as f:
+        with importlib.resources.open_binary('debyecalculator.display_assets', 'qstep.png') as f:
             iq_scaling_img = f.read()
-        with open(pkg_resources.resource_filename(__name__, 'display_assets/show_hide.png'), 'rb') as f:
+        with importlib.resources.open_binary('debyecalculator.display_assets', 'show_hide.png') as f:
             show_hide_img = f.read()
-        with open(pkg_resources.resource_filename(__name__, 'display_assets/max_norm.png'), 'rb') as f:
+        with importlib.resources.open_binary('debyecalculator.display_assets', 'max_norm.png') as f:
             max_norm_img = f.read()
-        with open(pkg_resources.resource_filename(__name__, 'display_assets/iq.png'), 'rb') as f:
+        with importlib.resources.open_binary('debyecalculator.display_assets', 'iq.png') as f:
             iq_img = f.read()
-        with open(pkg_resources.resource_filename(__name__, 'display_assets/sq.png'), 'rb') as f:
+        with importlib.resources.open_binary('debyecalculator.display_assets', 'sq.png') as f:
             sq_img = f.read()
-        with open(pkg_resources.resource_filename(__name__, 'display_assets/fq.png'), 'rb') as f:
+        with importlib.resources.open_binary('debyecalculator.display_assets', 'fq.png') as f:
             fq_img = f.read()
-        with open(pkg_resources.resource_filename(__name__, 'display_assets/gr.png'), 'rb') as f:
+        with importlib.resources.open_binary('debyecalculator.display_assets', 'gr.png') as f:
             gr_img = f.read()
         
         # Y-axis I(Q) scale button
@@ -1783,7 +1782,7 @@ class DebyeCalculator:
                     xseries.append(do[1]) # q
                     iq_ = do[2] if not normalize_iq.value else do[2]/max(do[2]) 
                     yseries.append(iq_) # iq
-                    xlabels.append('$Q$ [$\AA^{-1}$]')
+                    xlabels.append('$Q$ [$Å^{-1}$]')
                     ylabels.append('$I(Q)$' + normalize_iq_text)
                     if scale_type_button.value == 'logarithmic':
                         scales.append('log')
@@ -1796,7 +1795,7 @@ class DebyeCalculator:
                     xseries.append(do[1]) # q
                     sq_ = do[3] if not normalize_sq.value else do[3]/max(do[3]) 
                     yseries.append(sq_) # sq
-                    xlabels.append('$Q$ [$\AA^{-1}$]')
+                    xlabels.append('$Q$ [$Å^{-1}$]')
                     ylabels.append('$S(Q)$' + normalize_sq_text)
                     scales.append('linear')
                     titles.append('Structure Function, S(Q)')
@@ -1805,7 +1804,7 @@ class DebyeCalculator:
                     xseries.append(do[1]) # q
                     fq_ = do[4] if not normalize_fq.value else do[4]/max(do[4]) 
                     yseries.append(fq_) # fq
-                    xlabels.append('$Q$ [$\AA^{-1}$]')
+                    xlabels.append('$Q$ [$Å^{-1}$]')
                     ylabels.append('$F(Q)$'+ normalize_fq_text)
                     scales.append('linear')
                     titles.append('Reduced Structure Function, F(Q)')
@@ -1814,7 +1813,7 @@ class DebyeCalculator:
                     xseries.append(do[0]) # r
                     gr_ = do[5] if not normalize_gr.value else do[5]/max(do[5]) 
                     yseries.append(gr_) # gr
-                    xlabels.append('$r$ [$\AA$]')
+                    xlabels.append('$r$ [$Å$]')
                     ylabels.append('$G(r)$' + normalize_gr_text)
                     scales.append('linear')
                     titles.append('Reduced Pair Distribution Function, G(r)')

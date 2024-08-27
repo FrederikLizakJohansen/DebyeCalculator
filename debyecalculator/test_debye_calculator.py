@@ -3,12 +3,12 @@ from debyecalculator import DebyeCalculator
 from debyecalculator.utility.generate import generate_nanoparticles
 import numpy as np
 from ase.io import read
-import pkg_resources
+import importlib.resources
 import yaml
 import math
 
 # Elements to atomic numbers map
-with open(pkg_resources.resource_filename(__name__, 'utility/elements_info_xrays.yaml'), 'r') as yaml_file:
+with importlib.resources.open_text('debyecalculator.utility', 'elements_info.yaml') as yaml_file:
     element_info = yaml.safe_load(yaml_file)
 element_to_atomic_number = {}
 for i, (key, value) in enumerate(element_info.items()):

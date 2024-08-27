@@ -24,7 +24,7 @@ from ase.build.tools import sort as ase_sort
 from typing import Union, List
 from collections import namedtuple
 import yaml
-import pkg_resources
+import importlib.resources
 import warnings
 from tqdm.auto import tqdm
 
@@ -149,11 +149,15 @@ def generate_nanoparticles(
             device = device
 
     # Fetch atomic numbers and radii
-    with open(pkg_resources.resource_filename(__name__, 'elements_info_xrays.yaml'), 'r') as yaml_file:
+    with importlib.resources.open_text('debyecalculator.utility', 'elements_info.yaml') as yaml_file:
         elements_info = yaml.safe_load(yaml_file)
 
     # Fix radii type
-    if isinstance(radii, list):
+    if isinstance(radii, np.ndarray):
+        radii = [float(r) for r in radii]
+    elif torch.is_tensor(radii):
+        radii = [float(r) for r in radii]
+    elif isinstance(radii, list):
         radii = [float(r) for r in radii]
     elif isinstance(radii, float):
         radii = [radii]
@@ -388,6 +392,7 @@ def generate_core_shell_models_fixed_size(
     core_shell_ratios=[0.3, 0.5, 0.7], 
     radius=10.0,
     half_sphere=False,
+    crystalstructure = 'fcc',
 ):
     """
     Generates a list of ASE core-shell models with a fixed particle size and varying core-shell ratios.
@@ -400,13 +405,14 @@ def generate_core_shell_models_fixed_size(
     - core_shell_ratios (list of float): A list of core-to-particle radius ratios to generate.
     - radius (float): The fixed maximum radius of the particle.
     - half_sphere (bool): Whether to return half of the particle sphere.
+    - crystalstructure (str): Must be one of sc, fcc, bcc, tetragonal, bct, hcp, rhombohedral, orthorhombic, mcl, diamond, zincblend, rocksalt, cesiumchloride, fluorite or wurtzite.
     
     Returns:
     - models (list of ASE Atoms objects): A list of core-shell particles with varying core-shell ratios.
     """
     
     # Create a bulk cubic crystal of the core element
-    structure = bulk(core_element, 'fcc', a=lattice_constant, cubic=True).repeat(size)
+    structure = bulk(core_element, crystalstructure, a=lattice_constant, cubic=True).repeat(size)
     center_of_geometry = structure.get_positions().mean(axis=0)
     structure.translate(-center_of_geometry)
     
@@ -451,6 +457,7 @@ def generate_core_shell_models(
     shell_thicknesses=[1.0, 2.0, 3.0], 
     radius=10.0,
     half_sphere=False,
+    crystalstructure='fcc',
 ):
     """
     Generates a list of ASE core-shell models with varying shell thicknesses.
@@ -464,13 +471,14 @@ def generate_core_shell_models(
     - shell_thicknesses (list of float): A list of shell thicknesses to generate.
     - radius (float): The maximum radius of the particle.
     - half_sphere (bool): Whether to return half of the particle sphere.
+    - crystalstructure (str): Must be one of sc, fcc, bcc, tetragonal, bct, hcp, rhombohedral, orthorhombic, mcl, diamond, zincblend, rocksalt, cesiumchloride, fluorite or wurtzite.
     
     Returns:
     - models (list of ASE Atoms objects): A list of core-shell particles with varying shell thicknesses.
     """
     
     # Create a bulk cubic crystal of the core element
-    structure = bulk(core_element, 'fcc', a=lattice_constant, cubic=True).repeat(size)
+    structure = bulk(core_element, crystalstructure, a=lattice_constant, cubic=True).repeat(size)
     center_of_geometry = structure.get_positions().mean(axis=0)
     structure.translate(-center_of_geometry)
 
@@ -511,6 +519,7 @@ def generate_substitutional_alloy_models(
     substitution_ratios=[0.1, 0.2, 0.3], 
     radius=10.0,
     half_sphere=False,
+    crystalstructure='fcc',
     seed=None,
 ):
     """
@@ -525,6 +534,7 @@ def generate_substitutional_alloy_models(
     - substitution_ratios (list of float): A list of substitution ratios to generate.
     - radius (float): The fixed maximum radius of the particle.
     - half_sphere (bool): Whether to return half of the particle sphere.
+    - crystalstructure (str): Must be one of sc, fcc, bcc, tetragonal, bct, hcp, rhombohedral, orthorhombic, mcl, diamond, zincblend, rocksalt, cesiumchloride, fluorite or wurtzite.
     - seed (int, None): If not None, seed to be used to choose substituted atoms. 
     
     Returns:
@@ -532,7 +542,7 @@ def generate_substitutional_alloy_models(
     """
     
     # Create a bulk cubic crystal of the base element
-    structure = bulk(base_element, 'fcc', a=lattice_constant, cubic=True).repeat(size)
+    structure = bulk(base_element, crystalstructure, a=lattice_constant, cubic=True).repeat(size)
     
     # Center the structure
     center_of_geometry = structure.get_positions().mean(axis=0)
@@ -579,7 +589,8 @@ def generate_periodic_plane_substitution(
     size=(7, 7, 7), 
     radius=10.0, 
     plane_spacing=3, 
-    plane_orientation='z'
+    plane_orientation='z',
+    crystalstructure='fcc',
 ):
     """
     Generates a spherical particle with periodic planes of substituted atoms.
@@ -592,13 +603,14 @@ def generate_periodic_plane_substitution(
     - radius (float): The fixed maximum radius of the particle.
     - plane_spacing (int): The spacing between planes where substitution occurs.
     - plane_orientation (str): The orientation of the planes ('x', 'y', or 'z').
+    - crystalstructure (str): Must be one of sc, fcc, bcc, tetragonal, bct, hcp, rhombohedral, orthorhombic, mcl, diamond, zincblend, rocksalt, cesiumchloride, fluorite or wurtzite.
     
     Returns:
     - particle (ASE Atoms object): The spherical particle with periodic planes of substituted atoms, cut in half for visualization.
     """
     
     # Create a bulk cubic crystal of the base element
-    structure = bulk(base_element, 'fcc', a=lattice_constant, cubic=True).repeat(size)
+    structure = bulk(base_element, crystalstructure, a=lattice_constant, cubic=True).repeat(size)
     
     # Center the structure
     center_of_geometry = structure.get_positions().mean(axis=0)
@@ -626,6 +638,7 @@ def generate_spherical_particle(
     lattice_constant=3.0, 
     size=(7, 7, 7), 
     radius=10.0,
+    crystalstructure='fcc',
 ):
     """
     Generates a spherical particle with periodic planes of substituted atoms.
@@ -635,13 +648,14 @@ def generate_spherical_particle(
     - lattice_constant (float): The lattice constant of the crystal in angstroms.
     - size (tuple): The size of the unit cell replication in each direction.
     - radius (float): The fixed maximum radius of the particle.
+    - crystalstructure (str): Must be one of sc, fcc, bcc, tetragonal, bct, hcp, rhombohedral, orthorhombic, mcl, diamond, zincblend, rocksalt, cesiumchloride, fluorite or wurtzite.
 
     Returns:
     - particle (ASE Atoms object): The spherical particle.
     """
     
     # Create a bulk cubic crystal of the base element
-    structure = bulk(element, 'fcc', a=lattice_constant, cubic=True).repeat(size)
+    structure = bulk(element, crystalstructure, a=lattice_constant, cubic=True).repeat(size)
     
     # Center the structure
     center_of_geometry = structure.get_positions().mean(axis=0)
