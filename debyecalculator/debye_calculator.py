@@ -121,7 +121,7 @@ class DebyeCalculator:
         if device == 'cuda' and not torch.cuda.is_available():
             warnings.warn("Warning: Your system might have a CUDA-enabled GPU, but CUDA is not available. Computations will run on the CPU instead. " \
                           "For optimal performance, please install Pytorch with CUDA support. " \
-                          "If you do not have a CUDA-enabled CPU, you can surpress this warning by specifying the 'device' argument as 'cpu'", 
+                          "If you do not have a CUDA-enabled GPU, you can surpress this warning by specifying the 'device' argument as 'cpu'", 
                           UserWarning, 
                           stacklevel=2
                          )

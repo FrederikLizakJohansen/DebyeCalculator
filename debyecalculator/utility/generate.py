@@ -17,8 +17,9 @@ except ModuleNotFoundError:
 
 import numpy as np
 import ase
+from ase import Atoms
 from ase.io import read
-from ase.build import make_supercell
+from ase.build import make_supercell, bulk
 from ase.build.tools import sort as ase_sort
 from typing import Union, List
 from collections import namedtuple
@@ -106,7 +107,7 @@ def generate_nanoparticles(
     _override_device: bool = False,
     _lightweight_mode: bool = False,
     _return_ase: bool = False,
-    _reverse_order: bool = True,
+    _reverse_order: bool = False,
     _benchmarking: bool = False,
 ) -> NanoParticleType:
     """
@@ -378,3 +379,278 @@ def transform_edge_indices(edge_indices):
     transformed_edges = torch.tensor([[node_mapping[edge[0].item()], node_mapping[edge[1].item()]] for edge in edge_indices])
 
     return transformed_edges.T
+
+def generate_core_shell_models_fixed_size(
+    core_element='Ni', 
+    shell_element='Cu', 
+    lattice_constant=3.0,
+    size=(7, 7, 7), 
+    core_shell_ratios=[0.3, 0.5, 0.7], 
+    radius=10.0,
+    half_sphere=False,
+):
+    """
+    Generates a list of ASE core-shell models with a fixed particle size and varying core-shell ratios.
+    
+    Parameters:
+    - core_element (str): The chemical symbol of the core element.
+    - shell_element (str): The chemical symbol of the shell element.
+    - lattice_constant (float): The lattice constant of the crystal in angstroms.
+    - size (tuple): The size of the unit cell replication in each direction.
+    - core_shell_ratios (list of float): A list of core-to-particle radius ratios to generate.
+    - radius (float): The fixed maximum radius of the particle.
+    - half_sphere (bool): Whether to return half of the particle sphere.
+    
+    Returns:
+    - models (list of ASE Atoms objects): A list of core-shell particles with varying core-shell ratios.
+    """
+    
+    # Create a bulk cubic crystal of the core element
+    structure = bulk(core_element, 'fcc', a=lattice_constant, cubic=True).repeat(size)
+    center_of_geometry = structure.get_positions().mean(axis=0)
+    structure.translate(-center_of_geometry)
+    
+    distances = np.linalg.norm(structure.get_positions(), axis=1)
+    structure = structure[distances <= radius]
+    spherical_distances = np.linalg.norm(structure.get_positions(), axis=1)
+    
+    # Generate the models for each core-shell ratio
+    models = []
+    for ratio in core_shell_ratios:
+        # Calculate core radius based on the ratio
+        core_radius = ratio * radius
+        
+        # Assign core atoms
+        core_atoms = structure[spherical_distances <= core_radius]
+        core_atoms.set_chemical_symbols([core_element] * len(core_atoms))
+        
+        # Assign shell atoms
+        shell_atoms = structure[spherical_distances > core_radius]
+        shell_atoms.set_chemical_symbols([shell_element] * len(shell_atoms))
+        
+        # Combine core and shell atoms
+        core_shell_particle = core_atoms + shell_atoms
+        
+        if half_sphere:
+            # Cut the combined particle in half for visualization
+            core_shell_particle = core_shell_particle[
+                core_shell_particle.get_positions()[:, 2] <= 0
+            ]
+        
+        # Add the model to the list
+        models.append(core_shell_particle)
+    
+    return models
+
+def generate_core_shell_models(
+    core_element='Ni', 
+    shell_element='Cu', 
+    lattice_constant=3.0, 
+    size=(7, 7, 7),             
+    core_radius=4.0, 
+    shell_thicknesses=[1.0, 2.0, 3.0], 
+    radius=10.0,
+    half_sphere=False,
+):
+    """
+    Generates a list of ASE core-shell models with varying shell thicknesses.
+    
+    Parameters:
+    - core_element (str): The chemical symbol of the core element.
+    - shell_element (str): The chemical symbol of the shell element.
+    - lattice_constant (float): The lattice constant of the crystal in angstroms.
+    - size (tuple): The size of the unit cell replication in each direction.
+    - core_radius (float): The radius of the core in angstroms.
+    - shell_thicknesses (list of float): A list of shell thicknesses to generate.
+    - radius (float): The maximum radius of the particle.
+    - half_sphere (bool): Whether to return half of the particle sphere.
+    
+    Returns:
+    - models (list of ASE Atoms objects): A list of core-shell particles with varying shell thicknesses.
+    """
+    
+    # Create a bulk cubic crystal of the core element
+    structure = bulk(core_element, 'fcc', a=lattice_constant, cubic=True).repeat(size)
+    center_of_geometry = structure.get_positions().mean(axis=0)
+    structure.translate(-center_of_geometry)
+
+    # Calculate distances of all atoms from the center
+    distances = np.linalg.norm(structure.get_positions(), axis=1)
+
+    # Generate the models for each shell thickness
+    models = []
+    for thickness in shell_thicknesses:
+        # Create the core
+        core_atoms = structure[distances <= core_radius]
+        core_atoms.set_chemical_symbols([core_element] * len(core_atoms))
+        
+        # Create the shell
+        shell_atoms = structure[(distances > core_radius) & 
+                                (distances <= core_radius + thickness)]
+        shell_atoms.set_chemical_symbols([shell_element] * len(shell_atoms))
+        
+        # Combine core and shell
+        core_shell_particle = core_atoms + shell_atoms
+        
+        if half_sphere:
+            # Cut the combined particle in half for visualization
+            core_shell_particle = core_shell_particle[
+                core_shell_particle.get_positions()[:, 2] <= 0
+            ]
+        
+        # Add the model to the list
+        models.append(core_shell_particle)
+    
+    return models
+
+def generate_substitutional_alloy_models(
+    base_element='Cu', 
+    substitute_element='Ni', 
+    lattice_constant=3.0, 
+    size=(7, 7, 7), 
+    substitution_ratios=[0.1, 0.2, 0.3], 
+    radius=10.0,
+    half_sphere=False,
+    seed=None,
+):
+    """
+    Generates a list of ASE substitutional alloy models with a fixed particle size 
+    and varying substitution ratios.
+    
+    Parameters:
+    - base_element (str): The chemical symbol of the base element.
+    - substitute_element (str): The chemical symbol of the substituting element.
+    - lattice_constant (float): The lattice constant of the crystal in angstroms.
+    - size (tuple): The size of the unit cell replication in each direction.
+    - substitution_ratios (list of float): A list of substitution ratios to generate.
+    - radius (float): The fixed maximum radius of the particle.
+    - half_sphere (bool): Whether to return half of the particle sphere.
+    - seed (int, None): If not None, seed to be used to choose substituted atoms. 
+    
+    Returns:
+    - models (list of ASE Atoms objects): A list of spherical particles with varying substitution ratios.
+    """
+    
+    # Create a bulk cubic crystal of the base element
+    structure = bulk(base_element, 'fcc', a=lattice_constant, cubic=True).repeat(size)
+    
+    # Center the structure
+    center_of_geometry = structure.get_positions().mean(axis=0)
+    structure.translate(-center_of_geometry)
+    
+    # Calculate distances of all atoms from the center
+    distances = np.linalg.norm(structure.get_positions(), axis=1)
+    
+    # Filter atoms to keep only those within the specified radius
+    structure = structure[distances <= radius]
+    
+    # Generate the models for each substitution ratio
+    models = []
+    for ratio in substitution_ratios:
+        # Make a copy of the structure
+        alloy_structure = structure.copy()
+        
+        # Number of atoms to substitute
+        num_atoms = len(alloy_structure)
+        num_substitutions = int(num_atoms * ratio)
+        
+        # Randomly choose atoms to substitute
+        if seed is not None:
+            np.random.seed(42)  # For reproducibility
+        substitution_indices = np.random.choice(num_atoms, num_substitutions, replace=False)
+        
+        # Perform the substitution
+        for i in substitution_indices:
+            alloy_structure[i].symbol = substitute_element
+        
+        if half_sphere:
+            # Cut the alloy particle in half for visualization
+            alloy_structure = alloy_structure[alloy_structure.get_positions()[:, 2] <= 0]
+        
+        # Add the model to the list
+        models.append(alloy_structure)
+    
+    return models
+
+def generate_periodic_plane_substitution(
+    base_element='Cu',
+    substitute_element='Ni', 
+    lattice_constant=3.0, 
+    size=(7, 7, 7), 
+    radius=10.0, 
+    plane_spacing=3, 
+    plane_orientation='z'
+):
+    """
+    Generates a spherical particle with periodic planes of substituted atoms.
+    
+    Parameters:
+    - base_element (str): The chemical symbol of the base element.
+    - substitute_element (str): The chemical symbol of the substituting element.
+    - lattice_constant (float): The lattice constant of the crystal in angstroms.
+    - size (tuple): The size of the unit cell replication in each direction.
+    - radius (float): The fixed maximum radius of the particle.
+    - plane_spacing (int): The spacing between planes where substitution occurs.
+    - plane_orientation (str): The orientation of the planes ('x', 'y', or 'z').
+    
+    Returns:
+    - particle (ASE Atoms object): The spherical particle with periodic planes of substituted atoms, cut in half for visualization.
+    """
+    
+    # Create a bulk cubic crystal of the base element
+    structure = bulk(base_element, 'fcc', a=lattice_constant, cubic=True).repeat(size)
+    
+    # Center the structure
+    center_of_geometry = structure.get_positions().mean(axis=0)
+    structure.translate(-center_of_geometry)
+    
+    # Calculate distances of all atoms from the center
+    distances = np.linalg.norm(structure.get_positions(), axis=1)
+    
+    # Filter atoms to keep only those within the specified radius
+    structure = structure[distances <= radius]
+    
+    # Define the plane orientation (x, y, or z)
+    plane_index = {'x': 0, 'y': 1, 'z': 2}[plane_orientation.lower()]
+    
+    # Perform the periodic substitution
+    positions = structure.get_positions()
+    for i, pos in enumerate(positions):
+        if int(pos[plane_index] / lattice_constant) % plane_spacing == 0:
+            structure[i].symbol = substitute_element
+    
+    return structure
+
+def generate_spherical_particle(
+    element='Cu',
+    lattice_constant=3.0, 
+    size=(7, 7, 7), 
+    radius=10.0,
+):
+    """
+    Generates a spherical particle with periodic planes of substituted atoms.
+    
+    Parameters:
+    - element (str): The chemical symbol of the base element.
+    - lattice_constant (float): The lattice constant of the crystal in angstroms.
+    - size (tuple): The size of the unit cell replication in each direction.
+    - radius (float): The fixed maximum radius of the particle.
+
+    Returns:
+    - particle (ASE Atoms object): The spherical particle.
+    """
+    
+    # Create a bulk cubic crystal of the base element
+    structure = bulk(element, 'fcc', a=lattice_constant, cubic=True).repeat(size)
+    
+    # Center the structure
+    center_of_geometry = structure.get_positions().mean(axis=0)
+    structure.translate(-center_of_geometry)
+    
+    # Calculate distances of all atoms from the center
+    distances = np.linalg.norm(structure.get_positions(), axis=1)
+    
+    # Filter atoms to keep only those within the specified radius
+    structure = structure[distances <= radius]
+    
+    return structure
