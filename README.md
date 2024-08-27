@@ -4,9 +4,8 @@
 [![ChemRxiv](https://img.shields.io/badge/ChemRxiv%20%20-8A2BE2)](https://chemrxiv.org/engage/chemrxiv/article-details/651ec9668bab5d2055b2d009)
 [![ReadTheDocs](https://img.shields.io/readthedocs/debyecalculator)](https://debyecalculator.readthedocs.io/en/latest/)
 [![DOI](https://joss.theoj.org/papers/10.21105/joss.06024/status.svg)](https://doi.org/10.21105/joss.06024)
-![DebyeCalculator](https://raw.githubusercontent.com/FrederikLizakJohansen/DebyeCalculator/main/logo.png)
 
-# DebyeCalculator
+<img src="https://raw.githubusercontent.com/FrederikLizakJohansen/DebyeCalculator/main/logo_DebyeCalculator.png" alt="DebyeCalculator" width="350"/>
 Welcome to `DebyeCalculator`! This is a simple tool for calculating the scattering intensity $I(Q)$ through the Debye scattering equation, the Total Scattering Structure Function $S(Q)$, the Reduced Total Scattering Function $F(Q)$, and the Reduced Atomic Pair Distribution Function $G(r)$ from an atomic structure. 
 The Debye scattering equation can be used to compute the scattering pattern of any atomic structure and is commonly used to study both crystalline and non-crystalline materials with a range of scattering techniques like powder diffraction, total scattering with pair distribution function and small-angle scattering. Although the Debye scattering equation is extremely versatile, the computation of the double sum, which scales O(N<sup>2</sup>), has limited the practical use of the equation.
 Here, we provide an optimised code for the calculation of the Debye scattering equation on Graphics processing units (GPUs) which accelerate the calculations with orders of magnitudes.
@@ -97,18 +96,23 @@ calc = DebyeCalculator(device='cuda')
 
 # Usage
 
-## Interactive mode at Google Colab
-Follow the instructions in our [Interactive Google Colab notebook](https://github.com/FrederikLizakJohansen/DebyeCalculator/blob/main/InteractiveMode_Colab.ipynb) and try to play around. 
-
+## Interactive mode
 <b>IMPORTANT: </b> CHANGES TO INTERACTIVE MODE AS OF JANUARY 2024 (DebyeCalculator version >=1.0.5)
 In the lastest version of DebyeCalculator, we are unfortunately experiences some issues with Google Colab that does not allow the package to display the <tt>interact()</tt> widget. If you experience any related issues, please refer to this [statement](https://github.com/FrederikLizakJohansen/DebyeCalculator/issues/15#issuecomment-1873764451 'here') for further clarification and workarounds. 
 
-## Example usage
+## Example Usage
+
+This section provides quick examples on how to use the `DebyeCalculator` class for generating both total and partial scattering intensities from particle structures defined in `.xyz` files, `.cif` files, or directly from structure tuples.
+
+### Generating Total Scattering
+
+To calculate the total scattering intensity $I(Q)$ for a particle, you can use different structure sources:
+
 ```python
 from debyecalculator import DebyeCalculator
 import torch
 
-# Initialise calculator object
+# Initialize the DebyeCalculator object
 calc = DebyeCalculator(qmin=1.0, qmax=8.0, qstep=0.01)
 
 # Define structure sources
@@ -121,50 +125,32 @@ structure_tuple = (
          [0.1576, 0.1456, 0.8799],
          [0.5932, 0.0204, 0.6759],
          [0.6946, 0.4114, 0.4869]]
-))
-
-# Print object to view all parameters
-print(calc)
-## [OUTPUT] DebyeCalculator{'qmin': 1.0, 'qmax': 8.0, 'qstep': 0.01, 'rmin': 0.0, 'rmax': 20.0, ...}
-
-# Calculate Powder (X-ray) Diffraction from XYZ-file
-Q, I = calc.iq(structure_source=xyz_file)
-
-# Calculate Powder (X-ray) Diffraction from CIF
-Q, I = calc.iq(structure_source=cif_file, radii=5) # radii is the radius of the particle in Å
-
-# Calculate Powder (X-ray) Diffraction from Tuple
-Q, I = calc.iq(structure_source=structure_tuple)
-
-# Update parameters for Small Angle (Neutron) Scattering
-calc.update_parameters(qmin=0.0, qmax=3.0, qstep=0.01, radiation_type="neutron")
-
-# Calculate Small Angle (Neutron) Scattering
-Q, I = calc.iq(structure_source=xyz_file)
-
-# Update parameters for Total Scattering with Pair Distribution Function analysis
-calc.update_parameters(qmin=1.0, qmax=30.0, qstep=0.1, radiation_type="xray")
-
-# Calculate Pair Distribution Function
-r, G = calc.gr(structure_source=xyz_file)
-.....
-
-```
-
-## Partial Gr
-```
-# Create a mask for oxygen atoms
-mask = [atom == "O" for atom in structure_tuple[0]]
-
-# Apply the mask to the structure_tuple
-structure_tuple = (
-    [atom for atom, m in zip(structure_tuple[0], mask) if m],
-    structure_tuple[1][mask]
+    )
 )
 
-# Calculate Pair Distribution Function
-r_partial, Gr_partial = calc.gr(structure_source=structure_tuple)
+# Calculate I(Q) from different sources
+q, iq_xyz = calc.iq(xyz_file)
+q, iq_cif = calc.iq(cif_file)
+q, iq_tuple = calc.iq(structure_tuple)
 ```
+
+### Generating Partial Scattering
+
+DebyeCalculator also allows users to extract the partial scattering for specific pairs of atomic species within a structure:
+```python
+# Create an instance of DebyeCalculator with appropriate parameters
+calc = DebyeCalculator(qmin=1.0, qmax=20.0)
+
+# Load a single particle from a .xyz file and calculate partial I(Q) for specific atom pairs
+# Replace 'X' and 'Y' with the atomic symbols present in your structure
+q, iq_XX = calc.iq("path/to/nanoparticle.xyz", partial="X-X")
+q, iq_YY = calc.iq("path/to/nanoparticle.xyz", partial="Y-Y")
+q, iq_XY = calc.iq("path/to/nanoparticle.xyz", partial="X-Y")
+```
+**Note:** When combining signals from partial scattering, be cautious to avoid double-counting interactions between atoms.
+
+### Demo
+For a more detailed demonstration, including additional examples, please refer to the `demo.ipynb` notebook available in the repository.
 
 # Additional implementation details
 See the [docs](/docs) folder. 
