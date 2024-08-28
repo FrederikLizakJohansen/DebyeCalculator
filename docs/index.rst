@@ -5,6 +5,7 @@
 
 Welcome to DebyeCalculator's documentation!
 ===========================================
+docs/index.rst
 
 .. toctree::
    :maxdepth: 2
