@@ -1174,7 +1174,7 @@ class DebyeCalculator:
             file_list = '<strong>Uploaded Files:</strong><br>'
 
             # CIF Example
-            with importlib.resources.open_binary('data', 'AntiFluorite_Co2O.cif') as f:
+            with importlib.resources.open_binary('debyecalculator.data', 'AntiFluorite_Co2O.cif') as f:
                 example_dict = {}
                 example_dict['content'] = f.read()
                 example_dict['name'] = 'AntiFluorite_Co2O.cif'
@@ -1185,7 +1185,7 @@ class DebyeCalculator:
                 create_file_widgets(example_dict, file_widgets)
 
             # XYZ Example
-            with importlib.resources.open_binary('data', 'AntiFluorite_Co2O_r10.xyz') as f:
+            with importlib.resources.open_binary('debyecalculator.data', 'AntiFluorite_Co2O_r10.xyz') as f:
                 example_dict = {}
                 example_dict['content'] = f.read()
                 example_dict['name'] = 'AntiFluorite_Co2O_r10.xyz'
@@ -1464,7 +1464,7 @@ class DebyeCalculator:
         """ Plotting Options """
 
         # Load display display_assets
-        with importlib.resources.open_binary('debyecalculator.display_assets', 'qstep.png') as f:
+        with importlib.resources.open_binary('debyecalculator.display_assets', 'iq_scaling.png') as f:
             iq_scaling_img = f.read()
         with importlib.resources.open_binary('debyecalculator.display_assets', 'show_hide.png') as f:
             show_hide_img = f.read()
@@ -1876,7 +1876,7 @@ class DebyeCalculator:
                 name = upload_file['name']
                 suffix = name.split('.')[-1]
                 if checkboxes[name].value:
-                    with tempfile.NamedTemporaryFile(delete=True, suffix='.' + suffix, mode = 'w') as temp_file:
+                    with tempfile.NamedTemporaryFile(delete=False, suffix='.' + suffix, mode = 'w') as temp_file:
                         temp_content = BytesIO(upload_file['content']).read().decode()
                         temp_filename = temp_file.name
                         temp_file.write(temp_content)
