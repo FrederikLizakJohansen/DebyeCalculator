@@ -65,7 +65,7 @@ def test_iq_cif():
 
     # Calculate the scatering intensity using DebyeCalculator
     calc.update_parameters(qstep=0.05)
-    q, iq = calc.iq('data/AntiFluorite_Co2O.cif', radii=10.0)
+    q, iq = calc.iq('debyecalculator/data/AntiFluorite_Co2O.cif', radii=10.0)
     
     # Normalise counts
     eps = 1e-16
@@ -126,7 +126,7 @@ def test_sq_cif():
 
     # Calculate the structure factor using the DebyeCalculator
     calc.update_parameters(qstep=0.05)
-    q, sq = calc.sq('data/AntiFluorite_Co2O.cif', radii=10.0)
+    q, sq = calc.sq('debyecalculator/data/AntiFluorite_Co2O.cif', radii=10.0)
 
     # Check that the calculated structure factor matches the expected value
     assert np.allclose(q, q_expected, atol=1e-04, rtol=1e-03), f"Expected Q to be {q_expected}, but got {q}"
@@ -173,7 +173,7 @@ def test_fq_cif():
 
     # Calculate the structure factor using the DebyeCalculator
     calc.update_parameters(qstep=0.05)
-    q, fq = calc.fq('data/AntiFluorite_Co2O.cif', radii=10.0)
+    q, fq = calc.fq('debyecalculator/data/AntiFluorite_Co2O.cif', radii=10.0)
 
     # Check that the calculated structure factor matches the expected value
     assert np.allclose(q, q_expected, atol=1e-04, rtol=1e-03), f"Expected Q to be {q_expected}, but got {q}"
@@ -220,7 +220,7 @@ def test_gr_cif():
 
     # Calculate the structure factor using the DebyeCalculator
     calc.update_parameters(qstep=0.05)
-    r, gr = calc.gr('data/AntiFluorite_Co2O.cif', radii=10.0)
+    r, gr = calc.gr('debyecalculator/data/AntiFluorite_Co2O.cif', radii=10.0)
 
     # Check that the calculated structure factor matches the expected value
     assert np.allclose(r, r_expected, atol=1e-04, rtol=1e-03), f"Expected r to be {r_expected}, but got {r}"
@@ -286,7 +286,7 @@ def test_get_all_cif():
 
     # Calculate Iq, Fq, Sq, and Gr using the DebyeCalculator
     calc.update_parameters(qstep=0.05)
-    r, q, iq, sq, fq, gr = calc._get_all('data/AntiFluorite_Co2O.cif', radii=10.0)
+    r, q, iq, sq, fq, gr = calc._get_all('debyecalculator/data/AntiFluorite_Co2O.cif', radii=10.0)
 
     # Check that the calculated Iq matches the expected value
     ph = np.genfromtxt('debyecalculator/unittests_files/iq_AntiFluorite_Co2O_radius10.0.dat', delimiter=',', skip_header=15)
@@ -375,39 +375,41 @@ def test_partials():
     """
     Testing whether the partials add up
     """
+    cif_path = "debyecalculator/data/AntiFluorite_Co2O.cif"
+
     # I(Q)
-    _, iq = calc.iq("data/AntiFluorite_Co2O.cif", radii=5, partial=None)
-    _, iq_o_o = calc.iq("data/AntiFluorite_Co2O.cif", radii=5, partial="O-O", include_self_scattering=True)
-    _, iq_co_o = calc.iq("data/AntiFluorite_Co2O.cif", radii=5, partial="Co-O", include_self_scattering=False)
-    _, iq_co_co = calc.iq("data/AntiFluorite_Co2O.cif", radii=5, partial="Co-Co", include_self_scattering=True)
+    _, iq = calc.iq(cif_path, radii=5, partial=None)
+    _, iq_o_o = calc.iq(cif_path, radii=5, partial="O-O", include_self_scattering=True)
+    _, iq_co_o = calc.iq(cif_path, radii=5, partial="Co-O", include_self_scattering=False)
+    _, iq_co_co = calc.iq(cif_path, radii=5, partial="Co-Co", include_self_scattering=True)
     iq_added = iq_o_o + iq_co_o + iq_co_co
     assert np.allclose(iq, iq_added, atol=1e-04, rtol=1e-03), f"Partials are not matching for I(Q) calculations"
     # S(Q)
-    _, sq = calc.sq("data/AntiFluorite_Co2O.cif", radii=5, partial=None)
-    _, sq_o_o = calc.sq("data/AntiFluorite_Co2O.cif", radii=5, partial="O-O", )
-    _, sq_co_o = calc.sq("data/AntiFluorite_Co2O.cif", radii=5, partial="Co-O", )
-    _, sq_co_co = calc.sq("data/AntiFluorite_Co2O.cif", radii=5, partial="Co-Co", )
+    _, sq = calc.sq(cif_path, radii=5, partial=None)
+    _, sq_o_o = calc.sq(cif_path, radii=5, partial="O-O", )
+    _, sq_co_o = calc.sq(cif_path, radii=5, partial="Co-O", )
+    _, sq_co_co = calc.sq(cif_path, radii=5, partial="Co-Co", )
     sq_added = sq_o_o + sq_co_o + sq_co_co
     assert np.allclose(sq, sq_added, atol=1e-04, rtol=1e-03), f"Partials are not matching for S(Q) calculations"
     # F(Q)
-    _, fq = calc.fq("data/AntiFluorite_Co2O.cif", radii=5, partial=None)
-    _, fq_o_o = calc.fq("data/AntiFluorite_Co2O.cif", radii=5, partial="O-O", )
-    _, fq_co_o = calc.fq("data/AntiFluorite_Co2O.cif", radii=5, partial="Co-O", )
-    _, fq_co_co = calc.fq("data/AntiFluorite_Co2O.cif", radii=5, partial="Co-Co", )
+    _, fq = calc.fq(cif_path, radii=5, partial=None)
+    _, fq_o_o = calc.fq(cif_path, radii=5, partial="O-O", )
+    _, fq_co_o = calc.fq(cif_path, radii=5, partial="Co-O", )
+    _, fq_co_co = calc.fq(cif_path, radii=5, partial="Co-Co", )
     fq_added = fq_o_o + fq_co_o + fq_co_co
     assert np.allclose(fq, fq_added, atol=1e-04, rtol=1e-03), f"Partials are not matching for F(Q) calculations"
     # G(r)
-    _, gr = calc.gr("data/AntiFluorite_Co2O.cif", radii=5, partial=None)
-    _, gr_o_o = calc.gr("data/AntiFluorite_Co2O.cif", radii=5, partial="O-O", )
-    _, gr_co_o = calc.gr("data/AntiFluorite_Co2O.cif", radii=5, partial="Co-O", )
-    _, gr_co_co = calc.gr("data/AntiFluorite_Co2O.cif", radii=5, partial="Co-Co", )
+    _, gr = calc.gr(cif_path, radii=5, partial=None)
+    _, gr_o_o = calc.gr(cif_path, radii=5, partial="O-O", )
+    _, gr_co_o = calc.gr(cif_path, radii=5, partial="Co-O", )
+    _, gr_co_co = calc.gr(cif_path, radii=5, partial="Co-Co", )
     gr_added = gr_o_o + gr_co_o + gr_co_co
     assert np.allclose(gr, gr_added, atol=1e-04, rtol=1e-03), f"Partials are not matching for G(r) calculations"
     # _get_all
-    _, _, iq, sq, fq, gr = calc._get_all('data/AntiFluorite_Co2O.cif', radii=5, partial=None)
-    _, _, iq_o_o, sq_o_o, fq_o_o, gr_o_o = calc._get_all('data/AntiFluorite_Co2O.cif', radii=5, partial="O-O", include_self_scattering=True)
-    _, _, iq_co_o, sq_co_o, fq_co_o, gr_co_o = calc._get_all('data/AntiFluorite_Co2O.cif', radii=5, partial="Co-O", include_self_scattering=False)
-    _, _, iq_co_co, sq_co_co, fq_co_co, gr_co_co = calc._get_all('data/AntiFluorite_Co2O.cif', radii=5, partial="Co-Co", include_self_scattering=True)
+    _, _, iq, sq, fq, gr = calc._get_all(cif_path, radii=5, partial=None)
+    _, _, iq_o_o, sq_o_o, fq_o_o, gr_o_o = calc._get_all(cif_path, radii=5, partial="O-O", include_self_scattering=True)
+    _, _, iq_co_o, sq_co_o, fq_co_o, gr_co_o = calc._get_all(cif_path, radii=5, partial="Co-O", include_self_scattering=False)
+    _, _, iq_co_co, sq_co_co, fq_co_co, gr_co_co = calc._get_all(cif_path, radii=5, partial="Co-Co", include_self_scattering=True)
     iq_added = iq_o_o + iq_co_o + iq_co_co
     assert np.allclose(iq, iq_added, atol=1e-04, rtol=1e-03), f"Partials are not matching for I(Q) calculations"
     sq_added = sq_o_o + sq_co_o + sq_co_co
@@ -425,7 +427,7 @@ def test_generate_nanoparticle():
     elements = ase_structure.get_chemical_symbols()
 
     # Generate xyz from utility function
-    structure = generate_nanoparticles('data/AntiFluorite_Co2O.cif', radii=10.0)[0]
+    structure = generate_nanoparticles('debyecalculator/data/AntiFluorite_Co2O.cif', radii=10.0)[0]
 
     # Assert
     assert np.allclose(xyz, structure.xyz.cpu(), atol=1e-04, rtol=1e-03), f"Expected xyz to be {xyz}, but got {structure.xyz}"
