@@ -49,7 +49,11 @@ from ipywidgets import HBox, VBox, Layout
 from functools import partial
 from tqdm.auto import tqdm
 
-from pymatgen.core import Structure
+try:
+    from pymatgen.core import Structure
+    pymatgen_available = True
+except ImportError:
+    pymatgen_available = False
 
 # NamedTuple definitions
 StructureTuple = namedtuple('StructureTuple', 'elements size occupancy xyz triu_indices unique_inverse unique_form_factors form_avg_sq structure_inverse')
@@ -61,18 +65,31 @@ AllTuple = namedtuple('AllTuple', 'r q i s f g')
 
 ArrayLike = Union[np.ndarray, torch.Tensor]
 IntArrayLike = Union[List[int], np.ndarray, torch.Tensor]
-StructureSourceType = Union[
-    Tuple[List[str], ArrayLike],
-    Tuple[IntArrayLike, ArrayLike],
-    List[Tuple[List[str], ArrayLike]],
-    List[Tuple[IntArrayLike, ArrayLike]],
-    str,
-    List[str],
-    Atoms,
-    List[Atoms],
-    Structure,
-    List[Structure],
-]
+
+if pymatgen_available:
+    StructureSourceType = Union[
+        Tuple[List[str], ArrayLike],
+        Tuple[IntArrayLike, ArrayLike],
+        List[Tuple[List[str], ArrayLike]],
+        List[Tuple[IntArrayLike, ArrayLike]],
+        str,
+        List[str],
+        Atoms,
+        List[Atoms],
+        Structure,
+        List[Structure],
+    ]
+else:
+    StructureSourceType = Union[
+        Tuple[List[str], ArrayLike],
+        Tuple[IntArrayLike, ArrayLike],
+        List[Tuple[List[str], ArrayLike]],
+        List[Tuple[IntArrayLike, ArrayLike]],
+        str,
+        List[str],
+        Atoms,
+        List[Atoms],
+    ]
 
 class DebyeCalculator:
     """
