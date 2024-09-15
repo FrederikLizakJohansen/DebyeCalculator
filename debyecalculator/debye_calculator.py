@@ -489,7 +489,7 @@ class DebyeCalculator:
                 elements = [site.species_string for site in structure_source.sites]
                 size = len(elements)
                 occupancy = torch.ones((size), dtype=torch.float32).to(device=self.device)
-                xyz = torch.tensor(structure_source.cart_coords).to(device=self.device, dtype=torch.float32)
+                xyz = torch.from_numpy(np.array([[site.a, site.b, site.c] for site in structure_source.sites])).to(device=self.device, dtype=torch.float32)
             except:
                 raise ValueError(f'Encountered invalid Structure object')
                 
