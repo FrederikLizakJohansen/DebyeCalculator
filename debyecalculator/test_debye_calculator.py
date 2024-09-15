@@ -3,9 +3,14 @@ from debyecalculator import DebyeCalculator
 from debyecalculator.utility.generate import generate_nanoparticles
 import numpy as np
 from ase.io import read
-from pymatgen.core import Structure
 import importlib.resources
 import yaml
+
+try:
+    from pymatgen.core import Structure
+    pymatgen_available = True
+except ImportError:
+    pymatgen_available = False
 
 # Elements to atomic numbers map (fixture for reuse)
 @pytest.fixture(scope="module")
@@ -110,6 +115,10 @@ def test_generate_nanoparticle():
     ('icsd_001504_cc_r6_lc_2.85_6_tetragonal.xyz', 0.05, 0.1),
     ('structure_AntiFluorite_Co2O_radius10.0.xyz', 0.05, 0.05)
 ])
+@pytest.mark.skipif(
+    sys.version_info < (3, 10),
+    reason="Requires Python 3.10 or above"
+)
 def test_ase_and_pymatgen_input(debye_calc, filename, qstep, gr_qstep):
     # Load structure from ASE
     ase_structure = read(f'debyecalculator/unittests_files/{filename}')
