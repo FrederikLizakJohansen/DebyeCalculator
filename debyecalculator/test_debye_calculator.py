@@ -5,6 +5,7 @@ import numpy as np
 from ase.io import read
 import importlib.resources
 import yaml
+import sys
 
 try:
     from pymatgen.core import Structure
