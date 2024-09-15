@@ -6,6 +6,7 @@ from ase.io import read
 import importlib.resources
 import yaml
 import sys
+import math
 
 try:
     from pymatgen.core import Structure
@@ -161,3 +162,51 @@ def test_ase_and_pymatgen_input(debye_calc, filename, qstep, gr_qstep):
     r_pmg, gr_pmg = debye_calc.gr(pymatgen_structure)
     assert np.allclose(r_ase, r_pmg, atol=1e-04, rtol=1e-03), "Mismatch in r between ASE and Pymatgen"
     assert np.allclose(gr_ase, gr_pmg, atol=1e-04, rtol=1e-03), "Mismatch in G(r) between ASE and Pymatgen"
+
+# Partials
+def test_partials(debye_calc):
+    """
+    Testing whether the partials add up correctly for I(Q), S(Q), F(Q), and G(r)
+    when include_self_scattering is taken into account.
+    """
+    calc = debye_calc
+    cif_path = "debyecalculator/data/AntiFluorite_Co2O.cif"
+    radii = 5
+
+    # I(Q)
+    _, iq = calc.iq(cif_path, radii=radii, partial=None)
+    iq_parts = [calc.iq(cif_path, radii=radii, partial=p, include_self_scattering=is_self)[1]
+                for p, is_self in [("O-O", True), ("Co-O", False), ("Co-Co", True)]]
+    iq_sum = sum(iq_parts)
+    assert np.allclose(iq, iq_sum, atol=1e-04, rtol=1e-03), "Partials are not matching for I(Q) calculations"
+
+    # S(Q)
+    _, sq = calc.sq(cif_path, radii=radii, partial=None)
+    sq_parts = [calc.sq(cif_path, radii=radii, partial=p)[1]
+                for p in ["O-O", "Co-O", "Co-Co"]]
+    sq_sum = sum(sq_parts)
+    assert np.allclose(sq, sq_sum, atol=1e-04, rtol=1e-03), "Partials are not matching for S(Q) calculations"
+
+    # F(Q)
+    _, fq = calc.fq(cif_path, radii=radii, partial=None)
+    fq_parts = [calc.fq(cif_path, radii=radii, partial=p)[1]
+                for p in ["O-O", "Co-O", "Co-Co"]]
+    fq_sum = sum(fq_parts)
+    assert np.allclose(fq, fq_sum, atol=1e-04, rtol=1e-03), "Partials are not matching for F(Q) calculations"
+
+    # G(r)
+    _, gr = calc.gr(cif_path, radii=radii, partial=None)
+    gr_parts = [calc.gr(cif_path, radii=radii, partial=p)[1]
+                for p in ["O-O", "Co-O", "Co-Co"]]
+    gr_sum = sum(gr_parts)
+    assert np.allclose(gr, gr_sum, atol=1e-04, rtol=1e-03), "Partials are not matching for G(r) calculations"
+
+# Optimal qstep
+def test_optimal_qstep(debye_calc):
+    """
+    Test that the calculated qstep is optimal based on the rmax and rstep values.
+    """
+    calc = debye_calc
+    # Optimal qstep is π / (rmax + rstep), with a small tolerance for computational uncertainty
+    optimal_qstep = math.pi / (calc.rmax + calc.rstep) + 1e-5
+    assert calc.qstep <= optimal_qstep, f"Expected qstep <= {optimal_qstep}, but got qstep = {calc.qstep}"
