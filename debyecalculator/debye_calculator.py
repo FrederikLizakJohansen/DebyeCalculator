@@ -49,6 +49,12 @@ from ipywidgets import HBox, VBox, Layout
 from functools import partial
 from tqdm.auto import tqdm
 
+try:
+    from pymatgen.core import Structure
+    pymatgen_available = True
+except ImportError:
+    pymatgen_available = False
+
 # NamedTuple definitions
 StructureTuple = namedtuple('StructureTuple', 'elements size occupancy xyz triu_indices unique_inverse unique_form_factors form_avg_sq structure_inverse')
 IqTuple = namedtuple('IqTuple', 'q i')
@@ -59,16 +65,31 @@ AllTuple = namedtuple('AllTuple', 'r q i s f g')
 
 ArrayLike = Union[np.ndarray, torch.Tensor]
 IntArrayLike = Union[List[int], np.ndarray, torch.Tensor]
-StructureSourceType = Union[
-    Tuple[List[str], ArrayLike],
-    Tuple[IntArrayLike, ArrayLike],
-    List[Tuple[List[str], ArrayLike]],
-    List[Tuple[IntArrayLike, ArrayLike]],
-    str,
-    List[str],
-    Atoms,
-    List[Atoms],
-]
+
+if pymatgen_available:
+    StructureSourceType = Union[
+        Tuple[List[str], ArrayLike],
+        Tuple[IntArrayLike, ArrayLike],
+        List[Tuple[List[str], ArrayLike]],
+        List[Tuple[IntArrayLike, ArrayLike]],
+        str,
+        List[str],
+        Atoms,
+        List[Atoms],
+        Structure,
+        List[Structure],
+    ]
+else:
+    StructureSourceType = Union[
+        Tuple[List[str], ArrayLike],
+        Tuple[IntArrayLike, ArrayLike],
+        List[Tuple[List[str], ArrayLike]],
+        List[Tuple[IntArrayLike, ArrayLike]],
+        str,
+        List[str],
+        Atoms,
+        List[Atoms],
+    ]
 
 class DebyeCalculator:
     """
@@ -459,6 +480,18 @@ class DebyeCalculator:
                 xyz = torch.tensor(np.array(structure_source.get_positions())).to(device=self.device, dtype=torch.float32)
             except:
                 raise ValueError(f'Encountered invalid Atoms object')
+                
+            triu_indices, unique_inverse, unique_form_factors, form_avg_sq, structure_inverse = parse_elements(elements, size)
+
+            return StructureTuple(elements, size, occupancy, xyz, triu_indices, unique_inverse, unique_form_factors, form_avg_sq, structure_inverse)
+        elif isinstance(structure_source, Structure):
+            try:
+                elements = [site.species_string for site in structure_source.sites]
+                size = len(elements)
+                occupancy = torch.ones((size), dtype=torch.float32).to(device=self.device)
+                xyz = torch.from_numpy(np.array([[site.a, site.b, site.c] for site in structure_source.sites])).to(device=self.device, dtype=torch.float32)
+            except:
+                raise ValueError(f'Encountered invalid Structure object')
                 
             triu_indices, unique_inverse, unique_form_factors, form_avg_sq, structure_inverse = parse_elements(elements, size)
 

@@ -1,17 +1,3 @@
-qmin:1.0
-qmax:30.0
-qdamp:0.04
-qstep:0.05
-rmin:0.0
-rmax:20.0
-rstep:0.01
-rthres:0.0
-biso:0.3
-device:cuda
-batch_size:10000
-lorch_mod:False
-radiation_type:xray
-
 r,G(r)
 0.0,0.0
 0.01,-0.001527964
