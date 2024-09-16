@@ -116,6 +116,7 @@ class DebyeCalculator:
         profile: bool = False,
         _max_batch_size: int = 4000,
         _lightweight_mode: bool = False,
+        dtype: torch.dtype = torch.float32,
     ) -> None:
         """
         Initialize a DebyeCalculator instance with specified parameters.
@@ -136,6 +137,7 @@ class DebyeCalculator:
             radiation_type (str): Type of radiation for form factor calculations ('xray' or 'neutron'). Default is 'xray'
             rad_type (str): Alias for 'radiation_type'. Default is 'xray'.
             profile (bool): Activate profiler. Default is False.
+            dtype (torch.dtype): Data type for tensors. Default is torch.float32.
         """
 
         # Handling CUDA availability
@@ -169,6 +171,7 @@ class DebyeCalculator:
         self.biso = biso
         self.batch_size = batch_size
         self.lorch_mod = lorch_mod
+        self.dtype = dtype
 
         if radiation_type is not None:
             self.radiation_type = radiation_type
@@ -209,7 +212,7 @@ class DebyeCalculator:
         for k,v in self.FORM_FACTOR_COEF.items():
             if None in v:
                 v = [value if value is not None else np.nan for value in v]
-            self.FORM_FACTOR_COEF[k] = torch.tensor(v).to(device=self.device, dtype=torch.float32)
+            self.FORM_FACTOR_COEF[k] = torch.tensor(v).to(device=self.device, dtype=self.dtype)
         if self.radiation_type.lower() in ['xray', 'x']:
             self.form_factor_func = lambda p: torch.sum(p[:5] * torch.exp(-1*p[6:11] * (self.q / (4*torch.pi)).pow(2)), dim=1) + p[5]
         elif self.radiation_type.lower() in ['neutron', 'n']:
@@ -402,8 +405,8 @@ class DebyeCalculator:
                 size = xyz.shape[0]
                 if isinstance(xyz, np.ndarray):
                     xyz = torch.from_numpy(xyz)
-                xyz = xyz.to(device=self.device, dtype=torch.float32)
-                occupancy = torch.ones(xyz.shape[0]).to(device=self.device, dtype=torch.float32)
+                xyz = xyz.to(device=self.device, dtype=self.dtype)
+                occupancy = torch.ones(xyz.shape[0]).to(device=self.device, dtype=self.dtype)
                 triu_indices, unique_inverse, unique_form_factors, form_avg_sq, structure_inverse = parse_elements(elements, size)
 
                 return StructureTuple(elements, size, occupancy, xyz, triu_indices, unique_inverse, unique_form_factors, form_avg_sq, structure_inverse)
@@ -415,8 +418,8 @@ class DebyeCalculator:
                 size = xyz.shape[0]
                 if isinstance(xyz, np.ndarray):
                     xyz = torch.from_numpy(xyz)
-                xyz = xyz.to(device=self.device, dtype=torch.float32)
-                occupancy = torch.ones(xyz.shape[0]).to(device=self.device, dtype=torch.float32)
+                xyz = xyz.to(device=self.device, dtype=self.dtype)
+                occupancy = torch.ones(xyz.shape[0]).to(device=self.device, dtype=self.dtype)
                 triu_indices, unique_inverse, unique_form_factors, form_avg_sq, structure_inverse = parse_elements(elements, size)
 
                 return StructureTuple(elements, size, occupancy, xyz, triu_indices, unique_inverse, unique_form_factors, form_avg_sq, structure_inverse)
@@ -435,11 +438,11 @@ class DebyeCalculator:
 
                     # Append occupancy if nothing is provided
                     if structure.shape[1] == 5:
-                        occupancy = torch.from_numpy(structure[:,-1]).to(device=self.device, dtype=torch.float32)
-                        xyz = torch.tensor(structure[:,1:-1].astype('float')).to(device=self.device, dtype=torch.float32)
+                        occupancy = torch.from_numpy(structure[:,-1]).to(device=self.device, dtype=self.dtype)
+                        xyz = torch.tensor(structure[:,1:-1].astype('float')).to(device=self.device, dtype=self.dtype)
                     else:
-                        occupancy = torch.ones((size), dtype=torch.float32).to(device=self.device)
-                        xyz = torch.tensor(structure[:,1:].astype('float')).to(device=self.device, dtype=torch.float32)
+                        occupancy = torch.ones((size), dtype=self.dtype).to(device=self.device)
+                        xyz = torch.tensor(structure[:,1:].astype('float')).to(device=self.device, dtype=self.dtype)
                 except:
                     raise IOError(f'Encountered invalid file format when trying to load structure from {structure_source}')
                     
@@ -457,8 +460,8 @@ class DebyeCalculator:
                             StructureTuple(
                                 elements = structure.elements,
                                 size = structure.size,
-                                occupancy = structure.occupancy.to(dtype=torch.float32, device=self.device),
-                                xyz = structure.xyz.to(dtype=torch.float32, device=self.device),
+                                occupancy = structure.occupancy.to(dtype=self.dtype, device=self.device),
+                                xyz = structure.xyz.to(dtype=self.dtype, device=self.device),
                                 triu_indices = triu_indices,
                                 unique_inverse = unique_inverse,
                                 unique_form_factors = unique_form_factors,
@@ -476,8 +479,8 @@ class DebyeCalculator:
             try:
                 elements = structure_source.get_chemical_symbols()
                 size = len(elements)
-                occupancy = torch.ones((size), dtype=torch.float32).to(device=self.device)
-                xyz = torch.tensor(np.array(structure_source.get_positions())).to(device=self.device, dtype=torch.float32)
+                occupancy = torch.ones((size), dtype=self.dtype).to(device=self.device)
+                xyz = torch.tensor(np.array(structure_source.get_positions())).to(device=self.device, dtype=self.dtype)
             except:
                 raise ValueError(f'Encountered invalid Atoms object')
                 
@@ -488,8 +491,8 @@ class DebyeCalculator:
             try:
                 elements = [site.species_string for site in structure_source.sites]
                 size = len(elements)
-                occupancy = torch.ones((size), dtype=torch.float32).to(device=self.device)
-                xyz = torch.from_numpy(np.array([[site.a, site.b, site.c] for site in structure_source.sites])).to(device=self.device, dtype=torch.float32)
+                occupancy = torch.ones((size), dtype=self.dtype).to(device=self.device)
+                xyz = torch.from_numpy(np.array([[site.a, site.b, site.c] for site in structure_source.sites])).to(device=self.device, dtype=self.dtype)
             except:
                 raise ValueError(f'Encountered invalid Structure object')
                 
@@ -617,7 +620,7 @@ class DebyeCalculator:
                 self.profiler.time('Batching and Distances')
 
             # Calculate scattering using Debye Equation
-            iq = torch.zeros((len(self.q))).to(device=self.device, dtype=torch.float32)
+            iq = torch.zeros((len(self.q))).to(device=self.device, dtype=self.dtype)
             for d, inv_idx, idx, partial_mask in zip(dists, inverse_indices, indices, partial_mask_sparse):
                 
                 # Construct mask
@@ -722,7 +725,7 @@ class DebyeCalculator:
                 self.profiler.time('Batching and Distances')
 
             # Calculate scattering using Debye Equation
-            iq = torch.zeros((len(self.q))).to(device=self.device, dtype=torch.float32)
+            iq = torch.zeros((len(self.q))).to(device=self.device, dtype=self.dtype)
             for d, inv_idx, idx, partial_mask in zip(dists, inverse_indices, indices, partial_mask_sparse):
 
                 # Construct mask
@@ -826,7 +829,7 @@ class DebyeCalculator:
                 self.profiler.time('Batching and Distances')
 
             # Calculate scattering using Debye Equation
-            iq = torch.zeros((len(self.q))).to(device=self.device, dtype=torch.float32)
+            iq = torch.zeros((len(self.q))).to(device=self.device, dtype=self.dtype)
             for d, inv_idx, idx, partial_mask in zip(dists, inverse_indices, indices, partial_mask_sparse):
 
                 # Construct mask
@@ -930,7 +933,7 @@ class DebyeCalculator:
                 self.profiler.time('Batching and Distances')
 
             # Calculate scattering using Debye Equation
-            iq = torch.zeros((len(self.q))).to(device=self.device, dtype=torch.float32)
+            iq = torch.zeros((len(self.q))).to(device=self.device, dtype=self.dtype)
             for d, inv_idx, idx, partial_mask in zip(dists, inverse_indices, indices, partial_mask_sparse):
 
                 # Construct mask
@@ -1040,7 +1043,7 @@ class DebyeCalculator:
                 self.profiler.time('Batching and Distances')
 
             # Calculate scattering using Debye Equation
-            iq = torch.zeros((len(self.q))).to(device=self.device, dtype=torch.float32)
+            iq = torch.zeros((len(self.q))).to(device=self.device, dtype=self.dtype)
             for d, inv_idx, idx, partial_mask in zip(dists, inverse_indices, indices, partial_mask_sparse):
 
                 # Construct mask
