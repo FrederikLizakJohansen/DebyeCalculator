@@ -137,7 +137,7 @@ class DebyeCalculator:
             radiation_type (str): Type of radiation for form factor calculations ('xray' or 'neutron'). Default is 'xray'
             rad_type (str): Alias for 'radiation_type'. Default is 'xray'.
             profile (bool): Activate profiler. Default is False.
-            dtype (torch.dtype): Data type for tensors. Default is torch.float32.
+            dtype (torch.dtype): Data type for tensors. 32-bit and 64-bit floats are currently supported. Default is torch.float32.
         """
 
         # Handling CUDA availability
@@ -195,8 +195,8 @@ class DebyeCalculator:
             self.profiler = Profiler()
         
         # Initialise ranges
-        self.q = torch.arange(self.qmin, self.qmax, self.qstep).unsqueeze(-1).to(device=self.device)
-        self.r = torch.arange(self.rmin, self.rmax, self.rstep).unsqueeze(-1).to(device=self.device)
+        self.q = torch.arange(self.qmin, self.qmax, self.qstep).unsqueeze(-1).to(device=self.device, dtype=self.dtype)
+        self.r = torch.arange(self.rmin, self.rmax, self.rstep).unsqueeze(-1).to(device=self.device, dtype=self.dtype)
 
         with importlib.resources.open_text('debyecalculator.utility', 'elements_info.yaml') as yaml_file:
             self.FORM_FACTOR_COEF = yaml.safe_load(yaml_file)
@@ -301,6 +301,12 @@ class DebyeCalculator:
                 f"The qstep that was chosen is too large and might result in unwanted signal artifacts. With rmax={self.rmax} and rstep={self.rstep}, consider using qstep<={optimal_qstep:2.3f}.",
                 UserWarning
             )
+        
+        # Dtype
+        if self.dtype not in (torch.float32, torch.float64):
+            raise ValueError(
+                f"Invalid dtype {self.dtype}. Only torch.float32 and torch.float64 are supported."
+            )
     
     def update_parameters(
         self,
@@ -329,9 +335,9 @@ class DebyeCalculator:
         self.parameter_constraint_assertion()
 
         # Re-initialise ranges
-        if np.any([k in ['qmin','qmax','qstep','rmin', 'rmax', 'rstep', 'device'] for k in kwargs.keys()]):
-            self.q = torch.arange(self.qmin, self.qmax, self.qstep).unsqueeze(-1).to(device=self.device)
-            self.r = torch.arange(self.rmin, self.rmax, self.rstep).unsqueeze(-1).to(device=self.device)
+        if np.any([k in ['qmin','qmax','qstep','rmin', 'rmax', 'rstep', 'device', 'dtype'] for k in kwargs.keys()]):
+            self.q = torch.arange(self.qmin, self.qmax, self.qstep).unsqueeze(-1).to(device=self.device, dtype=self.dtype)
+            self.r = torch.arange(self.rmin, self.rmax, self.rstep).unsqueeze(-1).to(device=self.device, dtype=self.dtype)
             for key,val in self.FORM_FACTOR_COEF.items():
                 self.FORM_FACTOR_COEF[key] = val.to(device=self.device)
 
