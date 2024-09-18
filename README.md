@@ -4,7 +4,7 @@
 [![ChemRxiv](https://img.shields.io/badge/ChemRxiv%20%20-8A2BE2)](https://chemrxiv.org/engage/chemrxiv/article-details/651ec9668bab5d2055b2d009)
 [![ReadTheDocs](https://img.shields.io/readthedocs/debyecalculator)](https://debyecalculator.readthedocs.io/en/latest/)
 [![DOI](https://joss.theoj.org/papers/10.21105/joss.06024/status.svg)](https://doi.org/10.21105/joss.06024)
-![PyPI - Downloads](https://img.shields.io/pypi/dm/DebyeCalculator)
+[![PyPI - Downloads](https://img.shields.io/pypi/dm/DebyeCalculator)](https://pypistats.org/packages/debyecalculator)
 
 <img src="https://raw.githubusercontent.com/FrederikLizakJohansen/DebyeCalculator/main/logo_DebyeCalculator.png" alt="DebyeCalculator" width="350"/>
 
