@@ -574,561 +574,292 @@ class DebyeCalculator:
             partial_mask_sparse = torch.ones((int((N*(N-1))/2),), dtype=torch.bool)
 
         return partial_mask_sparse, partial_mask_struc, partial_mask_other
+    
+    def _initialize_structures(self, structure_source, radii=None):
+        """
+        Initialize structures from the provided structure source.
 
-    def iq(
+        Parameters:
+            structure_source: The source of the structure(s).
+            radii: Radii for particle generation (if needed).
+
+        Returns:
+            List of initialized structures.
+        """
+        if not isinstance(structure_source, list):
+            structure_source = [structure_source]
+
+        structures = []
+        for i, item in enumerate(structure_source):
+            structure_output = self._initialise_structure(item, radii, disable_pbar=True)
+
+            if isinstance(structure_output, list):
+                structures.extend(structure_output)
+            else:
+                structures.append(structure_output)
+
+        if self.profile:
+            self.profiler.time('Setup structures and form factors')
+
+        return structures
+    
+    def compute_iq(
         self,
-        structure_source: StructureSourceType,
-        radii: Union[List[float], float, None] = None,
+        structure: StructureTuple,
         partial: str = None,
-        keep_on_device: bool = False,
         include_self_scattering: bool = True,
-    ) -> Union[IqTuple, List[IqTuple]]:
+    ) -> torch.Tensor:
+        """
+        Compute the scattering intensity I(Q) for a given structure.
+
+        Parameters:
+            structure (StructureTuple): The atomic structure.
+            partial (str): Partial pattern for scattering calculation.
+            include_self_scattering (bool): Whether to include self-scattering.
+
+        Returns:
+            torch.Tensor: The computed I(Q) values.
+        """
+        # Calculate distances and batch
+        if self.batch_size is None:
+            self.batch_size = self._max_batch_size
+
+        N = structure.xyz.size(0)
+        triu_indices = torch.triu_indices(N, N, offset=1)
+
+        # Generate all distances, and batch
+        dists = torch.norm(structure.xyz[:, None] - structure.xyz, dim=2, p=2)[triu_indices[0], triu_indices[1]].split(self.batch_size)
+
+        # Generate partial masks
+        partial_mask_sparse, partial_mask_struc, partial_mask_other = self.generate_partial_masks(structure, partial)
+
+        # Batch mask and other indices
+        partial_mask_sparse = partial_mask_sparse.to(device=self.device).split(self.batch_size)
+        indices = structure.triu_indices.split(self.batch_size, dim=1)
+        inverse_indices = structure.unique_inverse.split(self.batch_size, dim=1)
+
+        if self.profile:
+            self.profiler.time('Batching and Distances')
+
+        # Calculate scattering using Debye Equation
+        iq = torch.zeros((len(self.q))).to(device=self.device, dtype=self.dtype)
+        for d, inv_idx, idx, partial_mask in zip(dists, inverse_indices, indices, partial_mask_sparse):
+
+            # Construct mask
+            threshold_mask = d >= self.rthres
+            mask = threshold_mask & partial_mask
+
+            # Calculate scattering
+            occ_product = structure.occupancy[idx[0]] * structure.occupancy[idx[1]]
+            sinc = torch.sinc(d[mask] * self.q / torch.pi)
+            ffp = structure.unique_form_factors[inv_idx[0]] * structure.unique_form_factors[inv_idx[1]]
+            iq += torch.sum(occ_product.unsqueeze(-1)[mask] * ffp[mask] * sinc.permute(1, 0), dim=0)
+
+        # Apply Debye-Waller Isotropic Atomic Displacement
+        if self.biso != 0.0:
+            iq *= torch.exp(-self.q.squeeze(-1).pow(2) * self.biso / (8 * torch.pi ** 2))
+
+        # Self-scattering contribution
+        if include_self_scattering:
+            self_scattering_mask = torch.zeros((N,), dtype=bool)
+            self_scattering_mask[partial_mask_struc] = True
+            self_scattering_mask[partial_mask_other] = True
+
+            sinc = torch.ones((structure.size, len(self.q))).to(device=self.device)[self_scattering_mask]
+            iq += torch.sum(
+                (structure.occupancy[self_scattering_mask].unsqueeze(-1) * structure.unique_form_factors[structure.structure_inverse][self_scattering_mask]) ** 2 * sinc,
+                dim=0
+            ) / 2
+
+        if self.profile:
+            self.profiler.time('I(Q)')
+
+        return iq
+
+    def compute_sq(self, iq: torch.Tensor, structure: StructureTuple) -> torch.Tensor:
+        """
+        Compute the structure function S(Q) from I(Q).
+
+        Parameters:
+            iq (torch.Tensor): The scattering intensity I(Q).
+            structure (StructureTuple): The atomic structure.
+
+        Returns:
+            torch.Tensor: The computed S(Q) values.
+        """
+        sq = iq / structure.form_avg_sq / structure.size
+
+        if self.profile:
+            self.profiler.time('S(Q)')
+
+        return sq
+
+    def compute_fq(self, sq: torch.Tensor) -> torch.Tensor:
+        """
+        Compute the reduced structure function F(Q) from S(Q).
+
+        Parameters:
+            sq (torch.Tensor): The structure function S(Q).
+
+        Returns:
+            torch.Tensor: The computed F(Q) values.
+        """
+        fq = self.q.squeeze(-1) * sq
+
+        if self.profile:
+            self.profiler.time('F(Q)')
+
+        return fq
+
+    def compute_gr(self, fq: torch.Tensor) -> torch.Tensor:
+        """
+        Compute the reduced pair distribution function G(r) from F(Q).
+
+        Parameters:
+            fq (torch.Tensor): The reduced structure function F(Q).
+
+        Returns:
+            torch.Tensor: The computed G(r) values.
+        """
+        damp = 1 if self.qdamp == 0.0 else torch.exp(-(self.r.squeeze(-1) * self.qdamp).pow(2) / 2)
+        lorch_mod = 1 if not self.lorch_mod else torch.sinc(self.q * self.lorch_mod * (torch.pi / self.qmax))
+        gr = (2 / torch.pi) * torch.sum(fq.unsqueeze(-1) * torch.sin(self.q * self.r.permute(1, 0)) * self.qstep * lorch_mod, dim=0) * damp
+
+        if self.profile:
+            self.profiler.time('G(r)')
+
+        return gr
+    
+    def iq(self, structure_source, radii=None, partial=None, keep_on_device=False, include_self_scattering=True):
         """
         Calculate the scattering intensity I(Q) for the given atomic structure(s).
-
-        Parameters:
-            structure_source (StructureSourceType): Atomic structure source in XYZ/CIF format, ASE Atoms object, or as a tuple of (atomic_identities, atomic_positions).
-            radii (Union[List[float], float, None]): List/float of radii/radius of particle(s) to generate with parsed CIF.
-            partial (str): String on the form 'X-Y' where 'X' and 'Y' are elements in either structure. Used for calculating partial scattering patterns. Default is None.
-            keep_on_device (bool): Flag to keep the results on the class device. Default is False, and will return numpy arrays on CPU.
-            include_self_scattering (bool): Flag to compute self-scattering contribution. Default is True.
-
-        Returns:
-            Union[IqTuple, List[IqTuple]]: IqTuple containing Q-values and scattering intensity I(Q) or a list of such tuples.
-
-        Raises:
-            TypeError: If the structure source is of an invalid type.
-            IOError: If there is an issue loading the structure from the specified file.
-            ValueError: If the file extension is not valid or when providing .cif data file, radii is not provided.
         """
-        def compute_iq(structure):
-
-            # Calculate distances and batch
-            if self.batch_size is None:
-                self.batch_size = self._max_batch_size
-
-            # Generate the upper trianfular indices
-            N = structure.xyz.size(0)
-            triu_indices = torch.triu_indices(N, N, offset=1)
-
-            # Generate all distances, and batch
-            dists = torch.norm(structure.xyz[:,None] - structure.xyz, dim=2, p=2)[triu_indices[0], triu_indices[1]].split(self.batch_size)
-
-            # Generate partial masks
-            partial_mask_sparse, partial_mask_struc, partial_mask_other = self.generate_partial_masks(structure, partial)
-
-            # Batch mask and other indices
-            partial_mask_sparse = partial_mask_sparse.to(device=self.device).split(self.batch_size)
-            indices = structure.triu_indices.split(self.batch_size, dim=1)
-            inverse_indices = structure.unique_inverse.split(self.batch_size, dim=1)
-
-            if self.profile:
-                self.profiler.time('Batching and Distances')
-
-            # Calculate scattering using Debye Equation
-            iq = torch.zeros((len(self.q))).to(device=self.device, dtype=self.dtype)
-            for d, inv_idx, idx, partial_mask in zip(dists, inverse_indices, indices, partial_mask_sparse):
-                
-                # Construct mask
-                threshold_mask = d >= self.rthres
-                mask = threshold_mask & partial_mask
-
-                # Calcualte scattering
-                occ_product = structure.occupancy[idx[0]] * structure.occupancy[idx[1]]
-                sinc = torch.sinc(d[mask] * self.q / torch.pi)
-                ffp = structure.unique_form_factors[inv_idx[0]] * structure.unique_form_factors[inv_idx[1]]
-                iq += torch.sum(occ_product.unsqueeze(-1)[mask] * ffp[mask] * sinc.permute(1,0), dim=0)
-
-            # Apply Debye-Weller Isotropic Atomic Displacement
-            if self.biso != 0.0:
-                iq *= torch.exp(-self.q.squeeze(-1).pow(2) * self.biso/(8*torch.pi**2))
-            
-            # Self-scattering contribution
-            if include_self_scattering:
-                self_scattering_mask = torch.zeros((N,), dtype=bool)
-                self_scattering_mask[partial_mask_struc] = True
-                self_scattering_mask[partial_mask_other] = True
-
-                sinc = torch.ones((structure.size, len(self.q))).to(device=self.device)[self_scattering_mask]
-                iq += torch.sum((structure.occupancy[self_scattering_mask].unsqueeze(-1) * structure.unique_form_factors[structure.structure_inverse][self_scattering_mask])**2 * sinc, dim=0) / 2
-
-            if self.profile:
-                self.profiler.time('I(Q)')
-
-            return iq
-        
         if self.profile:
             self.profiler.reset()
-        
-        if not isinstance(structure_source, list):
-            structure_source = [structure_source]
 
-        structures = []
-        for i, item in enumerate(structure_source):
-            structure_output = self._initialise_structure(item, radii, disable_pbar = True)
-
-            if isinstance(structure_output, list):
-                structures.extend(structure_output)
-            else:
-                structures.append(structure_output)
-
-        if self.profile:
-            self.profiler.time('Setup structures and form factors')
+        structures = self._initialize_structures(structure_source, radii)
 
         output = []
         for structure in structures:
-
-            output_tuple = IqTuple(self.q.squeeze(-1), compute_iq(structure))
+            iq_values = self.compute_iq(structure, partial, include_self_scattering)
+            output_tuple = IqTuple(self.q.squeeze(-1), iq_values)
             if not keep_on_device:
                 output_tuple = output_tuple._replace(
-                    q = output_tuple.q.cpu().numpy(),
-                    i = output_tuple.i.cpu().numpy()
+                    q=output_tuple.q.cpu().numpy(),
+                    i=output_tuple.i.cpu().numpy()
                 )
             output.append(output_tuple)
 
         return output if len(output) > 1 else output[0]
 
-    def sq(
-        self,
-        structure_source: StructureSourceType,
-        radii: Union[List[float], float, None] = None,
-        partial: str = None,
-        keep_on_device: bool = False,
-    ) -> Union[SqTuple, List[SqTuple]]:
-        """
-        Calculate the structure function S(Q) for the given atomic structure(s)
-
-        Parameters:
-            structure_source (StructureSourceType): Atomic structure source in XYZ/CIF format, ASE Atoms object or as a tuple of (atomic_identities, atomic_positions)
-            radii (Union[List[float], float, None]): List/float of radii/radius of particle(s) to generate with parsed CIF.
-            partial (str): String on the form 'X-Y' where 'X' and 'Y' are elements in either structure. Used for calculating partial scattering patterns. Default is None.
-            keep_on_device (bool): Flag to keep the results on the class device. Default is False, and will return numpy arrays on CPU
-
-        Returns:
-            SqTuple containing Q-values and structure function S(Q)
-        """
-        def compute_sq(structure):
-            # Calculate distances and batch
-            if self.batch_size is None:
-                self.batch_size = self._max_batch_size
-
-            # Generate the upper trianfular indices
-            N = structure.xyz.size(0)
-            triu_indices = torch.triu_indices(N, N, offset=1)
-
-            # Generate all distances, and batch
-            dists = torch.norm(structure.xyz[:,None] - structure.xyz, dim=2, p=2)[triu_indices[0], triu_indices[1]].split(self.batch_size)
-            
-            # Generate partial masks
-            partial_mask_sparse, partial_mask_struc, partial_mask_other = self.generate_partial_masks(structure, partial)
-
-            # Batch mask and other indices
-            partial_mask_sparse = partial_mask_sparse.to(device=self.device).split(self.batch_size)
-            indices = structure.triu_indices.split(self.batch_size, dim=1)
-            inverse_indices = structure.unique_inverse.split(self.batch_size, dim=1)
-            
-            if self.profile:
-                self.profiler.time('Batching and Distances')
-
-            # Calculate scattering using Debye Equation
-            iq = torch.zeros((len(self.q))).to(device=self.device, dtype=self.dtype)
-            for d, inv_idx, idx, partial_mask in zip(dists, inverse_indices, indices, partial_mask_sparse):
-
-                # Construct mask
-                threshold_mask = d >= self.rthres
-                mask = threshold_mask & partial_mask
-
-                # Calculate scattering
-                occ_product = structure.occupancy[idx[0]] * structure.occupancy[idx[1]]
-                sinc = torch.sinc(d[mask] * self.q / torch.pi)
-                ffp = structure.unique_form_factors[inv_idx[0]] * structure.unique_form_factors[inv_idx[1]]
-                iq += torch.sum(occ_product.unsqueeze(-1)[mask] * ffp[mask] * sinc.permute(1,0), dim=0)
-
-            # Apply Debye-Weller Isotropic Atomic Displacement
-            if self.biso != 0.0:
-                iq *= torch.exp(-self.q.squeeze(-1).pow(2) * self.biso/(8*torch.pi**2))
-        
-            # Calculate S(Q) and F(Q)
-            sq = iq/structure.form_avg_sq/structure.size
-            
-            if self.profile:
-                self.profiler.time('S(Q)')
-
-            return sq
-        
-        if self.profile:
-            self.profiler.reset()
-        
-        if not isinstance(structure_source, list):
-            structure_source = [structure_source]
-
-        structures = []
-        for i, item in enumerate(structure_source):
-            structure_output = self._initialise_structure(item, radii, disable_pbar = True)
-
-            if isinstance(structure_output, list):
-                structures.extend(structure_output)
-            else:
-                structures.append(structure_output)
-
-        if self.profile:
-            self.profiler.time('Setup structures and form factors')
-
-        output = []
-        for structure in structures:
-            output_tuple = SqTuple(self.q.squeeze(-1), compute_sq(structure))
-            if not keep_on_device:
-                output_tuple = output_tuple._replace(
-                    q = output_tuple.q.cpu().numpy(),
-                    s = output_tuple.s.cpu().numpy()
-                )
-            output.append(output_tuple)
-
-        return output if len(output) > 1 else output[0]
-
-    def fq(
-        self,
-        structure_source: StructureSourceType,
-        radii: Union[List[float], float, None] = None,
-        partial: str = None,
-        keep_on_device: bool = False,
-    ) -> Union[FqTuple, List[FqTuple]]:
+    def sq(self, structure_source, radii=None, partial=None, keep_on_device=False):
         """
         Calculate the structure function S(Q) for the given atomic structure(s).
-
-        Parameters:
-            structure_source (StructureSourceType): Atomic structure source in XYZ/CIF format, ASE Atoms object, or as a tuple of (atomic_identities, atomic_positions).
-            radii (Union[List[float], float, None]): List/float of radii/radius of particle(s) to generate with parsed CIF.
-            partial (str): String on the form 'X-Y' where 'X' and 'Y' are elements in either structure. Used for calculating partial scattering patterns. Default is None.
-            keep_on_device (bool): Flag to keep the results on the class device. Default is False, and will return numpy arrays on CPU.
-
-        Returns:
-            Union[SqTuple, List[SqTuple]]: SqTuple containing Q-values and structure function S(Q) or a list of such tuples.
-
-        Raises:
-            TypeError: If the structure source is of an invalid type.
-            IOError: If there is an issue loading the structure from the specified file.
-            ValueError: If the file extension is not valid or when providing .cif data file, radii is not provided.
         """
-        
-        def compute_fq(structure):
-            # Calculate distances and batch
-            if self.batch_size is None:
-                self.batch_size = self._max_batch_size
-
-            # Generate the upper trianfular indices
-            N = structure.xyz.size(0)
-            triu_indices = torch.triu_indices(N, N, offset=1)
-
-            # Generate all distances, and batch
-            dists = torch.norm(structure.xyz[:,None] - structure.xyz, dim=2, p=2)[triu_indices[0], triu_indices[1]].split(self.batch_size)
-            
-            # Generate partial masks
-            partial_mask_sparse, partial_mask_struc, partial_mask_other = self.generate_partial_masks(structure, partial)
-
-            # Batch mask and other indices
-            partial_mask_sparse = partial_mask_sparse.to(device=self.device).split(self.batch_size)
-            indices = structure.triu_indices.split(self.batch_size, dim=1)
-            inverse_indices = structure.unique_inverse.split(self.batch_size, dim=1)
-            
-            if self.profile:
-                self.profiler.time('Batching and Distances')
-
-            # Calculate scattering using Debye Equation
-            iq = torch.zeros((len(self.q))).to(device=self.device, dtype=self.dtype)
-            for d, inv_idx, idx, partial_mask in zip(dists, inverse_indices, indices, partial_mask_sparse):
-
-                # Construct mask
-                threshold_mask = d >= self.rthres
-                mask = threshold_mask & partial_mask
-
-                # Calculate scattering
-                occ_product = structure.occupancy[idx[0]] * structure.occupancy[idx[1]]
-                sinc = torch.sinc(d[mask] * self.q / torch.pi)
-                ffp = structure.unique_form_factors[inv_idx[0]] * structure.unique_form_factors[inv_idx[1]]
-                iq += torch.sum(occ_product.unsqueeze(-1)[mask] * ffp[mask] * sinc.permute(1,0), dim=0)
-
-            # Apply Debye-Weller Isotropic Atomic Displacement
-            if self.biso != 0.0:
-                iq *= torch.exp(-self.q.squeeze(-1).pow(2) * self.biso/(8*torch.pi**2))
-        
-            # Calculate S(Q) and F(Q)
-            sq = iq/structure.form_avg_sq/structure.size
-            fq = self.q.squeeze(-1) * sq
-            
-            if self.profile:
-                self.profiler.time('F(Q)')
-
-            return fq
-        
         if self.profile:
             self.profiler.reset()
-        
-        if not isinstance(structure_source, list):
-            structure_source = [structure_source]
 
-        structures = []
-        for i, item in enumerate(structure_source):
-            structure_output = self._initialise_structure(item, radii, disable_pbar = True)
-
-            if isinstance(structure_output, list):
-                structures.extend(structure_output)
-            else:
-                structures.append(structure_output)
-
-        if self.profile:
-            self.profiler.time('Setup structures and form factors')
+        structures = self._initialize_structures(structure_source, radii)
 
         output = []
         for structure in structures:
-            output_tuple = FqTuple(self.q.squeeze(-1), compute_fq(structure))
+            iq_values = self.compute_iq(structure, partial, include_self_scattering=False)
+            sq_values = self.compute_sq(iq_values, structure)
+            output_tuple = SqTuple(self.q.squeeze(-1), sq_values)
             if not keep_on_device:
                 output_tuple = output_tuple._replace(
-                    q = output_tuple.q.cpu().numpy(),
-                    f = output_tuple.f.cpu().numpy()
+                    q=output_tuple.q.cpu().numpy(),
+                    s=output_tuple.s.cpu().numpy()
                 )
             output.append(output_tuple)
 
         return output if len(output) > 1 else output[0]
 
-    def gr(
-        self,
-        structure_source: StructureSourceType,
-        radii: Union[List[float], float, None] = None,
-        partial: str = None,
-        keep_on_device: bool = False,
-    ) -> Union[GrTuple, List[GrTuple]]:
+    def fq(self, structure_source, radii=None, partial=None, keep_on_device=False):
+        """
+        Calculate the reduced structure function F(Q) for the given atomic structure(s).
+        """
+        if self.profile:
+            self.profiler.reset()
+
+        structures = self._initialize_structures(structure_source, radii)
+
+        output = []
+        for structure in structures:
+            iq_values = self.compute_iq(structure, partial, include_self_scattering=False)
+            sq_values = self.compute_sq(iq_values, structure)
+            fq_values = self.compute_fq(sq_values)
+            output_tuple = FqTuple(self.q.squeeze(-1), fq_values)
+            if not keep_on_device:
+                output_tuple = output_tuple._replace(
+                    q=output_tuple.q.cpu().numpy(),
+                    f=output_tuple.f.cpu().numpy()
+                )
+            output.append(output_tuple)
+
+        return output if len(output) > 1 else output[0]
+
+    def gr(self, structure_source, radii=None, partial=None, keep_on_device=False):
         """
         Calculate the reduced pair distribution function G(r) for the given atomic structure(s).
-
-        Parameters:
-            structure_source (StructureSourceType): Atomic structure source in XYZ/CIF format, ASE Atoms object, or as a tuple of (atomic_identities, atomic_positions).
-            radii (Union[List[float], float, None]): List/float of radii/radius of particle(s) to generate with parsed CIF.
-            partial (str): String on the form 'X-Y' where 'X' and 'Y' are elements in either structure. Used for calculating partial scattering patterns. Default is None.
-            keep_on_device (bool): Flag to keep the results on the class device. Default is False, and will return numpy arrays on CPU.
-
-        Returns:
-            Union[GrTuple, List[GrTuple]]: GrTuple containing r-values and reduced pair distribution function G(r) or a list of such tuples.
-
-        Raises:
-            TypeError: If the structure source is of an invalid type.
-            IOError: If there is an issue loading the structure from the specified file.
-            ValueError: If the file extension is not valid or when providing .cif data file, radii is not provided.
         """
-        def compute_gr(structure):
-            # Calculate distances and batch
-            if self.batch_size is None:
-                self.batch_size = self._max_batch_size
-
-            # Generate the upper trianfular indices
-            N = structure.xyz.size(0)
-            triu_indices = torch.triu_indices(N, N, offset=1)
-
-            # Generate all distances, and batch
-            dists = torch.norm(structure.xyz[:,None] - structure.xyz, dim=2, p=2)[triu_indices[0], triu_indices[1]].split(self.batch_size)
-            
-            # Generate partial masks
-            partial_mask_sparse, partial_mask_struc, partial_mask_other = self.generate_partial_masks(structure, partial)
-
-            # Batch mask and other indices
-            partial_mask_sparse = partial_mask_sparse.to(device=self.device).split(self.batch_size)
-            indices = structure.triu_indices.split(self.batch_size, dim=1)
-            inverse_indices = structure.unique_inverse.split(self.batch_size, dim=1)
-            
-            if self.profile:
-                self.profiler.time('Batching and Distances')
-
-            # Calculate scattering using Debye Equation
-            iq = torch.zeros((len(self.q))).to(device=self.device, dtype=self.dtype)
-            for d, inv_idx, idx, partial_mask in zip(dists, inverse_indices, indices, partial_mask_sparse):
-
-                # Construct mask
-                threshold_mask = d >= self.rthres
-                mask = threshold_mask & partial_mask
-
-                # Calculate scattering
-                occ_product = structure.occupancy[idx[0]] * structure.occupancy[idx[1]]
-                sinc = torch.sinc(d[mask] * self.q / torch.pi)
-                ffp = structure.unique_form_factors[inv_idx[0]] * structure.unique_form_factors[inv_idx[1]]
-                iq += torch.sum(occ_product.unsqueeze(-1)[mask] * ffp[mask] * sinc.permute(1,0), dim=0)
-
-            # Apply Debye-Weller Isotropic Atomic Displacement
-            if self.biso != 0.0:
-                iq *= torch.exp(-self.q.squeeze(-1).pow(2) * self.biso/(8*torch.pi**2))
-        
-            # Calculate S(Q), F(Q) and G(r)
-            sq = iq/structure.form_avg_sq/structure.size
-            fq = self.q.squeeze(-1) * sq
-
-            damp = 1 if self.qdamp == 0.0 else torch.exp(-(self.r.squeeze(-1) * self.qdamp).pow(2) / 2)
-            lorch_mod = 1 if self.lorch_mod == None else torch.sinc(self.q * self.lorch_mod*(torch.pi / self.qmax))
-            gr = (2 / torch.pi) * torch.sum(fq.unsqueeze(-1) * torch.sin(self.q * self.r.permute(1,0))*self.qstep * lorch_mod, dim=0) * damp
-            
-            if self.profile:
-                self.profiler.time('G(r)')
-            
-            return gr
-        
         if self.profile:
             self.profiler.reset()
+
+        structures = self._initialize_structures(structure_source, radii)
         
-        if not isinstance(structure_source, list):
-            structure_source = [structure_source]
-
-        structures = []
-        for i, item in enumerate(structure_source):
-            structure_output = self._initialise_structure(item, radii, disable_pbar = True)
-
-            if isinstance(structure_output, list):
-                structures.extend(structure_output)
-            else:
-                structures.append(structure_output)
-
-        if self.profile:
-            self.profiler.time('Setup structures and form factors')
-
         output = []
         for structure in structures:
-            output_tuple = GrTuple(self.r.squeeze(-1), compute_gr(structure))
+            iq_values = self.compute_iq(structure, partial, include_self_scattering=False)
+            sq_values = self.compute_sq(iq_values, structure)
+            fq_values = self.compute_fq(sq_values)
+            gr_values = self.compute_gr(fq_values)
+            output_tuple = GrTuple(self.r.squeeze(-1), gr_values)
             if not keep_on_device:
                 output_tuple = output_tuple._replace(
-                    r = output_tuple.r.cpu().numpy(),
-                    g = output_tuple.g.cpu().numpy()
+                    r=output_tuple.r.cpu().numpy(),
+                    g=output_tuple.g.cpu().numpy()
                 )
             output.append(output_tuple)
 
         return output if len(output) > 1 else output[0]
 
-    def _get_all(
-        self,
-        structure_source: StructureSourceType,
-        radii: Union[List[float], float, None] = None,
-        partial: str = None,
-        keep_on_device: bool = False,
-        include_self_scattering: bool = True,
-    ) -> Union[AllTuple, List[AllTuple]]:
+    def _get_all(self, structure_source, radii=None, partial=None, keep_on_device=False, include_self_scattering=True):
         """
         Calculate I(Q), S(Q), F(Q), and G(r) for the given atomic structure(s).
-
-        Parameters:
-            structure_source (StructureSourceType): Atomic structure source in XYZ/CIF format, ASE Atoms object, or as a tuple of (atomic_identities, atomic_positions).
-            radii (Union[List[float], float, None]): List/float of radii/radius of particle(s) to generate with parsed CIF.
-            partial (str): String on the form 'X-Y' where 'X' and 'Y' are elements in either structure. Used for calculating partial scattering patterns. Default is None.
-            keep_on_device (bool): Flag to keep the results on the class device. Default is False, and will return numpy arrays on CPU.
-            include_self_scattering (bool): Flag to compute self-scattering contribution. Default is True.
-
-        Returns:
-            Union[AllTuple, List[AllTuple]]: AllTuple containing r-values, Q-values, I(Q), S(Q), F(Q), and G(r) or a list of such tuples.
-
-        Raises:
-            TypeError: If the structure source is of an invalid type.
-            IOError: If there is an issue loading the structure from the specified file.
-            ValueError: If the file extension is not valid or when providing .cif data file, radii is not provided.
         """
-        def compute_all(structure):
-            # Calculate distances and batch
-            if self.batch_size is None:
-                self.batch_size = self._max_batch_size
-
-            # Generate the upper trianfular indices
-            N = structure.xyz.size(0)
-            triu_indices = torch.triu_indices(N, N, offset=1)
-
-            # Generate all distances, and batch
-            dists = torch.norm(structure.xyz[:,None] - structure.xyz, dim=2, p=2)[triu_indices[0], triu_indices[1]].split(self.batch_size)
-            
-            # Generate partial masks
-            partial_mask_sparse, partial_mask_struc, partial_mask_other = self.generate_partial_masks(structure, partial)
-
-            # Batch mask and other indices
-            partial_mask_sparse = partial_mask_sparse.to(device=self.device).split(self.batch_size)
-            indices = structure.triu_indices.split(self.batch_size, dim=1)
-            inverse_indices = structure.unique_inverse.split(self.batch_size, dim=1)
-            
-            if self.profile:
-                self.profiler.time('Batching and Distances')
-
-            # Calculate scattering using Debye Equation
-            iq = torch.zeros((len(self.q))).to(device=self.device, dtype=self.dtype)
-            for d, inv_idx, idx, partial_mask in zip(dists, inverse_indices, indices, partial_mask_sparse):
-
-                # Construct mask
-                threshold_mask = d >= self.rthres
-                mask = threshold_mask & partial_mask
-
-                # Calculate scattering
-                occ_product = structure.occupancy[idx[0]] * structure.occupancy[idx[1]]
-                sinc = torch.sinc(d[mask] * self.q / torch.pi)
-                ffp = structure.unique_form_factors[inv_idx[0]] * structure.unique_form_factors[inv_idx[1]]
-                iq += torch.sum(occ_product.unsqueeze(-1)[mask] * ffp[mask] * sinc.permute(1,0), dim=0)
-
-            # Apply Debye-Weller Isotropic Atomic Displacement
-            if self.biso != 0.0:
-                iq *= torch.exp(-self.q.squeeze(-1).pow(2) * self.biso/(8*torch.pi**2))
-        
-            # Calculate S(Q), F(Q) and G(r)
-            sq = iq/structure.form_avg_sq/structure.size
-            fq = self.q.squeeze(-1) * sq
-
-            damp = 1 if self.qdamp == 0.0 else torch.exp(-(self.r.squeeze(-1) * self.qdamp).pow(2) / 2)
-            lorch_mod = 1 if self.lorch_mod == None else torch.sinc(self.q * self.lorch_mod*(torch.pi / self.qmax))
-            gr = (2 / torch.pi) * torch.sum(fq.unsqueeze(-1) * torch.sin(self.q * self.r.permute(1,0))*self.qstep * lorch_mod, dim=0) * damp
-            
-            # Self-scattering contribution
-            if include_self_scattering:
-                self_scattering_mask = torch.zeros((N,), dtype=bool)
-                self_scattering_mask[partial_mask_struc] = True
-                self_scattering_mask[partial_mask_other] = True
-
-                sinc = torch.ones((structure.size, len(self.q))).to(device=self.device)[self_scattering_mask]
-                iq += torch.sum((structure.occupancy[self_scattering_mask].unsqueeze(-1) * structure.unique_form_factors[structure.structure_inverse][self_scattering_mask])**2 * sinc, dim=0) / 2
-            
-            if self.profile:
-                self.profiler.time('All')
-
-            return iq, sq, fq, gr
-        
         if self.profile:
             self.profiler.reset()
-        
-        if not isinstance(structure_source, list):
-            structure_source = [structure_source]
 
-        structures = []
-        for i, item in enumerate(structure_source):
-            structure_output = self._initialise_structure(item, radii, disable_pbar = True)
-
-            if isinstance(structure_output, list):
-                structures.extend(structure_output)
-            else:
-                structures.append(structure_output)
-
-        if self.profile:
-            self.profiler.time('Setup structures and form factors')
+        structures = self._initialize_structures(structure_source, radii)
 
         output = []
         for structure in structures:
-            iq, sq, fq, gr = compute_all(structure)
+            iq_values = self.compute_iq(structure, partial, include_self_scattering=False)
+            sq_values = self.compute_sq(iq_values, structure)
+            fq_values = self.compute_fq(sq_values)
+            gr_values = self.compute_gr(fq_values)
             output_tuple = AllTuple(
                 self.r.squeeze(-1),
                 self.q.squeeze(-1),
-                iq,
-                sq,
-                fq,
-                gr
+                iq_values,
+                sq_values,
+                fq_values,
+                gr_values
             )
             if not keep_on_device:
                 output_tuple = output_tuple._replace(
-                    r = output_tuple.r.cpu().numpy(),
-                    q = output_tuple.q.cpu().numpy(),
-                    i = output_tuple.i.cpu().numpy(),
-                    s = output_tuple.s.cpu().numpy(),
-                    f = output_tuple.f.cpu().numpy(),
-                    g = output_tuple.g.cpu().numpy()
+                    r=output_tuple.r.cpu().numpy(),
+                    q=output_tuple.q.cpu().numpy(),
+                    i=output_tuple.i.cpu().numpy(),
+                    s=output_tuple.s.cpu().numpy(),
+                    f=output_tuple.f.cpu().numpy(),
+                    g=output_tuple.g.cpu().numpy()
                 )
             output.append(output_tuple)
 
         return output if len(output) > 1 else output[0]
+    
 
     def _is_notebook(
         self,
