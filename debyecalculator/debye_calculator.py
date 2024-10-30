@@ -676,7 +676,11 @@ class DebyeCalculator:
 
         return iq
 
-    def compute_sq(self, iq: torch.Tensor, structure: StructureTuple) -> torch.Tensor:
+    def compute_sq(
+        self, 
+        iq: torch.Tensor,
+        structure: StructureTuple
+    ) -> torch.Tensor:
         """
         Compute the structure function S(Q) from I(Q).
 
@@ -694,7 +698,10 @@ class DebyeCalculator:
 
         return sq
 
-    def compute_fq(self, sq: torch.Tensor) -> torch.Tensor:
+    def compute_fq(
+        self,
+        sq: torch.Tensor
+    ) -> torch.Tensor:
         """
         Compute the reduced structure function F(Q) from S(Q).
 
@@ -711,7 +718,10 @@ class DebyeCalculator:
 
         return fq
 
-    def compute_gr(self, fq: torch.Tensor) -> torch.Tensor:
+    def compute_gr(
+        self,
+        fq: torch.Tensor
+    ) -> torch.Tensor:
         """
         Compute the reduced pair distribution function G(r) from F(Q).
 
@@ -730,9 +740,31 @@ class DebyeCalculator:
 
         return gr
     
-    def iq(self, structure_source, radii=None, partial=None, keep_on_device=False, include_self_scattering=True):
+    def iq(
+        self,
+        structure_source: StructureSourceType,
+        radii: Union[List[float], float, None] = None,
+        partial: str = None, 
+        keep_on_device: bool = False, 
+        include_self_scattering: bool = True,
+    ) -> Union[IqTuple, List[IqTuple]]:
         """
         Calculate the scattering intensity I(Q) for the given atomic structure(s).
+
+        Parameters:
+            structure_source (StructureSourceType): Atomic structure source in XYZ/CIF format, ASE Atoms object, or as a tuple of (atomic_identities, atomic_positions).
+            radii (Union[List[float], float, None]): List/float of radii/radius of particle(s) to generate with parsed CIF.
+            partial (str): String on the form 'X-Y' where 'X' and 'Y' are elements in either structure. Used for calculating partial scattering patterns. Default is None.
+            keep_on_device (bool): Flag to keep the results on the class device. Default is False, and will return numpy arrays on CPU.
+            include_self_scattering (bool): Flag to compute self-scattering contribution. Default is True.
+
+        Returns:
+            Union[IqTuple, List[IqTuple]]: IqTuple containing Q-values and scattering intensity I(Q) or a list of such tuples.
+
+        Raises:
+            TypeError: If the structure source is of an invalid type.
+            IOError: If there is an issue loading the structure from the specified file.
+            ValueError: If the file extension is not valid or when providing .cif data file, radii is not provided.
         """
         if self.profile:
             self.profiler.reset()
@@ -752,9 +784,24 @@ class DebyeCalculator:
 
         return output if len(output) > 1 else output[0]
 
-    def sq(self, structure_source, radii=None, partial=None, keep_on_device=False):
+    def sq(
+        self,
+        structure_source: StructureSourceType,
+        radii: Union[List[float], float, None] = None,
+        partial: str = None, 
+        keep_on_device: bool = False, 
+    ) -> Union[SqTuple, List[SqTuple]]:
         """
         Calculate the structure function S(Q) for the given atomic structure(s).
+
+        Parameters:
+            structure_source (StructureSourceType): Atomic structure source in XYZ/CIF format, ASE Atoms object or as a tuple of (atomic_identities, atomic_positions)
+            radii (Union[List[float], float, None]): List/float of radii/radius of particle(s) to generate with parsed CIF.
+            partial (str): String on the form 'X-Y' where 'X' and 'Y' are elements in either structure. Used for calculating partial scattering patterns. Default is None.
+            keep_on_device (bool): Flag to keep the results on the class device. Default is False, and will return numpy arrays on CPU
+
+        Returns:
+            SqTuple containing Q-values and structure function S(Q)
         """
         if self.profile:
             self.profiler.reset()
@@ -775,9 +822,29 @@ class DebyeCalculator:
 
         return output if len(output) > 1 else output[0]
 
-    def fq(self, structure_source, radii=None, partial=None, keep_on_device=False):
+    def fq(
+        self,
+        structure_source: StructureSourceType,
+        radii: Union[List[float], float, None] = None,
+        partial: str = None, 
+        keep_on_device: bool = False, 
+    ) -> Union[FqTuple, List[FqTuple]]:
         """
         Calculate the reduced structure function F(Q) for the given atomic structure(s).
+
+        Parameters:
+            structure_source (StructureSourceType): Atomic structure source in XYZ/CIF format, ASE Atoms object, or as a tuple of (atomic_identities, atomic_positions).
+            radii (Union[List[float], float, None]): List/float of radii/radius of particle(s) to generate with parsed CIF.
+            partial (str): String on the form 'X-Y' where 'X' and 'Y' are elements in either structure. Used for calculating partial scattering patterns. Default is None.
+            keep_on_device (bool): Flag to keep the results on the class device. Default is False, and will return numpy arrays on CPU.
+
+        Returns:
+            Union[SqTuple, List[SqTuple]]: SqTuple containing Q-values and structure function S(Q) or a list of such tuples.
+
+        Raises:
+            TypeError: If the structure source is of an invalid type.
+            IOError: If there is an issue loading the structure from the specified file.
+            ValueError: If the file extension is not valid or when providing .cif data file, radii is not provided.
         """
         if self.profile:
             self.profiler.reset()
@@ -799,9 +866,29 @@ class DebyeCalculator:
 
         return output if len(output) > 1 else output[0]
 
-    def gr(self, structure_source, radii=None, partial=None, keep_on_device=False):
+    def gr(
+        self,
+        structure_source: StructureSourceType,
+        radii: Union[List[float], float, None] = None,
+        partial: str = None, 
+        keep_on_device: bool = False, 
+    ) -> Union[GrTuple, List[GrTuple]]:
         """
         Calculate the reduced pair distribution function G(r) for the given atomic structure(s).
+
+        Parameters:
+            structure_source (StructureSourceType): Atomic structure source in XYZ/CIF format, ASE Atoms object, or as a tuple of (atomic_identities, atomic_positions).
+            radii (Union[List[float], float, None]): List/float of radii/radius of particle(s) to generate with parsed CIF.
+            partial (str): String on the form 'X-Y' where 'X' and 'Y' are elements in either structure. Used for calculating partial scattering patterns. Default is None.
+            keep_on_device (bool): Flag to keep the results on the class device. Default is False, and will return numpy arrays on CPU.
+
+        Returns:
+            Union[GrTuple, List[GrTuple]]: GrTuple containing r-values and reduced pair distribution function G(r) or a list of such tuples.
+
+        Raises:
+            TypeError: If the structure source is of an invalid type.
+            IOError: If there is an issue loading the structure from the specified file.
+            ValueError: If the file extension is not valid or when providing .cif data file, radii is not provided.
         """
         if self.profile:
             self.profiler.reset()
@@ -824,9 +911,29 @@ class DebyeCalculator:
 
         return output if len(output) > 1 else output[0]
 
-    def _get_all(self, structure_source, radii=None, partial=None, keep_on_device=False, include_self_scattering=True):
+    def _get_all(
+        self,
+        structure_source: StructureSourceType,
+        radii: Union[List[float], float, None] = None,
+        partial: str = None, 
+        keep_on_device: bool = False, 
+    ) -> Union[AllTuple, List[AllTuple]]:
         """
         Calculate I(Q), S(Q), F(Q), and G(r) for the given atomic structure(s).
+        Parameters:
+            structure_source (StructureSourceType): Atomic structure source in XYZ/CIF format, ASE Atoms object, or as a tuple of (atomic_identities, atomic_positions).
+            radii (Union[List[float], float, None]): List/float of radii/radius of particle(s) to generate with parsed CIF.
+            partial (str): String on the form 'X-Y' where 'X' and 'Y' are elements in either structure. Used for calculating partial scattering patterns. Default is None.
+            keep_on_device (bool): Flag to keep the results on the class device. Default is False, and will return numpy arrays on CPU.
+            include_self_scattering (bool): Flag to compute self-scattering contribution. Default is True.
+
+        Returns:
+            Union[AllTuple, List[AllTuple]]: AllTuple containing r-values, Q-values, I(Q), S(Q), F(Q), and G(r) or a list of such tuples.
+
+        Raises:
+            TypeError: If the structure source is of an invalid type.
+            IOError: If there is an issue loading the structure from the specified file.
+            ValueError: If the file extension is not valid or when providing .cif data file, radii is not provided.
         """
         if self.profile:
             self.profiler.reset()
@@ -836,13 +943,14 @@ class DebyeCalculator:
         output = []
         for structure in structures:
             iq_values = self.compute_iq(structure, partial, include_self_scattering=False)
+            iq_values_self_scattering = self.compute_iq(structure, partial)
             sq_values = self.compute_sq(iq_values, structure)
             fq_values = self.compute_fq(sq_values)
             gr_values = self.compute_gr(fq_values)
             output_tuple = AllTuple(
                 self.r.squeeze(-1),
                 self.q.squeeze(-1),
-                iq_values,
+                iq_values_self_scattering,
                 sq_values,
                 fq_values,
                 gr_values
