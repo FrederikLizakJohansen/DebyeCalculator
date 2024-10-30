@@ -134,7 +134,7 @@ class DebyeBenchmarker:
 
         self.show_progress_bar = show_progress_bar
 
-        self.ref_stat_csv_titan_10k = pkg_resources.resource_filename(__name__, 'benchmark_reference_TITANRTX_10k.csv')
+        self.ref_stat_csv_titan_10k = pkg_resources.resource_filename(__name__, 'benchmark_reference_TITANRTX.csv')
         self.reference_stat_titan_10k = from_csv(self.ref_stat_csv_titan_10k)
         self.reference_stat_titan_10k.name = 'TITAN RTX'
         
@@ -185,7 +185,7 @@ class DebyeBenchmarker:
         Returns:
             Statistics: TITAN RTX
         """
-        return self.reference_stat_titan
+        return self.reference_stat_titan_10k
 
     def get_reference_stat_diffpy(self) -> Statistics:
         """
