@@ -287,7 +287,7 @@ class DebyeCalculator:
             raise ValueError("batch_size must be non-negative.")
 
         # Device constraints
-        if self.device not in ['cpu', 'cuda']:
+        if self.device not in ['cpu', 'cuda', 'mps']:
             raise ValueError("Invalid device")
 
         # Radiation type constraints
@@ -651,7 +651,12 @@ class DebyeCalculator:
 
             # Calculate scattering
             occ_product = structure.occupancy[idx[0]] * structure.occupancy[idx[1]]
-            sinc = torch.sinc(d[mask] * self.q / torch.pi)
+            if self.device == 'mps':
+                x = d[mask] * self.q / torch.pi
+                sinc = torch.sin(torch.pi * x) / (torch.pi * x)
+            else:
+                sinc = torch.sinc(d[mask] * self.q / torch.pi)
+
             ffp = structure.unique_form_factors[inv_idx[0]] * structure.unique_form_factors[inv_idx[1]]
             iq += torch.sum(occ_product.unsqueeze(-1)[mask] * ffp[mask] * sinc.permute(1, 0), dim=0)
 
