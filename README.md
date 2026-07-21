@@ -11,6 +11,7 @@
 Welcome to `DebyeCalculator`! This is a simple tool for calculating the scattering intensity $I(Q)$ through the Debye scattering equation, the Total Scattering Structure Function $S(Q)$, the Reduced Total Scattering Function $F(Q)$, and the Reduced Atomic Pair Distribution Function $G(r)$ from an atomic structure. 
 The Debye scattering equation can be used to compute the scattering pattern of any atomic structure and is commonly used to study both crystalline and non-crystalline materials with a range of scattering techniques like powder diffraction, total scattering with pair distribution function and small-angle scattering. Although the Debye scattering equation is extremely versatile, the computation of the double sum, which scales O(N<sup>2</sup>), has limited the practical use of the equation.
 Here, we provide an optimised code for the calculation of the Debye scattering equation on Graphics processing units (GPUs) which accelerate the calculations with orders of magnitudes.
+> For ideal periodic crystals, [BraggCalculator](https://github.com/FrederikLizakJohansen/BraggCalculator) provides a complementary reciprocal-space approach to powder X-ray and neutron diffraction that exploits translational symmetry, while `DebyeCalculator` retains finite-size and non-periodic information through its real-space pair sum.
 
 1. [Installation](#installation)
     1. [Prerequisites](#prerequisites)
