@@ -21,4 +21,4 @@ Output in `paper/benchmark/benchmark_output/`:
 
 Each measurement runs in its own process. A series stops after the first structure that takes longer than `--time-limit` seconds (default 120) or fails, for example by running out of memory. Re-running the command skips finished measurements, and `--plot-only` redraws the figures from `results.json`.
 
-Useful options: `--radii 2:40:2,45:80:5`, `--devices cpu cuda`, `--old-ref <git ref>`, `--repetitions 5`, `--dtype float64`, `--batch-size <pairs>`. See `--help`.
+Useful options: `--versions new` (skip the release), `--radii 2:40:2,45:80:5`, `--devices cpu cuda`, `--old-ref <git ref>`, `--repetitions 5`, `--dtype float64`, `--batch-size <pairs>`. See `--help`.

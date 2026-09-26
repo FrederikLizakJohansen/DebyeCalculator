@@ -208,7 +208,7 @@ def run_benchmarks(args: argparse.Namespace) -> None:
         results_path.write_text(json.dumps(results, indent=1))
 
     for device in devices:
-        for version in VERSIONS:
+        for version in args.versions:
             key = f'{version}-{device}'
             series = results['timings'].setdefault(key, {})
             print(f'\n== {key} ({results["meta"][version + "_version"]})', flush=True)
@@ -244,6 +244,7 @@ def run_benchmarks(args: argparse.Namespace) -> None:
     pattern_dir = out / 'patterns'
     pattern_dir.mkdir(exist_ok=True)
     configurations = [('old', 'cpu', 'float64')] + [(v, d, 'float32') for d in devices for v in VERSIONS] + [('new', 'cpu', 'float64')]
+    configurations = [c for c in configurations if c[0] in args.versions]
     for version, device, dtype in configurations:
         path = pattern_dir / f'{version}-{device}-{dtype}.npz'
         if path.exists():
@@ -510,6 +511,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--out', default=str(DEFAULT_OUT), help='Output directory')
     parser.add_argument('--old-ref', default='v1.0.14', help='Git ref of the version to compare against')
+    parser.add_argument('--versions', nargs='+', choices=VERSIONS, default=list(VERSIONS),
+                        help='Versions to measure; saved results of the other version stay in the figures')
     parser.add_argument('--devices', nargs='+', choices=['cpu', 'cuda'], help='Default: cpu, and cuda if available')
     parser.add_argument('--radii', type=parse_radii, default=parse_radii('2:40:2,45:80:5'),
                         help='Particle radii in Å, as comma-separated values or start:stop:step ranges')
