@@ -839,10 +839,15 @@ class DebyeCalculator:
             # Node index of r_{k-1} is k (node 0 sits at r = -dr)
             node_weights[:, j:j + n_nodes] += bin_weights[:, :, j]
 
-        # Evaluate sinc(q r_n) on the nodes; sinc is even, so nodes at negative r are valid
+        # Evaluate sinc(q r_n) on the nodes, in chunks of nodes bounded by the batch size; sinc is even, so nodes at negative r are valid
         nodes = (torch.arange(n_nodes + 3, device=self.device, dtype=acc_dtype) - 1) * dr
-        sinc = torch.sinc(nodes.unsqueeze(-1) * q.to(acc_dtype).unsqueeze(0) / math.pi)
-        sinc_sums = (node_weights @ sinc).to(self.dtype)
+        q_acc = q.to(acc_dtype).unsqueeze(0) / math.pi
+        sinc_sums = torch.zeros((len(element_pairs), nq), device=self.device, dtype=acc_dtype)
+        nodes_per_chunk = max(1, self.batch_size // max(1, nq))
+        for start in range(0, nodes.numel(), nodes_per_chunk):
+            sinc = torch.sinc(nodes[start:start + nodes_per_chunk].unsqueeze(-1) * q_acc)
+            sinc_sums += node_weights[:, start:start + nodes_per_chunk] @ sinc
+        sinc_sums = sinc_sums.to(self.dtype)
 
         pair_iq = torch.zeros(nq, device=self.device, dtype=self.dtype)
         for pair_number, (a, b) in enumerate(element_pairs):
