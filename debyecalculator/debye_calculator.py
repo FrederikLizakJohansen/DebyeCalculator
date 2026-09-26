@@ -669,7 +669,7 @@ class DebyeCalculator:
         acc_dtype: torch.dtype,
     ) -> torch.Tensor:
         """
-        Spread the pair weights of the given batches onto the distance grid (see _compute_iq_parts).
+        Accumulate the moments of the fractional bin position for the given batches (see _compute_iq_parts).
 
         Parameters:
             jobs: Batches as (element pair number, element a, element b, first row, last row + 1), with rows indexing atoms of element a.
@@ -681,10 +681,10 @@ class DebyeCalculator:
             acc_dtype: Data type of the accumulated histogram.
 
         Returns:
-            torch.Tensor: Histogram of shape (n_element_pairs, n_nodes).
+            torch.Tensor: Moments sum(w), sum(w s), sum(w s^2), sum(w s^3) per distance bin, of shape (n_element_pairs, n_nodes, 4).
         """
-        hist = torch.zeros((n_element_pairs, n_nodes), device=self.device, dtype=acc_dtype)
-        stencil = torch.arange(4, device=self.device)
+        hist = torch.zeros((n_element_pairs, n_nodes, 4), device=self.device, dtype=acc_dtype)
+        batch_moments = torch.zeros((n_nodes, 4), device=self.device, dtype=self.dtype)
         uniform_occupancy = bool(torch.all(occupancy == 1))
 
         for pair_number, a, b, start, stop in jobs:
@@ -704,42 +704,33 @@ class DebyeCalculator:
                 above = (d >= self.rthres).to(self.dtype)
                 w = above if w is None else w * above
 
-            # Cubic Lagrange weights on nodes k-1, k, k+1, k+2 (r_k <= d < r_{k+1}), s = fractional position.
+            # Moments 1, s, s^2, s^3 of the fractional position s within bin k (r_k <= d < r_{k+1}).
             # The fractional position needs more precision than float32 offers once d / dr is large
             u = d.reshape(-1).to(acc_dtype) / dr
             floor_u = torch.floor(u)
             s = (u - floor_u).to(self.dtype)
-            s_p1 = s + 1
-            s_m1 = s - 1
-            s_m2 = s - 2
-            s_s_m1 = s * s_m1
-            s_p1_s_m2 = s_p1 * s_m2
-            lagrange = torch.empty((u.numel(), 4), device=self.device, dtype=self.dtype)
+            moments = torch.empty((u.numel(), 4), device=self.device, dtype=self.dtype)
             if w is None:
-                torch.mul(s_s_m1 * s_m2, -1 / 6, out=lagrange[:, 0])
-                torch.mul(s_p1_s_m2 * s_m1, 1 / 2, out=lagrange[:, 1])
-                torch.mul(s_p1_s_m2 * s, -1 / 2, out=lagrange[:, 2])
-                torch.mul(s_s_m1 * s_p1, 1 / 6, out=lagrange[:, 3])
+                moments[:, 0] = 1.0
+                moments[:, 1] = s
             else:
                 w = w.reshape(-1)
-                w_6 = w / 6
-                w_2 = w / 2
-                torch.mul(s_s_m1 * s_m2, -w_6, out=lagrange[:, 0])
-                torch.mul(s_p1_s_m2 * s_m1, w_2, out=lagrange[:, 1])
-                torch.mul(s_p1_s_m2 * s, -w_2, out=lagrange[:, 2])
-                torch.mul(s_s_m1 * s_p1, w_6, out=lagrange[:, 3])
+                moments[:, 0] = w
+                torch.mul(s, w, out=moments[:, 1])
+            torch.mul(moments[:, 1], s, out=moments[:, 2])
+            torch.mul(moments[:, 2], s, out=moments[:, 3])
 
-            # Zero the weights of pairs j <= i
+            # Zero the moments of pairs j <= i
             if a == b:
                 n_square = min(n_rows, n_cols)
                 rows = torch.arange(n_rows, device=self.device).unsqueeze(-1)
                 cols = torch.arange(n_square, device=self.device).unsqueeze(0)
-                lagrange.view(n_rows, n_cols, 4)[:, :n_square].masked_fill_((cols < rows).unsqueeze(-1), 0.0)
+                moments.view(n_rows, n_cols, 4)[:, :n_square].masked_fill_((cols < rows).unsqueeze(-1), 0.0)
 
-            # Node index of r_{k-1} is k (node 0 sits at r = -dr). The weights alternate in sign, so the
-            # histogram accumulates in acc_dtype to avoid cancellation errors
-            index = floor_u.long().unsqueeze(-1) + stencil
-            hist[pair_number].index_add_(0, index.reshape(-1), lagrange.reshape(-1).to(acc_dtype))
+            # All moments are non-negative, so a per-batch sum in self.dtype has no cancellation
+            batch_moments.zero_()
+            batch_moments.index_add_(0, floor_u.long(), moments)
+            hist[pair_number] += batch_moments
 
         return hist
 
@@ -754,7 +745,8 @@ class DebyeCalculator:
 
         Atom pairs are processed per element pair, so the form factor product is applied once per element pair.
         Each pair weight is spread onto a uniform distance grid with cubic (4-point) Lagrange interpolation weights,
-        and the Debye sum is evaluated on the grid nodes only:
+        and the Debye sum is evaluated on the grid nodes only. The pairs are accumulated as the moments of their fractional
+        position within each bin, which are non-negative, and converted to node weights afterwards:
 
             sum_p w_p sinc(q d_p) = sum_n H_n sinc(q r_n) + O((q_max dr)^4 / 4!)
 
@@ -830,10 +822,23 @@ class DebyeCalculator:
         else:
             hist = self._spread_pairs(jobs, *spread_args)
 
+        # Cubic Lagrange weights of nodes k-1, k, k+1, k+2 for bin k, as polynomials in s (coefficients of 1, s, s^2, s^3)
+        lagrange_coefficients = torch.tensor([
+            [0.0, -1 / 3, 1 / 2, -1 / 6],
+            [1.0, -1 / 2, -1.0, 1 / 2],
+            [0.0, 1.0, 1 / 2, -1 / 2],
+            [0.0, -1 / 6, 0.0, 1 / 6],
+        ], device=self.device, dtype=acc_dtype)
+        bin_weights = hist @ lagrange_coefficients.T
+        node_weights = torch.zeros((len(element_pairs), n_nodes + 3), device=self.device, dtype=acc_dtype)
+        for j in range(4):
+            # Node index of r_{k-1} is k (node 0 sits at r = -dr)
+            node_weights[:, j:j + n_nodes] += bin_weights[:, :, j]
+
         # Evaluate sinc(q r_n) on the nodes; sinc is even, so nodes at negative r are valid
-        nodes = (torch.arange(n_nodes, device=self.device, dtype=acc_dtype) - 1) * dr
+        nodes = (torch.arange(n_nodes + 3, device=self.device, dtype=acc_dtype) - 1) * dr
         sinc = torch.sinc(nodes.unsqueeze(-1) * q.to(acc_dtype).unsqueeze(0) / math.pi)
-        sinc_sums = (hist @ sinc).to(self.dtype)
+        sinc_sums = (node_weights @ sinc).to(self.dtype)
 
         pair_iq = torch.zeros(nq, device=self.device, dtype=self.dtype)
         for pair_number, (a, b) in enumerate(element_pairs):
