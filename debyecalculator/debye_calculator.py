@@ -47,6 +47,7 @@ import ipywidgets as widgets
 from IPython.display import display, HTML, clear_output
 from ipywidgets import HBox, VBox, Layout
 from functools import partial
+from concurrent.futures import ThreadPoolExecutor
 from tqdm.auto import tqdm
 
 try:
@@ -109,13 +110,14 @@ class DebyeCalculator:
         rthres: float = 0.0,
         biso: float = 0.3,
         device: str = 'cuda',
-        batch_size: Union[int, None] = 100000,
+        batch_size: Union[int, None] = 3000000,
         lorch_mod: bool = False,
         radiation_type: str = None,
         rad_type: str = None,
         profile: bool = False,
         _max_batch_size: int = 4000,
         _lightweight_mode: bool = False,
+        _spread_step_factor: float = 0.05,
         dtype: torch.dtype = torch.float32,
     ) -> None:
         """
@@ -132,7 +134,7 @@ class DebyeCalculator:
             rthres (float): Threshold value for exclusion of distances below this value in the scattering calculation. Default is 0.0.
             biso (float): Debye-Waller isotropic atomic displacement parameter. Default is 0.3.
             device (str): Device to use for computations ('cuda' for CUDA-enabled GPU's or 'cpu' for CPU)
-            batch_size (int or None): Number of atom pairs processed per batch. If None, the batch size will be automatically set. Default is 100000.
+            batch_size (int or None): Number of atom pairs processed per batch (shared between CPU threads). If None, the batch size will be automatically set. Default is 3000000.
             lorch_mod (bool): Flag to enable Lorch modification. Default is False.
             radiation_type (str): Type of radiation for form factor calculations ('xray' or 'neutron'). Default is 'xray'
             rad_type (str): Alias for 'radiation_type'. Default is 'xray'.
@@ -225,6 +227,9 @@ class DebyeCalculator:
         
         # Lightweight mode
         self._lightweight_mode = _lightweight_mode
+
+        # Distance-grid spacing as a fraction of 1/q_max (see _compute_iq_parts)
+        self._spread_step_factor = _spread_step_factor
 
     def __repr__(self):
         return (
@@ -652,28 +657,81 @@ class DebyeCalculator:
 
         return el1, el2
 
-    @staticmethod
-    def _split_k_matmul(
-        lhs: torch.Tensor,
-        rhs: torch.Tensor,
-        k_chunk: int = 2048,
+    def _spread_pairs(
+        self,
+        jobs: List[Tuple[int, int, int, int, int]],
+        xyz: torch.Tensor,
+        occupancy: torch.Tensor,
+        atom_indices: List[torch.Tensor],
+        n_element_pairs: int,
+        n_nodes: int,
+        dr: float,
+        acc_dtype: torch.dtype,
     ) -> torch.Tensor:
         """
-        Compute lhs.T @ rhs for tall inputs (K x M and K x N with K >> M, N) as a batched product over K-chunks.
-        A single GEMM with a long reduction axis and small output parallelises poorly on CPU.
+        Spread the pair weights of the given batches onto the distance grid (see _compute_iq_parts).
+
+        Parameters:
+            jobs: Batches as (element pair number, element a, element b, first row, last row + 1), with rows indexing atoms of element a.
+            xyz, occupancy: Atomic positions and occupancies.
+            atom_indices: Atom indices for each unique element.
+            n_element_pairs: Number of element pairs (rows of the histogram).
+            n_nodes: Number of grid nodes.
+            dr: Grid spacing.
+            acc_dtype: Data type of the accumulated histogram.
+
+        Returns:
+            torch.Tensor: Histogram of shape (n_element_pairs, n_nodes).
         """
-        k = lhs.shape[0]
-        n_chunks = k // k_chunk
-        if n_chunks < 2:
-            return lhs.T @ rhs
-        main = n_chunks * k_chunk
-        out = torch.bmm(
-            lhs[:main].view(n_chunks, k_chunk, lhs.shape[1]).transpose(1, 2),
-            rhs[:main].view(n_chunks, k_chunk, rhs.shape[1]),
-        ).sum(0)
-        if main < k:
-            out += lhs[main:].T @ rhs[main:]
-        return out
+        hist = torch.zeros((n_element_pairs, n_nodes), device=self.device, dtype=acc_dtype)
+        stencil = torch.arange(4, device=self.device)
+
+        for pair_number, a, b, start, stop in jobs:
+            idx_a, idx_b = atom_indices[a], atom_indices[b]
+            n_b = idx_b.numel()
+
+            # Within a single element, only columns j > i are needed
+            col_start = start + 1 if a == b else 0
+            d = torch.cdist(xyz[idx_a[start:stop]], xyz[idx_b[col_start:]], compute_mode='donot_use_mm_for_euclid_dist')
+            w = occupancy[idx_a[start:stop]].unsqueeze(-1) * occupancy[idx_b[col_start:]].unsqueeze(0)
+
+            # Excluded pairs get zero weight
+            valid = None
+            if a == b:
+                rows = torch.arange(start, stop, device=self.device).unsqueeze(-1)
+                cols = torch.arange(col_start, n_b, device=self.device).unsqueeze(0)
+                valid = cols > rows
+            if self.rthres > 0:
+                above = d >= self.rthres
+                valid = above if valid is None else valid & above
+            if valid is not None:
+                w = w * valid
+
+            # Cubic Lagrange weights on nodes k-1, k, k+1, k+2 (r_k <= d < r_{k+1}), s = fractional position.
+            # The fractional position needs more precision than float32 offers once d / dr is large
+            u = d.reshape(-1).to(acc_dtype) / dr
+            w = w.reshape(-1)
+            floor_u = torch.floor(u)
+            s = (u - floor_u).to(self.dtype)
+            s_p1 = s + 1
+            s_m1 = s - 1
+            s_m2 = s - 2
+            s_s_m1 = s * s_m1
+            s_p1_s_m2 = s_p1 * s_m2
+            w_6 = w / 6
+            w_2 = w / 2
+            lagrange = torch.empty((u.numel(), 4), device=self.device, dtype=self.dtype)
+            torch.mul(s_s_m1 * s_m2, -w_6, out=lagrange[:, 0])
+            torch.mul(s_p1_s_m2 * s_m1, w_2, out=lagrange[:, 1])
+            torch.mul(s_p1_s_m2 * s, -w_2, out=lagrange[:, 2])
+            torch.mul(s_s_m1 * s_p1, w_6, out=lagrange[:, 3])
+
+            # Node index of r_{k-1} is k (node 0 sits at r = -dr). The weights alternate in sign, so the
+            # histogram accumulates in acc_dtype to avoid cancellation errors
+            index = floor_u.long().unsqueeze(-1) + stencil
+            hist[pair_number].index_add_(0, index.reshape(-1), lagrange.reshape(-1).to(acc_dtype))
+
+        return hist
 
     def _compute_iq_parts(
         self,
@@ -685,9 +743,13 @@ class DebyeCalculator:
         Compute the pair (distinct) and self-scattering contributions to I(Q).
 
         Atom pairs are processed per element pair, so the form factor product is applied once per element pair.
-        The Q-grid is uniform, q_k = q_0 + (m*B + n)*dq, which allows sin(d*q_k) to be expanded as
-        sin(d*c_m)cos(d*f_n) + cos(d*c_m)sin(d*f_n) with c_m = q_0 + m*B*dq and f_n = n*dq.
-        The sum over pairs then reduces to two matrix products, and each pair needs only 2*(M+B) trigonometric evaluations.
+        Each pair weight is spread onto a uniform distance grid with cubic (4-point) Lagrange interpolation weights,
+        and the Debye sum is evaluated on the grid nodes only:
+
+            sum_p w_p sinc(q d_p) = sum_n H_n sinc(q r_n) + O((q_max dr)^4 / 4!)
+
+        The grid spacing dr is chosen from q_max so that the interpolation error is below floating point round-off.
+        The cost per pair is independent of the number of Q-points, and memory is bounded by the batch size.
 
         Parameters:
             structure (StructureTuple): The atomic structure.
@@ -716,80 +778,56 @@ class DebyeCalculator:
             a, b = sorted(unique_elements.index(el) for el in partial_elements)
             element_pairs = [(a, b)]
 
-        # Factorised Q-grid
         q = self.q.squeeze(-1)
         nq = q.numel()
-        B = max(1, math.ceil(math.sqrt(nq)))
-        M = math.ceil(nq / B)
-        q_coarse = (self.qmin + self.qstep * B * torch.arange(M, device=self.device, dtype=self.dtype)).unsqueeze(0)
-        q_fine = (self.qstep * torch.arange(B, device=self.device, dtype=self.dtype)).unsqueeze(0)
 
+        # Distance grid: node n sits at r_n = (n - 1) * dr; node 0 at r = -dr holds the stencil for the shortest distances
+        acc_dtype = torch.float32 if self.device == 'mps' else torch.float64
+        q_abs_max = max(abs(self.qmin), abs(self.qmax), 1e-3)
+        dr = self._spread_step_factor / q_abs_max
+        centered = xyz - xyz.mean(dim=0)
+        d_max = 2 * torch.linalg.norm(centered, dim=1).max().item() if xyz.shape[0] > 0 else 0.0
+        n_nodes = int(math.ceil(d_max / dr)) + 5
         atom_indices = [torch.nonzero(element_index == i).squeeze(-1) for i in range(len(unique_elements))]
 
-        pair_iq = torch.zeros(nq, device=self.device, dtype=self.dtype)
-        for a, b in element_pairs:
-            idx_a, idx_b = atom_indices[a], atom_indices[b]
-            xyz_a, xyz_b = xyz[idx_a], xyz[idx_b]
-            occ_a, occ_b = occupancy[idx_a], occupancy[idx_b]
-            n_b = idx_b.numel()
+        # On CPU, independent batches run in threads (PyTorch releases the GIL) with one intra-op thread each,
+        # since the scatter into the histogram runs on a single thread. The batch size is shared between the threads
+        n_threads = torch.get_num_threads() if self.device == 'cpu' else 1
+        pairs_per_job = max(1, self.batch_size // n_threads)
 
-            acc = torch.zeros((M, B), device=self.device, dtype=self.dtype)
-            w_sum = torch.zeros((), device=self.device, dtype=self.dtype)
-            w_zero = torch.zeros((), device=self.device, dtype=self.dtype)
-
-            rows_per_batch = max(1, self.batch_size // max(1, n_b))
-            for start in range(0, idx_a.numel(), rows_per_batch):
-                stop = min(start + rows_per_batch, idx_a.numel())
-
-                # Within a single element, only columns j > i are needed
-                col_start = start + 1 if a == b else 0
-                if col_start >= n_b:
+        # Batches of rows for each element pair
+        jobs = []
+        for pair_number, (a, b) in enumerate(element_pairs):
+            n_a, n_b = atom_indices[a].numel(), atom_indices[b].numel()
+            rows_per_batch = max(1, pairs_per_job // max(1, n_b))
+            for start in range(0, n_a, rows_per_batch):
+                if a == b and start + 1 >= n_b:
                     break
-                d = torch.cdist(xyz_a[start:stop], xyz_b[col_start:], compute_mode='donot_use_mm_for_euclid_dist')
-                w = occ_a[start:stop].unsqueeze(-1) * occ_b[col_start:].unsqueeze(0)
+                jobs.append((pair_number, a, b, start, min(start + rows_per_batch, n_a)))
 
-                # Excluded pairs get zero weight and a dummy distance of 1
-                valid = None
-                if a == b:
-                    rows = torch.arange(start, stop, device=self.device).unsqueeze(-1)
-                    cols = torch.arange(col_start, n_b, device=self.device).unsqueeze(0)
-                    valid = cols > rows
-                if self.rthres > 0:
-                    above = d >= self.rthres
-                    valid = above if valid is None else valid & above
-                if valid is not None:
-                    w = w * valid
-                    d = d.masked_fill(~valid, 1.0)
+        spread_args = (xyz, occupancy, atom_indices, len(element_pairs), n_nodes, dr, acc_dtype)
 
-                # Coincident atoms contribute sinc(0) = 1
-                is_zero = d == 0
-                w_zero += (w * is_zero).sum()
-                w = w.masked_fill(is_zero, 0.0)
-                d = d.masked_fill(is_zero, 1.0)
+        n_workers = min(n_threads, len(jobs))
+        if n_workers > 1:
+            intra_op_threads = torch.get_num_threads()
+            torch.set_num_threads(1)
+            try:
+                with ThreadPoolExecutor(n_workers) as executor:
+                    hists = list(executor.map(lambda worker: self._spread_pairs(jobs[worker::n_workers], *spread_args), range(n_workers)))
+            finally:
+                torch.set_num_threads(intra_op_threads)
+            hist = torch.stack(hists).sum(0)
+        else:
+            hist = self._spread_pairs(jobs, *spread_args)
 
-                d = d.reshape(-1)
-                w = w.reshape(-1)
-                w_sum += w.sum()
-                n_pairs = d.numel()
-                d = d.unsqueeze(-1)
-                w_d = (w / d.squeeze(-1)).unsqueeze(-1)
+        # Evaluate sinc(q r_n) on the nodes; sinc is even, so nodes at negative r are valid
+        nodes = (torch.arange(n_nodes, device=self.device, dtype=acc_dtype) - 1) * dr
+        sinc = torch.sinc(nodes.unsqueeze(-1) * q.to(acc_dtype).unsqueeze(0) / math.pi)
+        sinc_sums = (hist @ sinc).to(self.dtype)
 
-                # lhs = [sin(d c) w/d ; cos(d c) w/d], rhs = [cos(d f) ; sin(d f)]
-                arg = d * q_coarse
-                lhs = torch.empty((2, n_pairs, M), device=self.device, dtype=self.dtype)
-                torch.sin(arg, out=lhs[0])
-                torch.cos(arg, out=lhs[1])
-                lhs.mul_(w_d)
-                arg = d * q_fine
-                rhs = torch.empty((2, n_pairs, B), device=self.device, dtype=self.dtype)
-                torch.cos(arg, out=rhs[0])
-                torch.sin(arg, out=rhs[1])
-                acc += self._split_k_matmul(lhs.view(-1, M), rhs.view(-1, B))
-
-            # sum_p w_p sin(d_p q) / (d_p q), with the q -> 0 limit
-            sinc_sum = acc.flatten()[:nq]
-            sinc_sum = torch.where(q == 0, w_sum, sinc_sum / torch.where(q == 0, torch.ones_like(q), q)) + w_zero
-            pair_iq += form_factors[a] * form_factors[b] * sinc_sum
+        pair_iq = torch.zeros(nq, device=self.device, dtype=self.dtype)
+        for pair_number, (a, b) in enumerate(element_pairs):
+            pair_iq += form_factors[a] * form_factors[b] * sinc_sums[pair_number]
 
         # Apply Debye-Waller Isotropic Atomic Displacement
         if self.biso != 0.0:
