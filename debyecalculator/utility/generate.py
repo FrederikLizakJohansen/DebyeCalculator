@@ -26,7 +26,20 @@ from collections import namedtuple
 import yaml
 import importlib.resources
 import warnings
+from functools import lru_cache
 from tqdm.auto import tqdm
+
+@lru_cache(maxsize=None)
+def _load_elements_info_cached() -> dict:
+    loader = getattr(yaml, 'CSafeLoader', yaml.SafeLoader)
+    with importlib.resources.open_text('debyecalculator.utility', 'elements_info.yaml') as yaml_file:
+        return yaml.load(yaml_file, Loader=loader)
+
+def load_elements_info() -> dict:
+    """
+    Return the element information table from elements_info.yaml. The file is parsed once per process; each call returns a new copy.
+    """
+    return {key: list(value) for key, value in _load_elements_info_cached().items()}
 
 NanoParticle = namedtuple('NanoParticle', 'elements size occupancy xyz')
 NanoParticleASE = namedtuple('NanoParticleASE', 'ase_structure np_size')
@@ -149,8 +162,7 @@ def generate_nanoparticles(
             device = device
 
     # Fetch atomic numbers and radii
-    with importlib.resources.open_text('debyecalculator.utility', 'elements_info.yaml') as yaml_file:
-        elements_info = yaml.safe_load(yaml_file)
+    elements_info = load_elements_info()
 
     # Fix radii type
     if isinstance(radii, np.ndarray):
@@ -231,16 +243,16 @@ def generate_nanoparticles(
         return nanoparticle_tuple_list
 
     # Find atomic radii
-    atomic_radii = torch.tensor(np.array([
-        elements_info[elm][13]
-        for elm in cell.get_chemical_symbols()
-        ], dtype='float'), device=device)
+    unique_numbers, inverse = np.unique(cell.numbers, return_inverse=True)
+    number_to_radius = {value[12]: value[13] for value in elements_info.values() if value[12] in unique_numbers}
+    unique_radii = np.array([number_to_radius[z] for z in unique_numbers], dtype='float')
+    atomic_radii = torch.from_numpy(unique_radii[inverse.reshape(-1)]).to(device=device)
 
     if _lightweight_mode:
         center_dists = torch.norm(positions, dim=1)
     else:
         # Find all metals and center around the nearest metal
-        metal_filter = torch.BoolTensor([a in metals for a in cell.get_atomic_numbers()]).to(device = device)
+        metal_filter = torch.from_numpy(np.isin(cell.get_atomic_numbers(), metals)).to(device = device)
 
         # Find the most central metal atom and center the cell around it
         center_dists = torch.norm(positions, dim=1)
@@ -250,22 +262,45 @@ def generate_nanoparticles(
         # Update the cell positions
         cell.positions = positions.cpu()
 
-    # Calculate distance matrix
-    cell_dists = cdist(positions, positions)
+    # Only atoms within reach of the largest particle can be part of an included edge
+    bond_scale = 1.25
+    reach = r_max + 2 * bond_scale * torch.amax(atomic_radii).item() + 1e-3
+    candidates = torch.nonzero(center_dists <= reach).flatten()
+    candidate_positions = positions[candidates]
+    candidate_radii = atomic_radii[candidates].to(dtype=positions.dtype)
 
-    # Create mask of threshold for bonds
-    bond_threshold = torch.zeros_like(cell_dists, device=device)
-    for i, r1 in enumerate(atomic_radii):
-        bond_threshold[i,:] = (r1 + atomic_radii) * 1.25
-    bond_threshold.fill_diagonal_(0.)
-
-    # Find edges
-    direction = torch.argwhere(cell_dists < bond_threshold).T
+    # Find edges, i.e. pairs closer than the scaled sum of atomic radii, one block of rows at a time
+    n_candidates = candidates.numel()
+    rows_per_block = max(1, 2**24 // max(1, n_candidates))
+    edge_blocks = []
+    for start in range(0, n_candidates, rows_per_block):
+        stop = min(start + rows_per_block, n_candidates)
+        block_dists = cdist(candidate_positions[start:stop], candidate_positions)
+        bond_threshold = (candidate_radii[start:stop].unsqueeze(1) + candidate_radii.unsqueeze(0)) * bond_scale
+        rows = torch.arange(start, stop, device=device)
+        bond_threshold[rows - start, rows] = 0.
+        block_edges = torch.argwhere(block_dists < bond_threshold)
+        block_edges[:, 0] += start
+        edge_blocks.append(block_edges)
+    direction = torch.cat(edge_blocks).T
 
     # Handle case with no edges
     if len(direction[0]) == 0:
-        min_dist = torch.amin(cell_dists[cell_dists > 0])
-        direction = torch.argwhere(cell_dists < min_dist * 1.1).T
+        min_dist = torch.tensor(float('inf'), device=device)
+        for start in range(0, n_candidates, rows_per_block):
+            stop = min(start + rows_per_block, n_candidates)
+            block_dists = cdist(candidate_positions[start:stop], candidate_positions)
+            min_dist = torch.minimum(min_dist, torch.amin(torch.where(block_dists > 0, block_dists, float('inf'))))
+        edge_blocks = []
+        for start in range(0, n_candidates, rows_per_block):
+            stop = min(start + rows_per_block, n_candidates)
+            block_edges = torch.argwhere(cdist(candidate_positions[start:stop], candidate_positions) < min_dist * 1.1)
+            block_edges[:, 0] += start
+            edge_blocks.append(block_edges)
+        direction = torch.cat(edge_blocks).T
+
+    # Map edges back to indices in the supercell
+    direction = candidates[direction]
 
     # Initialize nanoparticle lists and progress bar
     nanoparticle_tuple_list = []
@@ -345,7 +380,7 @@ def generate_nanoparticles(
                     raise NotImplementedError('FAILED: return_graph_elements is not yet implemented for sorted atoms')
         
                 # Get included distances
-                np_dists = cell_dists[included_edges[0], included_edges[1]]
+                np_dists = torch.norm(positions[included_edges[0]] - positions[included_edges[1]], dim=-1)
 
                 # Reorganise the included edges
                 reorganised_edges = transform_edge_indices(included_edges)

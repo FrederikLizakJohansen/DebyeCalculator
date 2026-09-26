@@ -41,7 +41,7 @@ from ase.build import make_supercell
 from ase.build.tools import sort as ase_sort
 
 from debyecalculator.utility.profiling import Profiler
-from debyecalculator.utility.generate import generate_nanoparticles
+from debyecalculator.utility.generate import generate_nanoparticles, load_elements_info
 
 import ipywidgets as widgets
 from IPython.display import display, HTML, clear_output
@@ -198,8 +198,7 @@ class DebyeCalculator:
         self.q = torch.arange(self.qmin, self.qmax, self.qstep).unsqueeze(-1).to(device=self.device, dtype=self.dtype)
         self.r = torch.arange(self.rmin, self.rmax, self.rstep).unsqueeze(-1).to(device=self.device, dtype=self.dtype)
 
-        with importlib.resources.open_text('debyecalculator.utility', 'elements_info.yaml') as yaml_file:
-            self.FORM_FACTOR_COEF = yaml.safe_load(yaml_file)
+        self.FORM_FACTOR_COEF = load_elements_info()
 
         # Form factor coefficients
         self.atomic_numbers_to_elements = {}
