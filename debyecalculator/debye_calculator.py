@@ -393,15 +393,16 @@ class DebyeCalculator:
             # Get unique elements and construc form factor stacks
             unique_elements, inverse, counts = np.unique(elements, return_counts=True, return_inverse=True)
 
-            triu_indices = torch.triu_indices(size, size, 1)
-            unique_inverse = torch.from_numpy(inverse[triu_indices]).to(device=self.device)
+            # Pair index tensors are O(N^2); pairs are enumerated on the fly in _compute_iq_parts
+            triu_indices = None
+            unique_inverse = None
             unique_form_factors = torch.stack([self.form_factor_func(self.FORM_FACTOR_COEF[el]) for el in unique_elements])
 
             # Calculate average squared form factor and self scattering inverse indices
             counts = torch.from_numpy(counts).to(device=self.device)
             compositional_fractions = counts / torch.sum(counts)
             form_avg_sq = torch.sum(compositional_fractions.reshape(-1,1) * unique_form_factors, dim=0)**2
-            structure_inverse = torch.from_numpy(np.array([inverse[i] for i in range(size)])).to(device=self.device)
+            structure_inverse = torch.from_numpy(inverse.reshape(-1)).to(device=self.device)
 
             return triu_indices, unique_inverse, unique_form_factors, form_avg_sq, structure_inverse
 
@@ -620,66 +621,153 @@ class DebyeCalculator:
         Returns:
             torch.Tensor: The computed I(Q) values.
         """
-        # Calculate distances and batch
-        if self.batch_size is None:
-            self.batch_size = self._max_batch_size
-
-        N = structure.xyz.size(0)
-        triu_indices = torch.triu_indices(N, N, offset=1)
-
-        # Generate all distances, and batch
-        dists = torch.norm(structure.xyz[:, None] - structure.xyz, dim=2, p=2)[triu_indices[0], triu_indices[1]].split(self.batch_size)
-
-        # Generate partial masks
-        partial_mask_sparse, partial_mask_struc, partial_mask_other = self.generate_partial_masks(structure, partial)
-
-        # Batch mask and other indices
-        partial_mask_sparse = partial_mask_sparse.to(device=self.device).split(self.batch_size)
-        indices = structure.triu_indices.split(self.batch_size, dim=1)
-        inverse_indices = structure.unique_inverse.split(self.batch_size, dim=1)
-
-        if self.profile:
-            self.profiler.time('Batching and Distances')
-
-        # Calculate scattering using Debye Equation
-        iq = torch.zeros((len(self.q))).to(device=self.device, dtype=self.dtype)
-        for d, inv_idx, idx, partial_mask in zip(dists, inverse_indices, indices, partial_mask_sparse):
-
-            # Construct mask
-            threshold_mask = d >= self.rthres
-            mask = threshold_mask & partial_mask
-
-            # Calculate scattering
-            occ_product = structure.occupancy[idx[0]] * structure.occupancy[idx[1]]
-            if self.device == 'mps':
-                x = d[mask] * self.q / torch.pi
-                sinc = torch.sin(torch.pi * x) / (torch.pi * x)
-            else:
-                sinc = torch.sinc(d[mask] * self.q / torch.pi)
-
-            ffp = structure.unique_form_factors[inv_idx[0]] * structure.unique_form_factors[inv_idx[1]]
-            iq += torch.sum(occ_product.unsqueeze(-1)[mask] * ffp[mask] * sinc.permute(1, 0), dim=0)
-
-        # Apply Debye-Waller Isotropic Atomic Displacement
-        if self.biso != 0.0:
-            iq *= torch.exp(-self.q.squeeze(-1).pow(2) * self.biso / (8 * torch.pi ** 2))
-
-        # Self-scattering contribution
-        if include_self_scattering:
-            self_scattering_mask = torch.zeros((N,), dtype=bool)
-            self_scattering_mask[partial_mask_struc] = True
-            self_scattering_mask[partial_mask_other] = True
-
-            sinc = torch.ones((structure.size, len(self.q))).to(device=self.device)[self_scattering_mask]
-            iq += torch.sum(
-                (structure.occupancy[self_scattering_mask].unsqueeze(-1) * structure.unique_form_factors[structure.structure_inverse][self_scattering_mask]) ** 2 * sinc,
-                dim=0
-            ) / 2
+        pair_iq, self_iq = self._compute_iq_parts(structure, partial, include_self_scattering)
+        iq = pair_iq if self_iq is None else pair_iq + self_iq
 
         if self.profile:
             self.profiler.time('I(Q)')
 
         return iq
+
+    def _parse_partial(
+        self,
+        structure: StructureTuple,
+        partial: Union[str, None],
+    ) -> Union[None, Tuple[str, str]]:
+        """
+        Validate a partial pattern 'X-Y' against the structure and return the element pair (X, Y), or None if no partial is given.
+        """
+        if partial is None:
+            return None
+
+        match = re.match(r'^([a-zA-Z]+)-([a-zA-Z]+)$', partial)
+        if not match:
+            raise ValueError("'partial' does not match the pattern 'X-Y', of elements 'X' and 'Y'.")
+
+        el1, el2 = match.groups()
+        elements = np.asarray(structure.elements)
+        if not el1 in elements:
+            raise ValueError(f"element {el1} from 'partial' is not present in structure.")
+        if not el2 in elements:
+            raise ValueError(f"element {el2} from 'partial' is not present in structure.")
+
+        return el1, el2
+
+    def _compute_iq_parts(
+        self,
+        structure: StructureTuple,
+        partial: str = None,
+        include_self_scattering: bool = True,
+    ) -> Tuple[torch.Tensor, Union[torch.Tensor, None]]:
+        """
+        Compute the pair (distinct) and self-scattering contributions to I(Q).
+
+        Atom pairs are processed per element pair, so the form factor product is applied once per element pair.
+        The Q-grid is uniform, q_k = q_0 + (m*B + n)*dq, which allows sin(d*q_k) to be expanded as
+        sin(d*c_m)cos(d*f_n) + cos(d*c_m)sin(d*f_n) with c_m = q_0 + m*B*dq and f_n = n*dq.
+        The sum over pairs then reduces to two matrix products, and each pair needs only 2*(M+B) trigonometric evaluations.
+
+        Parameters:
+            structure (StructureTuple): The atomic structure.
+            partial (str): Partial pattern for scattering calculation.
+            include_self_scattering (bool): Whether to compute the self-scattering contribution.
+
+        Returns:
+            Tuple[torch.Tensor, Union[torch.Tensor, None]]: The pair contribution and the self-scattering contribution (None if not requested).
+        """
+        if self.batch_size is None:
+            self.batch_size = self._max_batch_size
+
+        partial_elements = self._parse_partial(structure, partial)
+
+        unique_elements = list(np.unique(structure.elements))
+        element_index = structure.structure_inverse
+        xyz = structure.xyz
+        occupancy = structure.occupancy
+        form_factors = structure.unique_form_factors
+
+        # Element pairs (a <= b) to include
+        if partial_elements is None:
+            n_el = len(unique_elements)
+            element_pairs = [(a, b) for a in range(n_el) for b in range(a, n_el)]
+        else:
+            a, b = sorted(unique_elements.index(el) for el in partial_elements)
+            element_pairs = [(a, b)]
+
+        # Factorised Q-grid
+        q = self.q.squeeze(-1)
+        nq = q.numel()
+        B = max(1, math.ceil(math.sqrt(nq)))
+        M = math.ceil(nq / B)
+        q_coarse = (self.qmin + self.qstep * B * torch.arange(M, device=self.device, dtype=self.dtype)).unsqueeze(0)
+        q_fine = (self.qstep * torch.arange(B, device=self.device, dtype=self.dtype)).unsqueeze(0)
+
+        atom_indices = [torch.nonzero(element_index == i).squeeze(-1) for i in range(len(unique_elements))]
+
+        pair_iq = torch.zeros(nq, device=self.device, dtype=self.dtype)
+        for a, b in element_pairs:
+            idx_a, idx_b = atom_indices[a], atom_indices[b]
+            xyz_a, xyz_b = xyz[idx_a], xyz[idx_b]
+            occ_a, occ_b = occupancy[idx_a], occupancy[idx_b]
+            n_b = idx_b.numel()
+            cols = torch.arange(n_b, device=self.device)
+
+            acc = torch.zeros((M, B), device=self.device, dtype=self.dtype)
+            w_sum = torch.zeros((), device=self.device, dtype=self.dtype)
+            w_zero = torch.zeros((), device=self.device, dtype=self.dtype)
+
+            rows_per_batch = max(1, self.batch_size // max(1, n_b))
+            for start in range(0, idx_a.numel(), rows_per_batch):
+                stop = min(start + rows_per_batch, idx_a.numel())
+                d = torch.cdist(xyz_a[start:stop], xyz_b, compute_mode='donot_use_mm_for_euclid_dist')
+                mask = d >= self.rthres
+                if a == b:
+                    rows = torch.arange(start, stop, device=self.device).unsqueeze(-1)
+                    mask &= cols.unsqueeze(0) > rows
+                w = (occ_a[start:stop].unsqueeze(-1) * occ_b.unsqueeze(0))[mask]
+                d = d[mask]
+
+                # Coincident atoms contribute sinc(0) = 1
+                is_zero = d == 0
+                if is_zero.any():
+                    w_zero += w[is_zero].sum()
+                    d, w = d[~is_zero], w[~is_zero]
+
+                w_sum += w.sum()
+                d = d.unsqueeze(-1)
+                w_d = (w / d.squeeze(-1)).unsqueeze(-1)
+                arg_coarse = d * q_coarse
+                arg_fine = d * q_fine
+                acc += (torch.sin(arg_coarse) * w_d).T @ torch.cos(arg_fine)
+                acc += (torch.cos(arg_coarse) * w_d).T @ torch.sin(arg_fine)
+
+            # sum_p w_p sin(d_p q) / (d_p q), with the q -> 0 limit
+            sinc_sum = acc.flatten()[:nq]
+            sinc_sum = torch.where(q == 0, w_sum, sinc_sum / torch.where(q == 0, torch.ones_like(q), q)) + w_zero
+            pair_iq += form_factors[a] * form_factors[b] * sinc_sum
+
+        # Apply Debye-Waller Isotropic Atomic Displacement
+        if self.biso != 0.0:
+            pair_iq *= torch.exp(-q.pow(2) * self.biso / (8 * torch.pi ** 2))
+
+        # Self-scattering contribution
+        self_iq = None
+        if include_self_scattering:
+            if partial_elements is None:
+                self_mask = torch.ones_like(element_index, dtype=torch.bool)
+            else:
+                self_mask = torch.zeros_like(element_index, dtype=torch.bool)
+                for el in partial_elements:
+                    self_mask |= element_index == unique_elements.index(el)
+            self_iq = torch.sum(
+                (occupancy[self_mask].unsqueeze(-1) * form_factors[element_index[self_mask]]) ** 2,
+                dim=0
+            ) / 2
+
+        if self.profile:
+            self.profiler.time('Pair and self-scattering')
+
+        return pair_iq, self_iq
 
     def compute_sq(
         self, 
@@ -947,8 +1035,8 @@ class DebyeCalculator:
 
         output = []
         for structure in structures:
-            iq_values = self.compute_iq(structure, partial, include_self_scattering=False)
-            iq_values_self_scattering = self.compute_iq(structure, partial)
+            iq_values, iq_values_self = self._compute_iq_parts(structure, partial)
+            iq_values_self_scattering = iq_values + iq_values_self
             sq_values = self.compute_sq(iq_values, structure)
             fq_values = self.compute_fq(sq_values)
             gr_values = self.compute_gr(fq_values)
