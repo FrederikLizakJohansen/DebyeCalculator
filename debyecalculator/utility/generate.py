@@ -20,6 +20,7 @@ import ase
 from ase import Atoms
 from ase.io import read
 from ase.build import make_supercell, bulk
+from ase.build.supercells import lattice_points_in_supercell, clean_matrix
 from ase.build.tools import sort as ase_sort
 from typing import Union, List
 from collections import namedtuple
@@ -27,6 +28,7 @@ import yaml
 import importlib.resources
 import warnings
 from functools import lru_cache
+from scipy.spatial import cKDTree
 from tqdm.auto import tqdm
 
 @lru_cache(maxsize=None)
@@ -40,6 +42,26 @@ def load_elements_info() -> dict:
     Return the element information table from elements_info.yaml. The file is parsed once per process; each call returns a new copy.
     """
     return {key: list(value) for key, value in _load_elements_info_cached().items()}
+
+def _make_supercell(prim: Atoms, P: np.ndarray, tol: float = 1e-5) -> Atoms:
+    """
+    Equivalent of ase.build.make_supercell (with wrap=True) that tiles the per-atom arrays in one step
+    instead of extending the supercell once per lattice point.
+    """
+    supercell = clean_matrix(P @ prim.cell)
+    lattice_points = np.dot(lattice_points_in_supercell(P), supercell)
+    n_points = len(lattice_points)
+
+    superatoms = Atoms(cell=supercell, pbc=prim.pbc)
+    arrays = {}
+    for name, array in prim.arrays.items():
+        if name == 'positions':
+            arrays[name] = (array[None, :, :] + lattice_points[:, None, :]).reshape(-1, 3)
+        else:
+            arrays[name] = np.tile(array, (n_points,) + (1,) * (array.ndim - 1))
+    superatoms.arrays.update(arrays)
+    superatoms.wrap(eps=tol)
+    return superatoms
 
 NanoParticle = namedtuple('NanoParticle', 'elements size occupancy xyz')
 NanoParticleASE = namedtuple('NanoParticleASE', 'ase_structure np_size')
@@ -212,7 +234,7 @@ def generate_nanoparticles(
     while not all(size_check):
         padding[~size_check] += 2 # Symmetric padding to ensure the particle does not exceed the supercell boundary
         supercell_matrix = np.diag((np.ceil(r_max / cell_dims)) * 2 + padding)
-        cell = make_supercell(prim=unit_cell, P=supercell_matrix)
+        cell = _make_supercell(unit_cell, supercell_matrix)
         size_check = cell.get_positions().max(axis=0) >= (r_max * 2 + 5) # Check if the supercell is larger than diameter of largest particle + 5 Angstroms of padding
         
     # Center the supercell # NOTE Newer versions of ASE might work differently
@@ -269,20 +291,20 @@ def generate_nanoparticles(
     candidate_positions = positions[candidates]
     candidate_radii = atomic_radii[candidates].to(dtype=positions.dtype)
 
-    # Find edges, i.e. pairs closer than the scaled sum of atomic radii, one block of rows at a time
+    # Find edges, i.e. pairs closer than the scaled sum of atomic radii, from a k-d tree query of close pairs
     n_candidates = candidates.numel()
     rows_per_block = max(1, 2**24 // max(1, n_candidates))
-    edge_blocks = []
-    for start in range(0, n_candidates, rows_per_block):
-        stop = min(start + rows_per_block, n_candidates)
-        block_dists = cdist(candidate_positions[start:stop], candidate_positions)
-        bond_threshold = (candidate_radii[start:stop].unsqueeze(1) + candidate_radii.unsqueeze(0)) * bond_scale
-        rows = torch.arange(start, stop, device=device)
-        bond_threshold[rows - start, rows] = 0.
-        block_edges = torch.argwhere(block_dists < bond_threshold)
-        block_edges[:, 0] += start
-        edge_blocks.append(block_edges)
-    direction = torch.cat(edge_blocks).T
+    max_threshold = 2 * bond_scale * torch.amax(candidate_radii).item() if n_candidates > 0 else 0.0
+    close_pairs = cKDTree(candidate_positions.cpu().double().numpy()).query_pairs(max_threshold + 1e-3, output_type='ndarray')
+    close_pairs = torch.from_numpy(close_pairs.astype(np.int64)).to(device=device).reshape(-1, 2)
+    i, j = close_pairs[:, 0], close_pairs[:, 1]
+    pair_dists = torch.norm(candidate_positions[i] - candidate_positions[j], dim=-1)
+    keep = pair_dists < (candidate_radii[i] + candidate_radii[j]) * bond_scale
+    i, j = i[keep], j[keep]
+
+    # Both directions, in row-major order
+    direction = torch.cat((torch.stack((i, j)), torch.stack((j, i))), dim=1)
+    direction = direction[:, torch.argsort(direction[0] * n_candidates + direction[1])]
 
     # Handle case with no edges
     if len(direction[0]) == 0:
