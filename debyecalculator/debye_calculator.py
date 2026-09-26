@@ -132,7 +132,7 @@ class DebyeCalculator:
             rthres (float): Threshold value for exclusion of distances below this value in the scattering calculation. Default is 0.0.
             biso (float): Debye-Waller isotropic atomic displacement parameter. Default is 0.3.
             device (str): Device to use for computations ('cuda' for CUDA-enabled GPU's or 'cpu' for CPU)
-            batch_size (int or None): Batch size for computation. If None, the batch size will be automatically set. Default is None.
+            batch_size (int or None): Number of atom pairs processed per batch. If None, the batch size will be automatically set. Default is 100000.
             lorch_mod (bool): Flag to enable Lorch modification. Default is False.
             radiation_type (str): Type of radiation for form factor calculations ('xray' or 'neutron'). Default is 'xray'
             rad_type (str): Alias for 'radiation_type'. Default is 'xray'.
@@ -733,7 +733,6 @@ class DebyeCalculator:
             xyz_a, xyz_b = xyz[idx_a], xyz[idx_b]
             occ_a, occ_b = occupancy[idx_a], occupancy[idx_b]
             n_b = idx_b.numel()
-            cols = torch.arange(n_b, device=self.device)
 
             acc = torch.zeros((M, B), device=self.device, dtype=self.dtype)
             w_sum = torch.zeros((), device=self.device, dtype=self.dtype)
@@ -742,20 +741,35 @@ class DebyeCalculator:
             rows_per_batch = max(1, self.batch_size // max(1, n_b))
             for start in range(0, idx_a.numel(), rows_per_batch):
                 stop = min(start + rows_per_batch, idx_a.numel())
-                d = torch.cdist(xyz_a[start:stop], xyz_b, compute_mode='donot_use_mm_for_euclid_dist')
-                mask = d >= self.rthres
+
+                # Within a single element, only columns j > i are needed
+                col_start = start + 1 if a == b else 0
+                if col_start >= n_b:
+                    break
+                d = torch.cdist(xyz_a[start:stop], xyz_b[col_start:], compute_mode='donot_use_mm_for_euclid_dist')
+                w = occ_a[start:stop].unsqueeze(-1) * occ_b[col_start:].unsqueeze(0)
+
+                # Excluded pairs get zero weight and a dummy distance of 1
+                valid = None
                 if a == b:
                     rows = torch.arange(start, stop, device=self.device).unsqueeze(-1)
-                    mask &= cols.unsqueeze(0) > rows
-                w = (occ_a[start:stop].unsqueeze(-1) * occ_b.unsqueeze(0))[mask]
-                d = d[mask]
+                    cols = torch.arange(col_start, n_b, device=self.device).unsqueeze(0)
+                    valid = cols > rows
+                if self.rthres > 0:
+                    above = d >= self.rthres
+                    valid = above if valid is None else valid & above
+                if valid is not None:
+                    w = w * valid
+                    d = d.masked_fill(~valid, 1.0)
 
                 # Coincident atoms contribute sinc(0) = 1
                 is_zero = d == 0
-                if is_zero.any():
-                    w_zero += w[is_zero].sum()
-                    d, w = d[~is_zero], w[~is_zero]
+                w_zero += (w * is_zero).sum()
+                w = w.masked_fill(is_zero, 0.0)
+                d = d.masked_fill(is_zero, 1.0)
 
+                d = d.reshape(-1)
+                w = w.reshape(-1)
                 w_sum += w.sum()
                 n_pairs = d.numel()
                 d = d.unsqueeze(-1)
