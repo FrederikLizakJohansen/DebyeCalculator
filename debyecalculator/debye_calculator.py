@@ -109,7 +109,7 @@ class DebyeCalculator:
         rthres: float = 0.0,
         biso: float = 0.3,
         device: str = 'cuda',
-        batch_size: Union[int, None] = 10000,
+        batch_size: Union[int, None] = 100000,
         lorch_mod: bool = False,
         radiation_type: str = None,
         rad_type: str = None,
@@ -653,6 +653,29 @@ class DebyeCalculator:
 
         return el1, el2
 
+    @staticmethod
+    def _split_k_matmul(
+        lhs: torch.Tensor,
+        rhs: torch.Tensor,
+        k_chunk: int = 2048,
+    ) -> torch.Tensor:
+        """
+        Compute lhs.T @ rhs for tall inputs (K x M and K x N with K >> M, N) as a batched product over K-chunks.
+        A single GEMM with a long reduction axis and small output parallelises poorly on CPU.
+        """
+        k = lhs.shape[0]
+        n_chunks = k // k_chunk
+        if n_chunks < 2:
+            return lhs.T @ rhs
+        main = n_chunks * k_chunk
+        out = torch.bmm(
+            lhs[:main].view(n_chunks, k_chunk, lhs.shape[1]).transpose(1, 2),
+            rhs[:main].view(n_chunks, k_chunk, rhs.shape[1]),
+        ).sum(0)
+        if main < k:
+            out += lhs[main:].T @ rhs[main:]
+        return out
+
     def _compute_iq_parts(
         self,
         structure: StructureTuple,
@@ -734,12 +757,21 @@ class DebyeCalculator:
                     d, w = d[~is_zero], w[~is_zero]
 
                 w_sum += w.sum()
+                n_pairs = d.numel()
                 d = d.unsqueeze(-1)
                 w_d = (w / d.squeeze(-1)).unsqueeze(-1)
-                arg_coarse = d * q_coarse
-                arg_fine = d * q_fine
-                acc += (torch.sin(arg_coarse) * w_d).T @ torch.cos(arg_fine)
-                acc += (torch.cos(arg_coarse) * w_d).T @ torch.sin(arg_fine)
+
+                # lhs = [sin(d c) w/d ; cos(d c) w/d], rhs = [cos(d f) ; sin(d f)]
+                arg = d * q_coarse
+                lhs = torch.empty((2, n_pairs, M), device=self.device, dtype=self.dtype)
+                torch.sin(arg, out=lhs[0])
+                torch.cos(arg, out=lhs[1])
+                lhs.mul_(w_d)
+                arg = d * q_fine
+                rhs = torch.empty((2, n_pairs, B), device=self.device, dtype=self.dtype)
+                torch.cos(arg, out=rhs[0])
+                torch.sin(arg, out=rhs[1])
+                acc += self._split_k_matmul(lhs.view(-1, M), rhs.view(-1, B))
 
             # sum_p w_p sin(d_p q) / (d_p q), with the q -> 0 limit
             sinc_sum = acc.flatten()[:nq]
