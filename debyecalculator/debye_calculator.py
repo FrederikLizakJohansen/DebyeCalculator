@@ -734,6 +734,120 @@ class DebyeCalculator:
 
         return hist
 
+    def _direct_pair_iq(
+        self,
+        xyz: torch.Tensor,
+        occupancy: torch.Tensor,
+        atom_indices: List[torch.Tensor],
+        element_pairs: List[Tuple[int, int]],
+        form_factors: torch.Tensor,
+        q: torch.Tensor,
+    ) -> torch.Tensor:
+        """
+        Pair contribution to I(Q) by direct summation over all pairs, for small structures.
+        """
+        pair_iq = torch.zeros(q.numel(), device=self.device, dtype=self.dtype)
+        for a, b in element_pairs:
+            idx_a, idx_b = atom_indices[a], atom_indices[b]
+            d = torch.cdist(xyz[idx_a], xyz[idx_b], compute_mode='donot_use_mm_for_euclid_dist')
+            w = occupancy[idx_a].unsqueeze(-1) * occupancy[idx_b].unsqueeze(0)
+            valid = d >= self.rthres
+            if a == b:
+                valid &= torch.ones_like(valid).triu(diagonal=1)
+            d, w = d[valid], w[valid]
+            sinc_sum = w @ torch.sinc(d.unsqueeze(-1) * q.unsqueeze(0) / math.pi)
+            pair_iq += form_factors[a] * form_factors[b] * sinc_sum
+        return pair_iq
+
+    def _finish_iq_parts(
+        self,
+        pair_iq: torch.Tensor,
+        q: torch.Tensor,
+        element_index: torch.Tensor,
+        occupancy: torch.Tensor,
+        form_factors: torch.Tensor,
+        unique_elements: List[str],
+        partial_elements: Union[None, Tuple[str, str]],
+        include_self_scattering: bool,
+    ) -> Tuple[torch.Tensor, Union[torch.Tensor, None]]:
+        """
+        Apply the Debye-Waller factor to the pair contribution and compute the self-scattering contribution.
+        """
+        # Apply Debye-Waller Isotropic Atomic Displacement
+        if self.biso != 0.0:
+            pair_iq *= torch.exp(-q.pow(2) * self.biso / (8 * torch.pi ** 2))
+
+        # Self-scattering contribution
+        self_iq = None
+        if include_self_scattering:
+            if partial_elements is None:
+                self_mask = torch.ones_like(element_index, dtype=torch.bool)
+            else:
+                self_mask = torch.zeros_like(element_index, dtype=torch.bool)
+                for el in partial_elements:
+                    self_mask |= element_index == unique_elements.index(el)
+            self_iq = torch.sum(
+                (occupancy[self_mask].unsqueeze(-1) * form_factors[element_index[self_mask]]) ** 2,
+                dim=0
+            ) / 2
+
+        if self.profile:
+            self.profiler.time('Pair and self-scattering')
+
+        return pair_iq, self_iq
+
+    def _node_sinc_sums(
+        self,
+        node_weights: torch.Tensor,
+        dr: float,
+        q: torch.Tensor,
+    ) -> torch.Tensor:
+        """
+        Compute sum_n H_n sinc(q r_n) for the grid nodes r_n = (n - 1) * dr.
+
+        With V_n = H_n / r_n, the sum is H_1 + sum_n V_n sin(q r_n) / q (node 1 sits at r = 0). Writing n = c*B + f,
+        sin(q r_n) = sin(q r_c) cos(q r_f) + cos(q r_c) sin(q r_f) with r_c = (c*B - 1) * dr and r_f = f * dr,
+        so the sum over nodes reduces to matrix products, with (C + B) * nq trigonometric evaluations.
+
+        Parameters:
+            node_weights (torch.Tensor): Node weights H of shape (n_element_pairs, n_nodes).
+            dr (float): Grid spacing.
+            q (torch.Tensor): Q-values.
+
+        Returns:
+            torch.Tensor: Sums of shape (n_element_pairs, nq), in the dtype of node_weights.
+        """
+        acc_dtype = node_weights.dtype
+        n_pairs, n_nodes = node_weights.shape
+        q = q.to(acc_dtype)
+
+        B = max(1, math.ceil(math.sqrt(n_nodes)))
+        C = math.ceil(n_nodes / B)
+        r = (torch.arange(C * B, device=self.device, dtype=acc_dtype) - 1) * dr
+        r_safe = torch.where(r == 0, torch.ones_like(r), r)
+        weights = torch.zeros((n_pairs, C * B), device=self.device, dtype=acc_dtype)
+        weights[:, :n_nodes] = node_weights
+        v = torch.where(r == 0, torch.zeros_like(weights), weights / r_safe).view(n_pairs, C, B)
+
+        r_fine = (torch.arange(B, device=self.device, dtype=acc_dtype) * dr).unsqueeze(-1) * q
+        cos_fine, sin_fine = torch.cos(r_fine), torch.sin(r_fine)
+
+        # Chunks of coarse blocks, bounded by the batch size
+        sums = torch.zeros((n_pairs, q.numel()), device=self.device, dtype=acc_dtype)
+        blocks_per_chunk = max(1, self.batch_size // max(1, n_pairs * q.numel()))
+        for start in range(0, C, blocks_per_chunk):
+            stop = min(start + blocks_per_chunk, C)
+            r_coarse = ((torch.arange(start, stop, device=self.device, dtype=acc_dtype) * B - 1) * dr).unsqueeze(-1) * q
+            v_chunk = v[:, start:stop]
+            sums += (torch.sin(r_coarse) * (v_chunk @ cos_fine)).sum(1)
+            sums += (torch.cos(r_coarse) * (v_chunk @ sin_fine)).sum(1)
+
+        # Divide by q, with the q -> 0 limit sum_n H_n
+        total = node_weights.sum(1, keepdim=True)
+        q_safe = torch.where(q == 0, torch.ones_like(q), q)
+        at_zero = weights[:, (r == 0).nonzero().squeeze(-1)].sum(1, keepdim=True)
+        return torch.where(q == 0, total, sums / q_safe + at_zero)
+
     def _compute_iq_parts(
         self,
         structure: StructureTuple,
@@ -796,9 +910,19 @@ class DebyeCalculator:
         n_nodes = int(math.ceil(d_max / dr)) + 5
         atom_indices = [torch.nonzero(element_index == i).squeeze(-1) for i in range(len(unique_elements))]
 
+        # With fewer pairs than grid nodes, the direct sum is cheaper than the grid evaluation
+        n_pairs = sum(
+            atom_indices[a].numel() * (atom_indices[a].numel() - 1) // 2 if a == b else atom_indices[a].numel() * atom_indices[b].numel()
+            for a, b in element_pairs
+        )
+        if n_pairs <= n_nodes:
+            pair_iq = self._direct_pair_iq(xyz, occupancy, atom_indices, element_pairs, form_factors, q)
+            return self._finish_iq_parts(pair_iq, q, element_index, occupancy, form_factors, unique_elements, partial_elements, include_self_scattering)
+
         # On CPU, independent batches run in threads (PyTorch releases the GIL) with one intra-op thread each,
         # since the scatter into the histogram runs on a single thread. The batch size is shared between the threads
-        n_threads = torch.get_num_threads() if self.device == 'cpu' else 1
+        # Threads are only worth starting for at least ~2^16 pairs each
+        n_threads = min(torch.get_num_threads(), max(1, n_pairs // 2**16)) if self.device == 'cpu' else 1
         pairs_per_job = max(1, self.batch_size // n_threads)
 
         # Batches of rows for each element pair
@@ -839,42 +963,13 @@ class DebyeCalculator:
             # Node index of r_{k-1} is k (node 0 sits at r = -dr)
             node_weights[:, j:j + n_nodes] += bin_weights[:, :, j]
 
-        # Evaluate sinc(q r_n) on the nodes, in chunks of nodes bounded by the batch size; sinc is even, so nodes at negative r are valid
-        nodes = (torch.arange(n_nodes + 3, device=self.device, dtype=acc_dtype) - 1) * dr
-        q_acc = q.to(acc_dtype).unsqueeze(0) / math.pi
-        sinc_sums = torch.zeros((len(element_pairs), nq), device=self.device, dtype=acc_dtype)
-        nodes_per_chunk = max(1, self.batch_size // max(1, nq))
-        for start in range(0, nodes.numel(), nodes_per_chunk):
-            sinc = torch.sinc(nodes[start:start + nodes_per_chunk].unsqueeze(-1) * q_acc)
-            sinc_sums += node_weights[:, start:start + nodes_per_chunk] @ sinc
-        sinc_sums = sinc_sums.to(self.dtype)
+        sinc_sums = self._node_sinc_sums(node_weights, dr, q).to(self.dtype)
 
         pair_iq = torch.zeros(nq, device=self.device, dtype=self.dtype)
         for pair_number, (a, b) in enumerate(element_pairs):
             pair_iq += form_factors[a] * form_factors[b] * sinc_sums[pair_number]
 
-        # Apply Debye-Waller Isotropic Atomic Displacement
-        if self.biso != 0.0:
-            pair_iq *= torch.exp(-q.pow(2) * self.biso / (8 * torch.pi ** 2))
-
-        # Self-scattering contribution
-        self_iq = None
-        if include_self_scattering:
-            if partial_elements is None:
-                self_mask = torch.ones_like(element_index, dtype=torch.bool)
-            else:
-                self_mask = torch.zeros_like(element_index, dtype=torch.bool)
-                for el in partial_elements:
-                    self_mask |= element_index == unique_elements.index(el)
-            self_iq = torch.sum(
-                (occupancy[self_mask].unsqueeze(-1) * form_factors[element_index[self_mask]]) ** 2,
-                dim=0
-            ) / 2
-
-        if self.profile:
-            self.profiler.time('Pair and self-scattering')
-
-        return pair_iq, self_iq
+        return self._finish_iq_parts(pair_iq, q, element_index, occupancy, form_factors, unique_elements, partial_elements, include_self_scattering)
 
     def compute_sq(
         self, 
@@ -932,8 +1027,14 @@ class DebyeCalculator:
             torch.Tensor: The computed G(r) values.
         """
         damp = 1 if self.qdamp == 0.0 else torch.exp(-(self.r.squeeze(-1) * self.qdamp).pow(2) / 2)
-        lorch_mod = 1 if not self.lorch_mod else torch.sinc(self.q * self.lorch_mod * (torch.pi / self.qmax))
-        gr = (2 / torch.pi) * torch.sum(fq.unsqueeze(-1) * torch.sin(self.q * self.r.permute(1, 0)) * self.qstep * lorch_mod, dim=0) * damp
+        lorch_mod = 1 if not self.lorch_mod else torch.sinc(self.q.squeeze(-1) * self.lorch_mod * (torch.pi / self.qmax))
+
+        # sin(q r) depends only on the grids; it is recomputed when update_parameters replaces them
+        if getattr(self, '_sin_qr_grids', None) is None or self._sin_qr_grids[0] is not self.q or self._sin_qr_grids[1] is not self.r:
+            self._sin_qr = torch.sin(self.q * self.r.permute(1, 0))
+            self._sin_qr_grids = (self.q, self.r)
+
+        gr = (2 / torch.pi) * ((fq * self.qstep * lorch_mod) @ self._sin_qr) * damp
 
         if self.profile:
             self.profiler.time('G(r)')
