@@ -117,7 +117,7 @@ class DebyeCalculator:
         profile: bool = False,
         _max_batch_size: int = 4000,
         _lightweight_mode: bool = False,
-        _spread_step_factor: float = 0.05,
+        _spread_step_factor: Union[float, None] = None,
         dtype: torch.dtype = torch.float32,
     ) -> None:
         """
@@ -228,7 +228,8 @@ class DebyeCalculator:
         # Lightweight mode
         self._lightweight_mode = _lightweight_mode
 
-        # Distance-grid spacing as a fraction of 1/q_max (see _compute_iq_parts)
+        # Distance-grid spacing times q_max (see _compute_iq_parts). The interpolation error scales as its fourth power;
+        # None gives ~1e-7 relative error for float32 and ~1e-10 for float64
         self._spread_step_factor = _spread_step_factor
 
     def __repr__(self):
@@ -684,7 +685,7 @@ class DebyeCalculator:
             torch.Tensor: Moments sum(w), sum(w s), sum(w s^2), sum(w s^3) per distance bin, of shape (n_element_pairs, n_nodes, 4).
         """
         hist = torch.zeros((n_element_pairs, n_nodes, 4), device=self.device, dtype=acc_dtype)
-        batch_moments = torch.zeros((n_nodes, 4), device=self.device, dtype=self.dtype)
+        batch_moments = torch.zeros((4, n_nodes), device=self.device, dtype=self.dtype)
         uniform_occupancy = bool(torch.all(occupancy == 1))
 
         for pair_number, a, b, start, stop in jobs:
@@ -705,32 +706,31 @@ class DebyeCalculator:
                 w = above if w is None else w * above
 
             # Moments 1, s, s^2, s^3 of the fractional position s within bin k (r_k <= d < r_{k+1}).
-            # The fractional position needs more precision than float32 offers once d / dr is large
-            u = d.reshape(-1).to(acc_dtype) / dr
-            floor_u = torch.floor(u)
-            s = (u - floor_u).to(self.dtype)
-            moments = torch.empty((u.numel(), 4), device=self.device, dtype=self.dtype)
+            # dr is a power of two, so u = d / dr, floor(u) and s = u - floor(u) are exact in any floating point precision
+            u = d.reshape(-1).mul_(1 / dr)
+            bins = torch.floor(u)
+            moments = torch.empty((4, u.numel()), device=self.device, dtype=self.dtype)
+            torch.sub(u, bins, out=moments[1])
+            torch.mul(moments[1], moments[1], out=moments[2])
+            torch.mul(moments[2], moments[1], out=moments[3])
             if w is None:
-                moments[:, 0] = 1.0
-                moments[:, 1] = s
+                moments[0].fill_(1.0)
             else:
                 w = w.reshape(-1)
-                moments[:, 0] = w
-                torch.mul(s, w, out=moments[:, 1])
-            torch.mul(moments[:, 1], s, out=moments[:, 2])
-            torch.mul(moments[:, 2], s, out=moments[:, 3])
+                moments[0].copy_(w)
+                moments[1:].mul_(w)
 
             # Zero the moments of pairs j <= i
             if a == b:
                 n_square = min(n_rows, n_cols)
                 rows = torch.arange(n_rows, device=self.device).unsqueeze(-1)
                 cols = torch.arange(n_square, device=self.device).unsqueeze(0)
-                moments.view(n_rows, n_cols, 4)[:, :n_square].masked_fill_((cols < rows).unsqueeze(-1), 0.0)
+                moments.view(4, n_rows, n_cols)[:, :, :n_square].masked_fill_(cols < rows, 0.0)
 
             # All moments are non-negative, so a per-batch sum in self.dtype has no cancellation
             batch_moments.zero_()
-            batch_moments.index_add_(0, floor_u.long(), moments)
-            hist[pair_number] += batch_moments
+            batch_moments.index_add_(1, bins.long(), moments)
+            hist[pair_number] += batch_moments.T
 
         return hist
 
@@ -786,7 +786,11 @@ class DebyeCalculator:
         # Distance grid: node n sits at r_n = (n - 1) * dr; node 0 at r = -dr holds the stencil for the shortest distances
         acc_dtype = torch.float32 if self.device == 'mps' else torch.float64
         q_abs_max = max(abs(self.qmin), abs(self.qmax), 1e-3)
-        dr = self._spread_step_factor / q_abs_max
+        # Power of two, so that the bin position d / dr is exact in floating point
+        step_factor = self._spread_step_factor
+        if step_factor is None:
+            step_factor = 0.03 if self.dtype == torch.float64 else 0.12
+        dr = 2.0 ** math.floor(math.log2(step_factor / q_abs_max))
         centered = xyz - xyz.mean(dim=0)
         d_max = 2 * torch.linalg.norm(centered, dim=1).max().item() if xyz.shape[0] > 0 else 0.0
         n_nodes = int(math.ceil(d_max / dr)) + 5
