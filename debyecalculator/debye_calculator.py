@@ -685,32 +685,28 @@ class DebyeCalculator:
         """
         hist = torch.zeros((n_element_pairs, n_nodes), device=self.device, dtype=acc_dtype)
         stencil = torch.arange(4, device=self.device)
+        uniform_occupancy = bool(torch.all(occupancy == 1))
 
         for pair_number, a, b, start, stop in jobs:
             idx_a, idx_b = atom_indices[a], atom_indices[b]
             n_b = idx_b.numel()
 
-            # Within a single element, only columns j > i are needed
+            # Within a single element, only columns j > i are needed; j <= i occurs in the leading square block only
             col_start = start + 1 if a == b else 0
+            n_rows, n_cols = stop - start, n_b - col_start
             d = torch.cdist(xyz[idx_a[start:stop]], xyz[idx_b[col_start:]], compute_mode='donot_use_mm_for_euclid_dist')
-            w = occupancy[idx_a[start:stop]].unsqueeze(-1) * occupancy[idx_b[col_start:]].unsqueeze(0)
 
-            # Excluded pairs get zero weight
-            valid = None
-            if a == b:
-                rows = torch.arange(start, stop, device=self.device).unsqueeze(-1)
-                cols = torch.arange(col_start, n_b, device=self.device).unsqueeze(0)
-                valid = cols > rows
+            # Pair weights; None means all weights are one
+            w = None
+            if not uniform_occupancy:
+                w = occupancy[idx_a[start:stop]].unsqueeze(-1) * occupancy[idx_b[col_start:]].unsqueeze(0)
             if self.rthres > 0:
-                above = d >= self.rthres
-                valid = above if valid is None else valid & above
-            if valid is not None:
-                w = w * valid
+                above = (d >= self.rthres).to(self.dtype)
+                w = above if w is None else w * above
 
             # Cubic Lagrange weights on nodes k-1, k, k+1, k+2 (r_k <= d < r_{k+1}), s = fractional position.
             # The fractional position needs more precision than float32 offers once d / dr is large
             u = d.reshape(-1).to(acc_dtype) / dr
-            w = w.reshape(-1)
             floor_u = torch.floor(u)
             s = (u - floor_u).to(self.dtype)
             s_p1 = s + 1
@@ -718,13 +714,27 @@ class DebyeCalculator:
             s_m2 = s - 2
             s_s_m1 = s * s_m1
             s_p1_s_m2 = s_p1 * s_m2
-            w_6 = w / 6
-            w_2 = w / 2
             lagrange = torch.empty((u.numel(), 4), device=self.device, dtype=self.dtype)
-            torch.mul(s_s_m1 * s_m2, -w_6, out=lagrange[:, 0])
-            torch.mul(s_p1_s_m2 * s_m1, w_2, out=lagrange[:, 1])
-            torch.mul(s_p1_s_m2 * s, -w_2, out=lagrange[:, 2])
-            torch.mul(s_s_m1 * s_p1, w_6, out=lagrange[:, 3])
+            if w is None:
+                torch.mul(s_s_m1 * s_m2, -1 / 6, out=lagrange[:, 0])
+                torch.mul(s_p1_s_m2 * s_m1, 1 / 2, out=lagrange[:, 1])
+                torch.mul(s_p1_s_m2 * s, -1 / 2, out=lagrange[:, 2])
+                torch.mul(s_s_m1 * s_p1, 1 / 6, out=lagrange[:, 3])
+            else:
+                w = w.reshape(-1)
+                w_6 = w / 6
+                w_2 = w / 2
+                torch.mul(s_s_m1 * s_m2, -w_6, out=lagrange[:, 0])
+                torch.mul(s_p1_s_m2 * s_m1, w_2, out=lagrange[:, 1])
+                torch.mul(s_p1_s_m2 * s, -w_2, out=lagrange[:, 2])
+                torch.mul(s_s_m1 * s_p1, w_6, out=lagrange[:, 3])
+
+            # Zero the weights of pairs j <= i
+            if a == b:
+                n_square = min(n_rows, n_cols)
+                rows = torch.arange(n_rows, device=self.device).unsqueeze(-1)
+                cols = torch.arange(n_square, device=self.device).unsqueeze(0)
+                lagrange.view(n_rows, n_cols, 4)[:, :n_square].masked_fill_((cols < rows).unsqueeze(-1), 0.0)
 
             # Node index of r_{k-1} is k (node 0 sits at r = -dr). The weights alternate in sign, so the
             # histogram accumulates in acc_dtype to avoid cancellation errors
