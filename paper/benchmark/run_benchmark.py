@@ -97,7 +97,7 @@ def worker(args: argparse.Namespace) -> None:
         'times': times,
         'mean': float(np.mean(times)),
         'std': float(np.std(times)),
-        'batch_size': calc.batch_size,
+        'batch_size': calc._effective_batch_size() if hasattr(calc, '_effective_batch_size') else calc.batch_size,
         'module': str(module_path),
         'cpu_peak_rss_mb': _peak_rss_mb(),
         'cpu_rss_increase_mb': _peak_rss_mb() - rss_before,

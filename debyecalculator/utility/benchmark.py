@@ -288,7 +288,7 @@ class DebyeBenchmarker:
             name = name,
             function_name = self.function_name,
             device = self.debye_calc.device,
-            batch_size = self.debye_calc.batch_size,
+            batch_size = self.debye_calc._effective_batch_size(),
             radii = self.radii, 
             num_atoms = list(num_atoms),
             means = list(means),
