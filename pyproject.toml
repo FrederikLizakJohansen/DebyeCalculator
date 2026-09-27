@@ -41,8 +41,8 @@ scipy = [
   {version = "^1.7.3", python = "^3.9,<3.12"}
 ]
 prettytable = "3.0.0"
-pyside6 = {version = "^6.5", optional = true}
-pyqtgraph = {version = ">=0.13", optional = true}
+pyside6 = {version = "^6.5", optional = true, python = ">=3.8"}
+pyqtgraph = {version = ">=0.13", optional = true, python = ">=3.8"}
 
 [tool.poetry.extras]
 gui = ["pyside6", "pyqtgraph"]

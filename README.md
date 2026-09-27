@@ -128,7 +128,7 @@ calc = DebyeCalculator(device='cuda')
 
 ## Desktop app
 
-A standalone desktop app (Windows, macOS, Linux) calculates and plots I(Q), S(Q), F(Q) and G(r) live while parameters change. Install it with the `gui` extra and start it from a terminal:
+A standalone desktop app (Windows, macOS, Linux) calculates and plots I(Q), S(Q), F(Q) and G(r) live while parameters change. Install it with the `gui` extra (Python 3.8 or later) and start it from a terminal:
 
 ```bash
 pip install "debyecalculator[gui]"
