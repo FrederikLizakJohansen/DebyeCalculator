@@ -130,3 +130,87 @@ def test_generation_is_deterministic_and_centred(lightweight):
         assert a.elements == b.elements
         assert torch.equal(a.xyz, b.xyz)
     assert first[0].size < first[1].size
+
+
+# -- gradients -------------------------------------------------------------------------------------------------------
+
+def exact_pair_iq_torch(calc, structure, xyz, occupancy, partial=None):
+    """
+    Differentiable brute-force pair_iq in float64 (plain autograd), as reference for the gradients.
+    """
+    q = calc.q.squeeze(-1).double()
+    elements = np.asarray(structure.elements)
+    form_factors = structure.unique_form_factors.double()[structure.structure_inverse]
+    i, j = torch.triu_indices(len(elements), len(elements), 1)
+    if partial is not None:
+        a, b = partial.split('-')
+        keep = torch.from_numpy(((elements[i] == a) & (elements[j] == b)) | ((elements[i] == b) & (elements[j] == a)))
+        i, j = i[keep], j[keep]
+    d = (xyz[i] - xyz[j]).norm(dim=1)
+    keep = d >= calc.rthres
+    i, j, d = i[keep], j[keep], d[keep]
+    out = torch.zeros_like(q)
+    for chunk in torch.split(torch.arange(d.numel()), 20000):
+        weight = (occupancy[i[chunk]] * occupancy[j[chunk]]).unsqueeze(-1) * form_factors[i[chunk]] * form_factors[j[chunk]]
+        out = out + (weight * torch.sinc(d[chunk].unsqueeze(-1) * q / np.pi)).sum(0)
+    return out * torch.exp(-q ** 2 * calc.biso / (8 * np.pi ** 2))
+
+
+def gradients(calc, structure, occupancy, reference: bool, partial=None):
+    dtype = torch.float64 if reference else calc.dtype
+    xyz = structure.xyz.detach().to(dtype).clone().requires_grad_(True)
+    occ = occupancy.to(dtype).clone().requires_grad_(True)
+    weights = torch.linspace(0.5, 1.5, calc.q.numel(), dtype=torch.float64)
+    if reference:
+        pair_iq = exact_pair_iq_torch(calc, structure, xyz, occ, partial)
+    else:
+        pair_iq, _ = calc._compute_iq_parts(structure._replace(xyz=xyz, occupancy=occ), partial=partial,
+                                            include_self_scattering=False)
+    (pair_iq.double() * weights).sum().backward()
+    return xyz.grad.double(), occ.grad.double()
+
+
+@pytest.mark.parametrize('radius, dtype, tolerance', [
+    (3.0, torch.float64, 1e-9),   # direct pair sum (plain autograd)
+    (10.0, torch.float64, 1e-9),  # distance grid, custom backward
+    (10.0, torch.float32, 1e-5),
+    (12.0, torch.float32, 1e-5),  # distance grid with threaded batches
+])
+def test_gradients_match_exact_autograd(radius, dtype, tolerance):
+    calc = DebyeCalculator(device='cpu', dtype=dtype)
+    structure = calc._initialize_structures(particle(radius))[0]
+    occupancy = torch.rand(len(structure.elements), dtype=torch.float64, generator=torch.Generator().manual_seed(0)) * 0.5 + 0.5
+    grad_xyz, grad_occ = gradients(calc, structure, occupancy, reference=False)
+    ref_xyz, ref_occ = gradients(calc, structure, occupancy, reference=True)
+    assert (grad_xyz - ref_xyz).norm() / ref_xyz.norm() < tolerance
+    assert (grad_occ - ref_occ).norm() / ref_occ.norm() < tolerance
+
+
+@pytest.mark.parametrize('kwargs, partial', [(dict(rthres=2.5), None), (dict(), 'Co-O')])
+def test_gradients_with_rthres_and_partial(kwargs, partial):
+    calc = DebyeCalculator(device='cpu', dtype=torch.float64, **kwargs)
+    structure = calc._initialize_structures(particle(10.0))[0]
+    occupancy = torch.ones(len(structure.elements), dtype=torch.float64)
+    grad_xyz, _ = gradients(calc, structure, occupancy, reference=False, partial=partial)
+    ref_xyz, _ = gradients(calc, structure, occupancy, reference=True, partial=partial)
+    assert (grad_xyz - ref_xyz).norm() / ref_xyz.norm() < 1e-9
+
+
+def test_gradients_through_public_api():
+    elements, xyz0 = particle(10.0)
+    calc = DebyeCalculator(device='cpu', dtype=torch.float64)
+    xyz = torch.tensor(xyz0, requires_grad=True)
+
+    def loss(positions):
+        r, gr = calc.gr((elements, positions), keep_on_device=True)
+        return (gr * torch.linspace(0, 1, gr.numel(), dtype=gr.dtype)).sum()
+
+    loss(xyz).backward()
+    direction = torch.randn(xyz.shape, dtype=torch.float64, generator=torch.Generator().manual_seed(1))
+    h = 1e-5
+    with torch.no_grad():
+        finite_difference = (loss(torch.tensor(xyz0) + h * direction) - loss(torch.tensor(xyz0) - h * direction)) / (2 * h)
+    assert (xyz.grad * direction).sum().item() == pytest.approx(finite_difference.item(), rel=1e-6)
+
+    # Without keep_on_device, results are numpy arrays also when the positions require gradients
+    assert isinstance(calc.iq((elements, xyz))[1], np.ndarray)
