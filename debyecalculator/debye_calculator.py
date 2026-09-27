@@ -13,7 +13,7 @@ import importlib.resources
 import warnings
 from glob import glob
 from datetime import datetime, timezone
-from typing import Union, Tuple, Any, List, Type
+from typing import Union, Tuple, Any, List, Type, Optional
 from collections import namedtuple
 
 # Handle import of torch (prerequisite)
@@ -91,6 +91,50 @@ else:
         Atoms,
         List[Atoms],
     ]
+
+class _Grid:
+    """
+    Batches and distance grid of a pair sum (see DebyeCalculator._compute_iq_parts).
+    """
+
+    def __init__(self, jobs, atom_indices, n_element_pairs, n_nodes, dr, acc_dtype, q, n_threads):
+        self.jobs = jobs
+        self.atom_indices = atom_indices
+        self.n_element_pairs = n_element_pairs
+        self.n_nodes = n_nodes
+        self.dr = dr
+        self.acc_dtype = acc_dtype
+        self.q = q
+        self.n_threads = n_threads
+
+
+class _GridPairSum(torch.autograd.Function):
+    """
+    S_t(q) = sum over atom pairs p of element pair t of w_p sinc(q d_p), with w_p = o_i o_j.
+
+    The forward pass evaluates the sums on the distance grid. The backward pass computes the gradients with respect to
+    positions and occupancies analytically from the incoming gradient g_t(q):
+
+        dL/dx_i = sum_j w_ij h_t(d_ij) (x_i - x_j) / d_ij,   h_t(d) = sum_q g_t(q) (cos(q d) - sinc(q d)) / d
+        dL/do_i = sum_j o_j k_t(d_ij),                        k_t(d) = sum_q g_t(q) sinc(q d)
+
+    with h_t and k_t tabulated on the grid nodes and interpolated per pair with the cubic stencil of the forward pass.
+    Memory stays bounded by the batch size, as in the forward pass.
+    """
+
+    @staticmethod
+    def forward(ctx, xyz, occupancy, calc, grid):
+        ctx.calc, ctx.grid = calc, grid
+        ctx.save_for_backward(xyz, occupancy)
+        return calc._grid_pair_sums(xyz, occupancy, grid)
+
+    @staticmethod
+    def backward(ctx, grad_sums):
+        xyz, occupancy = ctx.saved_tensors
+        grad_xyz, grad_occupancy = ctx.calc._grid_pair_sums_backward(
+            xyz, occupancy, ctx.grid, grad_sums, ctx.needs_input_grad[0], ctx.needs_input_grad[1])
+        return grad_xyz, grad_occupancy, None, None
+
 
 class DebyeCalculator:
     """
@@ -734,6 +778,139 @@ class DebyeCalculator:
 
         return hist
 
+    def _run_jobs(self, function, jobs: list, n_threads: int) -> list:
+        """
+        Run function(jobs_subset) for interleaved subsets of the jobs, in threads on CPU, and return the results.
+        Workers run without gradient tracking; grad mode is thread-local, so it is set in each worker.
+        """
+        def run(subset):
+            with torch.no_grad():
+                return function(subset)
+
+        n_workers = min(n_threads, len(jobs))
+        if n_workers <= 1:
+            return [run(jobs)]
+        intra_op_threads = torch.get_num_threads()
+        torch.set_num_threads(1)
+        try:
+            with ThreadPoolExecutor(n_workers) as executor:
+                return list(executor.map(lambda worker: run(jobs[worker::n_workers]), range(n_workers)))
+        finally:
+            torch.set_num_threads(intra_op_threads)
+
+    def _grid_pair_sums(self, xyz: torch.Tensor, occupancy: torch.Tensor, grid: '_Grid') -> torch.Tensor:
+        """
+        Forward pass of _GridPairSum: sum_p w_p sinc(q d_p) per element pair, of shape (n_element_pairs, nq).
+        """
+        spread_args = (xyz, occupancy, grid.atom_indices, grid.n_element_pairs, grid.n_nodes, grid.dr, grid.acc_dtype)
+        hists = self._run_jobs(lambda jobs: self._spread_pairs(jobs, *spread_args), grid.jobs, grid.n_threads)
+        hist = torch.stack(hists).sum(0)
+
+        # Cubic Lagrange weights of nodes k-1, k, k+1, k+2 for bin k, as polynomials in s (coefficients of 1, s, s^2, s^3)
+        lagrange_coefficients = torch.tensor([
+            [0.0, -1 / 3, 1 / 2, -1 / 6],
+            [1.0, -1 / 2, -1.0, 1 / 2],
+            [0.0, 1.0, 1 / 2, -1 / 2],
+            [0.0, -1 / 6, 0.0, 1 / 6],
+        ], device=self.device, dtype=grid.acc_dtype)
+        bin_weights = hist @ lagrange_coefficients.T
+        node_weights = torch.zeros((grid.n_element_pairs, grid.n_nodes + 3), device=self.device, dtype=grid.acc_dtype)
+        for j in range(4):
+            # Node index of r_{k-1} is k (node 0 sits at r = -dr)
+            node_weights[:, j:j + grid.n_nodes] += bin_weights[:, :, j]
+
+        return self._node_sinc_sums(node_weights, grid.dr, grid.q).to(self.dtype)
+
+    def _grid_pair_sums_backward(
+        self,
+        xyz: torch.Tensor,
+        occupancy: torch.Tensor,
+        grid: '_Grid',
+        grad_sums: torch.Tensor,
+        need_xyz: bool,
+        need_occupancy: bool,
+    ) -> Tuple[Optional[torch.Tensor], Optional[torch.Tensor]]:
+        """
+        Backward pass of _GridPairSum: gradients with respect to positions and occupancies.
+        """
+        acc_dtype = grid.acc_dtype
+        g = grad_sums.to(acc_dtype)
+        q = grid.q.to(acc_dtype)
+        n_nodes = grid.n_nodes + 3
+
+        # h_t and k_t on the grid nodes r_n = (n - 1) * dr, in chunks of nodes bounded by the batch size.
+        # h_t is odd and k_t even in r, so the node at r = -dr follows from the same expressions
+        r = (torch.arange(n_nodes, device=self.device, dtype=acc_dtype) - 1) * grid.dr
+        h_nodes = torch.zeros((n_nodes, grid.n_element_pairs), device=self.device, dtype=acc_dtype)
+        k_nodes = torch.zeros_like(h_nodes)
+        nodes_per_chunk = max(1, self.batch_size // max(1, q.numel()))
+        for start in range(0, n_nodes, nodes_per_chunk):
+            r_chunk = r[start:start + nodes_per_chunk].unsqueeze(-1)
+            x = r_chunk * q.unsqueeze(0)
+            sinc = torch.sinc(x / math.pi)
+            k_nodes[start:start + nodes_per_chunk] = sinc @ g.T
+            if need_xyz:
+                derivative = torch.where(r_chunk == 0, torch.zeros_like(x),
+                                         (torch.cos(x) - sinc) / torch.where(r_chunk == 0, torch.ones_like(r_chunk), r_chunk))
+                h_nodes[start:start + nodes_per_chunk] = derivative @ g.T
+
+        # Per-pair arithmetic in the calculation dtype; tables and accumulation in acc_dtype
+        h_nodes, k_nodes = h_nodes.to(self.dtype), k_nodes.to(self.dtype)
+
+        def worker(jobs):
+            grad_xyz = torch.zeros(xyz.shape, device=self.device, dtype=acc_dtype) if need_xyz else None
+            grad_occupancy = torch.zeros(occupancy.shape, device=self.device, dtype=acc_dtype) if need_occupancy else None
+            for pair_number, a, b, start, stop in jobs:
+                idx_a, idx_b = grid.atom_indices[a], grid.atom_indices[b]
+                col_start = start + 1 if a == b else 0
+                rows, cols = idx_a[start:stop], idx_b[col_start:]
+                xyz_a, xyz_b = xyz[rows].to(self.dtype), xyz[cols].to(self.dtype)
+                occ_a, occ_b = occupancy[rows].to(self.dtype), occupancy[cols].to(self.dtype)
+                d = torch.cdist(xyz_a, xyz_b, compute_mode='donot_use_mm_for_euclid_dist')
+
+                # Pairs j > i within a single element, and pairs at or beyond rthres
+                valid = None
+                if a == b:
+                    row_numbers = torch.arange(start, stop, device=self.device).unsqueeze(-1)
+                    col_numbers = torch.arange(col_start, idx_b.numel(), device=self.device).unsqueeze(0)
+                    valid = col_numbers > row_numbers
+                if self.rthres > 0:
+                    above = d >= self.rthres
+                    valid = above if valid is None else valid & above
+
+                # Cubic Lagrange interpolation from nodes k-1..k+2 (node index of r_{k-1} is k), as in the forward pass.
+                # dr is a power of two, so u, floor(u) and s are exact
+                u = d / grid.dr
+                bins = torch.floor(u)
+                s_ = u - bins
+                index = bins.long()
+                s_p1, s_m1, s_m2 = s_ + 1, s_ - 1, s_ - 2
+                weights = (s_ * s_m1 * s_m2 / -6, s_p1 * s_m1 * s_m2 / 2, s_p1 * s_ * s_m2 / -2, s_p1 * s_ * s_m1 / 6)
+
+                def interpolate(table):
+                    column = table[:, pair_number]
+                    values = weights[0] * column[index]
+                    for j in range(1, 4):
+                        values += weights[j] * column[index + j]
+                    return values if valid is None else values * valid
+
+                if need_xyz:
+                    safe_d = torch.where(d > 0, d, torch.ones_like(d))
+                    coefficient = torch.where(d > 0, interpolate(h_nodes) / safe_d, torch.zeros_like(d))
+                    coefficient *= occ_a.unsqueeze(-1) * occ_b.unsqueeze(0)
+                    grad_xyz.index_add_(0, rows, (xyz_a * coefficient.sum(1, keepdim=True) - coefficient @ xyz_b).to(acc_dtype))
+                    grad_xyz.index_add_(0, cols, (xyz_b * coefficient.sum(0).unsqueeze(-1) - coefficient.T @ xyz_a).to(acc_dtype))
+                if need_occupancy:
+                    k = interpolate(k_nodes)
+                    grad_occupancy.index_add_(0, rows, (k @ occ_b).to(acc_dtype))
+                    grad_occupancy.index_add_(0, cols, (k.T @ occ_a).to(acc_dtype))
+            return grad_xyz, grad_occupancy
+
+        results = self._run_jobs(worker, grid.jobs, grid.n_threads)
+        grad_xyz = torch.stack([gx for gx, _ in results]).sum(0).to(xyz.dtype) if need_xyz else None
+        grad_occupancy = torch.stack([go for _, go in results]).sum(0).to(occupancy.dtype) if need_occupancy else None
+        return grad_xyz, grad_occupancy
+
     def _direct_pair_iq(
         self,
         xyz: torch.Tensor,
@@ -935,35 +1112,8 @@ class DebyeCalculator:
                     break
                 jobs.append((pair_number, a, b, start, min(start + rows_per_batch, n_a)))
 
-        spread_args = (xyz, occupancy, atom_indices, len(element_pairs), n_nodes, dr, acc_dtype)
-
-        n_workers = min(n_threads, len(jobs))
-        if n_workers > 1:
-            intra_op_threads = torch.get_num_threads()
-            torch.set_num_threads(1)
-            try:
-                with ThreadPoolExecutor(n_workers) as executor:
-                    hists = list(executor.map(lambda worker: self._spread_pairs(jobs[worker::n_workers], *spread_args), range(n_workers)))
-            finally:
-                torch.set_num_threads(intra_op_threads)
-            hist = torch.stack(hists).sum(0)
-        else:
-            hist = self._spread_pairs(jobs, *spread_args)
-
-        # Cubic Lagrange weights of nodes k-1, k, k+1, k+2 for bin k, as polynomials in s (coefficients of 1, s, s^2, s^3)
-        lagrange_coefficients = torch.tensor([
-            [0.0, -1 / 3, 1 / 2, -1 / 6],
-            [1.0, -1 / 2, -1.0, 1 / 2],
-            [0.0, 1.0, 1 / 2, -1 / 2],
-            [0.0, -1 / 6, 0.0, 1 / 6],
-        ], device=self.device, dtype=acc_dtype)
-        bin_weights = hist @ lagrange_coefficients.T
-        node_weights = torch.zeros((len(element_pairs), n_nodes + 3), device=self.device, dtype=acc_dtype)
-        for j in range(4):
-            # Node index of r_{k-1} is k (node 0 sits at r = -dr)
-            node_weights[:, j:j + n_nodes] += bin_weights[:, :, j]
-
-        sinc_sums = self._node_sinc_sums(node_weights, dr, q).to(self.dtype)
+        grid = _Grid(jobs, atom_indices, len(element_pairs), n_nodes, dr, acc_dtype, q, n_threads)
+        sinc_sums = _GridPairSum.apply(xyz, occupancy, self, grid)
 
         pair_iq = torch.zeros(nq, device=self.device, dtype=self.dtype)
         for pair_number, (a, b) in enumerate(element_pairs):
@@ -1078,8 +1228,8 @@ class DebyeCalculator:
             output_tuple = IqTuple(self.q.squeeze(-1), iq_values)
             if not keep_on_device:
                 output_tuple = output_tuple._replace(
-                    q=output_tuple.q.cpu().numpy(),
-                    i=output_tuple.i.cpu().numpy()
+                    q=output_tuple.q.detach().cpu().numpy(),
+                    i=output_tuple.i.detach().cpu().numpy()
                 )
             output.append(output_tuple)
 
@@ -1116,8 +1266,8 @@ class DebyeCalculator:
             output_tuple = SqTuple(self.q.squeeze(-1), sq_values)
             if not keep_on_device:
                 output_tuple = output_tuple._replace(
-                    q=output_tuple.q.cpu().numpy(),
-                    s=output_tuple.s.cpu().numpy()
+                    q=output_tuple.q.detach().cpu().numpy(),
+                    s=output_tuple.s.detach().cpu().numpy()
                 )
             output.append(output_tuple)
 
@@ -1160,8 +1310,8 @@ class DebyeCalculator:
             output_tuple = FqTuple(self.q.squeeze(-1), fq_values)
             if not keep_on_device:
                 output_tuple = output_tuple._replace(
-                    q=output_tuple.q.cpu().numpy(),
-                    f=output_tuple.f.cpu().numpy()
+                    q=output_tuple.q.detach().cpu().numpy(),
+                    f=output_tuple.f.detach().cpu().numpy()
                 )
             output.append(output_tuple)
 
@@ -1205,8 +1355,8 @@ class DebyeCalculator:
             output_tuple = GrTuple(self.r.squeeze(-1), gr_values)
             if not keep_on_device:
                 output_tuple = output_tuple._replace(
-                    r=output_tuple.r.cpu().numpy(),
-                    g=output_tuple.g.cpu().numpy()
+                    r=output_tuple.r.detach().cpu().numpy(),
+                    g=output_tuple.g.detach().cpu().numpy()
                 )
             output.append(output_tuple)
 
@@ -1258,12 +1408,12 @@ class DebyeCalculator:
             )
             if not keep_on_device:
                 output_tuple = output_tuple._replace(
-                    r=output_tuple.r.cpu().numpy(),
-                    q=output_tuple.q.cpu().numpy(),
-                    i=output_tuple.i.cpu().numpy(),
-                    s=output_tuple.s.cpu().numpy(),
-                    f=output_tuple.f.cpu().numpy(),
-                    g=output_tuple.g.cpu().numpy()
+                    r=output_tuple.r.detach().cpu().numpy(),
+                    q=output_tuple.q.detach().cpu().numpy(),
+                    i=output_tuple.i.detach().cpu().numpy(),
+                    s=output_tuple.s.detach().cpu().numpy(),
+                    f=output_tuple.f.detach().cpu().numpy(),
+                    g=output_tuple.g.detach().cpu().numpy()
                 )
             output.append(output_tuple)
 
