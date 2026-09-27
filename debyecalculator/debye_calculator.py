@@ -450,7 +450,7 @@ class DebyeCalculator:
 
                     # Append occupancy if nothing is provided
                     if structure.shape[1] == 5:
-                        occupancy = torch.from_numpy(structure[:,-1]).to(device=self.device, dtype=self.dtype)
+                        occupancy = torch.from_numpy(structure[:,-1].astype('float')).to(device=self.device, dtype=self.dtype)
                         xyz = torch.tensor(structure[:,1:-1].astype('float')).to(device=self.device, dtype=self.dtype)
                     else:
                         occupancy = torch.ones((size), dtype=self.dtype).to(device=self.device)
