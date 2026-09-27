@@ -41,6 +41,14 @@ scipy = [
   {version = "^1.7.3", python = "^3.9,<3.12"}
 ]
 prettytable = "3.0.0"
+pyside6 = {version = "^6.5", optional = true}
+pyqtgraph = {version = ">=0.13", optional = true}
+
+[tool.poetry.extras]
+gui = ["pyside6", "pyqtgraph"]
+
+[tool.poetry.scripts]
+debyecalculator-gui = "debyecalculator.gui:main"
 
 [tool.poetry.dev-dependencies]
 pytest = ">=7.0"
