@@ -17,6 +17,7 @@ Here, we provide an optimised code for the calculation of the Debye scattering e
     1. [Prerequisites](#prerequisites)
     2. [Install with pip](#install-with-pip)
     3. [Install locally](#install-locally)
+    4. [Upgrading from 1.0.x](#upgrading-from-10x)
     5. [GPU support](#gpu-support)
 3. [Usage](#usage)
     1. [Interactive mode](#interactive-mode)
@@ -73,6 +74,31 @@ pip install pytest
 After installing the package, open a terminal or command prompt and navigate to the root directory of the package. Then run the following command to execute the tests:
 ```bash
 pytest
+```
+
+## Upgrading from 1.0.x
+
+Version 1.1 is a minor release in the sense of [semantic versioning](https://semver.org/): code written for 1.0.x runs unchanged and gives the same results within floating-point precision, only faster and with less memory.
+
+| Change | Public API | What it means when upgrading |
+|---|---|---|
+| Function signatures and return types | Unchanged | `iq`, `sq`, `fq`, `gr`, `generate_nanoparticles` and `interact()` take the same arguments and return the same types. The constructor keeps the 1.0.14 parameter order; the new parameters `pair_sum` and `num_threads` are appended with defaults. |
+| Python support | Unchanged | Python 3.7–3.11, as in 1.0.14 (tested with Python 3.7 and PyTorch 1.13). |
+| Numerical results | Within floating-point precision | The default `pair_sum='grid'` deviates from 1.0.14 by at most ~3e-6 (float32) and ~1e-9 (float64), relative to each function's maximum. `pair_sum='direct'` is the 1.0.x algorithm and reproduces 1.0.14 to ~1e-15 in float64 (~1e-6 in float32, from summation order). |
+| Generated nanoparticles | Unchanged | Bit-identical to 1.0.14. |
+| `batch_size` | Meaning unchanged, default changed | Still the number of atom pairs per batch, bounding memory. The default `None` now chooses the batch size: 3,000,000 pairs for `pair_sum='grid'`, 10,000 (the 1.0.14 default) for `pair_sum='direct'`. Explicit values are used as given; small ones such as 10,000 run faster than 1.0.14 but about 35× slower than the automatic choice. |
+| CPU threads | New behaviour, with opt-out | On the CPU, batches run in a thread pool. While it runs, PyTorch's process-wide thread count is 1; it is restored afterwards, also for overlapping calls from several threads. `num_threads=1` runs sequentially and leaves PyTorch's thread settings untouched. |
+| Gradients | Preserved | Results remain differentiable with respect to atomic positions, now at any particle size with memory bounded by `batch_size`. |
+| `keep_on_device=False` with positions that require gradients | Relaxed | Returns NumPy arrays; 1.0.14 raised an error. |
+| `StructureTuple.triu_indices`, `StructureTuple.unique_inverse` | Internal fields | `None`; the O(N²) index arrays are no longer built. They are only returned by underscore-prefixed methods. |
+| Memory | Lower | Bounded by `batch_size`, independent of particle size. |
+
+To reproduce results of 1.0.x exactly, use the 1.0.x algorithm or install the previous release:
+```python
+calc = DebyeCalculator(pair_sum='direct')   # 1.0.x pair sum; identical to 1.0.14 in float64
+```
+```bash
+pip install debyecalculator==1.0.14
 ```
 
 ## GPU Support
