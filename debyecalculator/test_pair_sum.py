@@ -214,3 +214,61 @@ def test_gradients_through_public_api():
 
     # Without keep_on_device, results are numpy arrays also when the positions require gradients
     assert isinstance(calc.iq((elements, xyz))[1], np.ndarray)
+
+
+# -- compatibility with 1.0.x ----------------------------------------------------------------------------------------
+
+def test_constructor_keeps_parameter_order_of_1_0():
+    import inspect
+    parameters = list(inspect.signature(DebyeCalculator.__init__).parameters)[1:]
+    assert parameters[:18] == ['qmin', 'qmax', 'qstep', 'qdamp', 'rmin', 'rmax', 'rstep', 'rthres', 'biso', 'device',
+                               'batch_size', 'lorch_mod', 'radiation_type', 'rad_type', 'profile', '_max_batch_size',
+                               '_lightweight_mode', 'dtype']
+
+
+@pytest.mark.parametrize('batch_size', [None, 1_000])
+def test_direct_pair_sum_matches_brute_force_and_grid(batch_size):
+    source = particle(8.0)
+    direct = DebyeCalculator(device='cpu', dtype=torch.float64, pair_sum='direct', batch_size=batch_size)
+    structure = direct._initialize_structures(source)[0]
+    pair_iq, _ = direct._compute_iq_parts(structure, include_self_scattering=False)
+    assert relative_error(pair_iq.cpu().numpy(), brute_force_pair_iq(direct, source)) < 1e-12
+
+    grid = DebyeCalculator(device='cpu', dtype=torch.float64)
+    for name in 'isfg':
+        assert relative_error(getattr(direct._get_all(source), name), getattr(grid._get_all(source), name)) < 1e-8
+
+
+def test_direct_pair_sum_gradients():
+    calc = DebyeCalculator(device='cpu', dtype=torch.float64, pair_sum='direct')
+    structure = calc._initialize_structures(particle(8.0))[0]
+    occupancy = torch.ones(len(structure.elements), dtype=torch.float64)
+    grad_xyz, _ = gradients(calc, structure, occupancy, reference=False)
+    ref_xyz, _ = gradients(calc, structure, occupancy, reference=True)
+    assert (grad_xyz - ref_xyz).norm() / ref_xyz.norm() < 1e-12
+
+
+def test_batch_size_none_is_automatic():
+    assert DebyeCalculator(device='cpu')._effective_batch_size() == 3_000_000
+    assert DebyeCalculator(device='cpu', pair_sum='direct')._effective_batch_size() == 10_000
+    assert DebyeCalculator(device='cpu', batch_size=50_000)._effective_batch_size() == 50_000
+    with pytest.raises(ValueError):
+        DebyeCalculator(device='cpu', pair_sum='other')
+    with pytest.raises(ValueError):
+        DebyeCalculator(device='cpu', num_threads=0)
+
+
+def test_thread_setting_is_restored_after_overlapping_calls():
+    from concurrent.futures import ThreadPoolExecutor
+    source = particle(14.0)  # enough pairs for the threaded path
+    before = torch.get_num_threads()
+    with ThreadPoolExecutor(4) as executor:
+        list(executor.map(lambda _: DebyeCalculator(device='cpu').iq(source), range(8)))
+    assert torch.get_num_threads() == before
+
+
+def test_single_thread_leaves_torch_settings_untouched(monkeypatch):
+    calls = []
+    monkeypatch.setattr(torch, 'set_num_threads', lambda n: calls.append(n))
+    DebyeCalculator(device='cpu', num_threads=1).iq(particle(14.0))
+    assert calls == []
