@@ -18,6 +18,7 @@ import numpy as np
 import torch
 
 from debyecalculator import DebyeCalculator
+from debyecalculator.debye_calculator import CalculationCancelled
 from debyecalculator.utility.generate import generate_nanoparticles
 
 STRUCTURE_SUFFIXES = ('.cif', '.xyz', '.pdb', '.vasp', '.poscar', '.extxyz', '.traj')
@@ -59,6 +60,7 @@ class StructureSpec:
     radius: float = 10.0
     lightweight: bool = False
     partial: Optional[str] = None
+    show_partials: bool = False  # also calculate every element-pair partial
 
     @property
     def is_cif(self) -> bool:
@@ -94,6 +96,8 @@ class Result:
     g: np.ndarray
     num_atoms: int
     element_pairs: List[str] = field(default_factory=list)
+    # Element-pair partials {'Co-O': {'i': ..., 's': ..., 'f': ..., 'g': ...}}, summing to the total
+    partials: Dict[str, Dict[str, np.ndarray]] = field(default_factory=dict)
 
 
 class LRUCache(OrderedDict):
@@ -180,9 +184,12 @@ class Engine:
                     self._applied.update(changed)
         return self._calc
 
-    def compute(self, params: Parameters, specs: List[StructureSpec]) -> List[Result]:
+    def compute(self, params: Parameters, specs: List[StructureSpec], progress=None) -> List[Result]:
         """
         Compute all functions for every structure. Raises on invalid parameters or unreadable files.
+
+        progress: optional callable receiving the completed fraction (0 to 1); returning False cancels the
+        calculation with CalculationCancelled.
         """
         if params.qmax <= params.qmin:
             raise ValueError('Qmax must be larger than Qmin')
@@ -195,29 +202,57 @@ class Engine:
         q_key_params = tuple(getattr(params, name) for name in Q_PARAMETERS) + (
             params.effective_qstep(), params.device, params.dtype)
 
+        particles = [self.particle(spec) for spec in specs]
+        tasks = []  # (spec index, partial or None, role): role 'total' or 'breakdown'
+        for index, (spec, particle) in enumerate(zip(specs, particles)):
+            pairs = particle.element_pairs()
+            partial = spec.partial if spec.partial in pairs else None
+            tasks.append((index, partial, 'total'))
+            if spec.show_partials and partial is None and len(pairs) > 1:
+                tasks += [(index, pair, 'breakdown') for pair in pairs]
+
+        totals: Dict[int, tuple] = {}
+        breakdowns: Dict[int, Dict[str, Dict[str, np.ndarray]]] = {index: {} for index in range(len(specs))}
+        for task_number, (index, partial, role) in enumerate(tasks):
+            spec, particle = specs[index], particles[index]
+            if progress is not None:
+                if progress(task_number / len(tasks)) is False:
+                    raise CalculationCancelled()
+                calc.progress_callback = lambda fraction, n=task_number: progress((n + fraction) / len(tasks))
+            try:
+                pair_iq, self_iq, sq, fq = self._q_space(calc, spec, particle, partial, q_key_params)
+            finally:
+                calc.progress_callback = None
+            if role == 'total':
+                iq = pair_iq + self_iq if params.include_self_scattering else pair_iq
+                totals[index] = (iq, sq, fq, calc.compute_gr(fq))
+            else:
+                # Self-scattering belongs to the same-element partials, so the partials sum to the total
+                a, b = partial.split('-')
+                iq = pair_iq + self_iq if (params.include_self_scattering and a == b) else pair_iq
+                breakdowns[index][partial] = {name: value.cpu().numpy() for name, value in
+                                              zip('isfg', (iq, sq, fq, calc.compute_gr(fq)))}
+
+        q = calc.q.squeeze(-1).cpu().numpy()
+        r = calc.r.squeeze(-1).cpu().numpy()
         results = []
-        for spec in specs:
-            particle = self.particle(spec)
-            partial = spec.partial if spec.partial and spec.partial in particle.element_pairs() else None
-            key = spec.particle_key() + (partial,) + q_key_params
-            cached = self._q_results.get_item(key)
-            if cached is None:
-                with warnings.catch_warnings():
-                    warnings.simplefilter('ignore')
-                    structure = calc._initialize_structures((list(particle.elements), particle.xyz))[0]
-                    pair_iq, self_iq = calc._compute_iq_parts(structure, partial)
-                    sq = calc.compute_sq(pair_iq, structure)
-                    fq = calc.compute_fq(sq)
-                cached = (pair_iq, self_iq, sq, fq)
-                self._q_results.put(key, cached)
-            pair_iq, self_iq, sq, fq = cached
-            iq = pair_iq + self_iq if params.include_self_scattering else pair_iq
-            gr = calc.compute_gr(fq)
-            results.append(Result(
-                q=calc.q.squeeze(-1).cpu().numpy(),
-                r=calc.r.squeeze(-1).cpu().numpy(),
-                i=iq.cpu().numpy(), s=sq.cpu().numpy(), f=fq.cpu().numpy(), g=gr.cpu().numpy(),
-                num_atoms=particle.size,
-                element_pairs=particle.element_pairs(),
-            ))
+        for index, particle in enumerate(particles):
+            iq, sq, fq, gr = (value.cpu().numpy() for value in totals[index])
+            results.append(Result(q=q, r=r, i=iq, s=sq, f=fq, g=gr, num_atoms=particle.size,
+                                  element_pairs=particle.element_pairs(), partials=breakdowns[index]))
         return results
+
+    def _q_space(self, calc: DebyeCalculator, spec: StructureSpec, particle: Particle, partial: Optional[str],
+                 q_key_params: tuple) -> tuple:
+        key = spec.particle_key() + (partial,) + q_key_params
+        cached = self._q_results.get_item(key)
+        if cached is None:
+            with warnings.catch_warnings():
+                warnings.simplefilter('ignore')
+                structure = calc._initialize_structures((list(particle.elements), particle.xyz))[0]
+                pair_iq, self_iq = calc._compute_iq_parts(structure, partial)
+                sq = calc.compute_sq(pair_iq, structure)
+                fq = calc.compute_fq(sq)
+            cached = (pair_iq, self_iq, sq, fq)
+            self._q_results.put(key, cached)
+        return cached
