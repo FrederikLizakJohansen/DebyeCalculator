@@ -164,7 +164,7 @@ class Engine:
 
     def _calculator(self, params: Parameters) -> DebyeCalculator:
         dtype = getattr(torch, params.dtype)
-        key = (params.device, params.dtype, params.batch_size)
+        key = (params.device, params.dtype, params.batch_size, params.num_threads)
         values = {
             'qmin': params.qmin, 'qmax': params.qmax, 'qstep': params.effective_qstep(),
             'rmin': params.rmin, 'rmax': params.rmax, 'rstep': params.rstep,
@@ -174,7 +174,8 @@ class Engine:
         with warnings.catch_warnings():
             warnings.simplefilter('ignore')
             if self._calc is None or key != self._calc_key:
-                self._calc = DebyeCalculator(device=params.device, dtype=dtype, batch_size=params.batch_size, **values)
+                self._calc = DebyeCalculator(device=params.device, dtype=dtype, batch_size=params.batch_size,
+                                             num_threads=params.num_threads or None, **values)
                 self._calc_key = key
                 self._applied = dict(values)
             else:
@@ -196,8 +197,6 @@ class Engine:
         if params.rmax <= params.rmin:
             raise ValueError('rmax must be larger than rmin')
 
-        if params.num_threads > 0 and torch.get_num_threads() != params.num_threads:
-            torch.set_num_threads(params.num_threads)
         calc = self._calculator(params)
         q_key_params = tuple(getattr(params, name) for name in Q_PARAMETERS) + (
             params.effective_qstep(), params.device, params.dtype)
