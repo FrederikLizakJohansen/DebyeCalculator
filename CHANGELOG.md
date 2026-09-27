@@ -7,6 +7,10 @@
 - Calculation memory is bounded by `batch_size` and independent of particle size.
 - Nanoparticle generation uses a k-d tree bond search and vectorised supercell construction (97,000 atoms: 67 s → 1 s). Generated particles are identical to 1.0.14.
 
+### Gradients
+- I(Q), S(Q), F(Q) and G(r) are differentiable with respect to atomic positions at any particle size. The backward pass of the pair sum is computed analytically on the distance grid, with the same memory bound as the forward pass. In 1.0.14, autograd worked through the direct pair sum but stored every pair × Q intermediate (about 1 GB per 1.5 million pairs in float32).
+- Results converted to NumPy (`keep_on_device=False`) are detached, so positions with `requires_grad=True` no longer raise an error there.
+
 ### Changed
 - `batch_size` counts atom pairs per batch (shared between CPU threads); the default is 3,000,000.
 - `StructureTuple.triu_indices` and `StructureTuple.unique_inverse` are `None`; pairs are enumerated per batch.
