@@ -4,25 +4,32 @@ Main window of the desktop GUI.
 
 import copy
 import json
+import threading
 import time
 from dataclasses import asdict
 from itertools import count
 from pathlib import Path
 from typing import List, Optional
 
+import numpy as np
 import torch
 from PySide6.QtCore import QObject, QSettings, QThread, QTimer, Qt, Signal, Slot
 from PySide6.QtGui import QAction, QActionGroup, QColor, QGuiApplication, QKeySequence
 from PySide6.QtWidgets import (
-    QAbstractItemView, QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog, QFormLayout, QGridLayout, QGroupBox,
-    QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMainWindow, QMessageBox, QPushButton, QScrollArea, QSpinBox,
-    QSplitter, QTabWidget, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
+    QAbstractItemView, QCheckBox, QComboBox, QDockWidget, QDoubleSpinBox, QFileDialog, QFormLayout, QGridLayout,
+    QGroupBox, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMainWindow, QMessageBox, QProgressBar, QPushButton,
+    QScrollArea, QSpinBox, QSplitter, QTabWidget, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
+from debyecalculator.debye_calculator import CalculationCancelled
+from debyecalculator.gui.data import DATA_SUFFIXES, compare, guess_function, load_xy, q_to_two_theta, two_theta_to_q
 from debyecalculator.gui.engine import (
     STRUCTURE_SUFFIXES, Engine, Parameters, Result, StructureSpec, available_devices,
 )
-from debyecalculator.gui.plots import FUNCTIONS, LEGEND_POSITIONS, MODES, PlotEntry, PlotOptions, PlotPanel
+from debyecalculator.gui.particle_view import ParticleView
+from debyecalculator.gui.plots import (
+    FUNCTIONS, LEGEND_POSITIONS, MODES, DataEntry, PlotEntry, PlotOptions, PlotPanel,
+)
 from debyecalculator.gui.theme import THEME_MODES, apply_theme
 from debyecalculator.gui.widgets import ColorButton, FloatSlider
 
@@ -49,6 +56,13 @@ PRESETS = {
     'Powder diffraction': dict(params=dict(qmin=1.0, qmax=8.0, qstep=0.1), functions=('i',), log_iq=False, log_q=False),
     'Total scattering': dict(params=dict(qmin=1.0, qmax=30.0, qstep=0.05), functions=('i', 'f', 'g'), log_iq=False, log_q=False),
 }
+
+# X-ray tube and common wavelengths [Å]
+WAVELENGTHS = {'Cu Kα (1.5406 Å)': 1.5406, 'Co Kα (1.7890 Å)': 1.7890, 'Mo Kα (0.7107 Å)': 0.7107,
+               'Ag Kα (0.5594 Å)': 0.5594, 'Custom': None}
+
+MAX_RECENT = 10
+SLOW_CALCULATION_MS = 250  # show progress and the cancel button after this time
 
 
 def palette_colors(name: str, n: int) -> List[str]:
@@ -91,37 +105,87 @@ class StructureItem:
         return dict(spec=asdict(self.spec), label=self.label, color=self.color.name(), visible=self.visible)
 
 
+class DataItem:
+    """
+    Experimental data. x is stored as Q (or r for G(r)); data measured against 2θ is converted on loading.
+    """
+    _ids = count()
+
+    def __init__(self, path: str, function: str, x_unit: str = 'Q', wavelength: float = 0.7107,
+                 label: Optional[str] = None, visible: bool = True, color: Optional[str] = None,
+                 compare_id: Optional[int] = None, fit_scale: bool = True, show_difference: bool = True):
+        self.id = next(self._ids)
+        self.path = str(Path(path).resolve())
+        self.function = function
+        self.x_unit = x_unit
+        self.wavelength = wavelength
+        self.label = label or Path(path).name
+        self.visible = visible
+        self.color = QColor(color) if color else None
+        self.compare_id = compare_id
+        self.fit_scale = fit_scale
+        self.show_difference = show_difference
+        self.raw_x, self.y = load_xy(self.path)
+        self.comparison = None
+
+    @property
+    def x(self) -> np.ndarray:
+        if self.function == 'i' and self.x_unit == '2θ':
+            return two_theta_to_q(self.raw_x, self.wavelength)
+        return self.raw_x
+
+    def to_dict(self) -> dict:
+        return dict(path=self.path, function=self.function, x_unit=self.x_unit, wavelength=self.wavelength,
+                    label=self.label, visible=self.visible, color=self.color.name() if self.color else None,
+                    compare_id=self.compare_id, fit_scale=self.fit_scale, show_difference=self.show_difference)
+
+
 class ComputeWorker(QObject):
-    finished = Signal(int, object, str, float)
+    finished = Signal(int, object, str, float, bool)
+    progress = Signal(int, float)
 
     def __init__(self):
         super().__init__()
         self.engine = Engine()
 
-    @Slot(int, object, object)
-    def run(self, request_id: int, params: Parameters, jobs: list) -> None:
+    @Slot(int, object, object, object)
+    def run(self, request_id: int, params: Parameters, jobs: list, cancel: threading.Event) -> None:
         start = time.perf_counter()
         results, errors = {}, []
-        for item_id, spec in jobs:
+        last_reported = [-1.0]
+
+        for number, (item_id, spec) in enumerate(jobs):
+            def report(fraction, number=number):
+                overall = (number + fraction) / len(jobs)
+                if overall - last_reported[0] >= 0.01:
+                    last_reported[0] = overall
+                    self.progress.emit(request_id, overall)
+                return not cancel.is_set()
+
             try:
-                results[item_id] = self.engine.compute(params, [spec])[0]
+                results[item_id] = self.engine.compute(params, [spec], progress=report)[0]
+            except CalculationCancelled:
+                self.finished.emit(request_id, {}, '', time.perf_counter() - start, True)
+                return
             except Exception as error:  # reported in the status bar; other structures still update
                 results[item_id] = error
                 errors.append(f'{Path(spec.path).name}: {error}')
-        self.finished.emit(request_id, results, '; '.join(errors), time.perf_counter() - start)
+        self.finished.emit(request_id, results, '; '.join(errors), time.perf_counter() - start, False)
 
 
 class MainWindow(QMainWindow):
-    request = Signal(int, object, object)
+    request = Signal(int, object, object, object)
 
-    def __init__(self, files: Optional[List[str]] = None):
+    def __init__(self, files: Optional[List[str]] = None, restore_session: Optional[bool] = None,
+                 settings: Optional[QSettings] = None):
         super().__init__()
         self.setWindowTitle(f'DebyeCalculator {package_version()}'.strip())
         self.resize(1500, 900)
         self.setAcceptDrops(True)
 
-        self.settings = QSettings('DebyeCalculator', 'DebyeCalculator')
+        self.settings = settings if settings is not None else QSettings('DebyeCalculator', 'DebyeCalculator')
         self.items: List[StructureItem] = []
+        self.data_items: List[DataItem] = []
         self.params = Parameters()
         self.plot_options = PlotOptions()
         self.palette_name = 'Tableau 10'
@@ -130,6 +194,8 @@ class MainWindow(QMainWindow):
         self._request_ids = count(1)
         self._busy = False
         self._pending = False
+        self._cancel_event: Optional[threading.Event] = None
+        self._calculation_start = 0.0
         self._updating_controls = False
 
         self._build_ui()
@@ -138,6 +204,8 @@ class MainWindow(QMainWindow):
 
         self._debounce = QTimer(self, singleShot=True, interval=15)
         self._debounce.timeout.connect(self._dispatch)
+        self._slow_timer = QTimer(self, singleShot=True, interval=SLOW_CALCULATION_MS)
+        self._slow_timer.timeout.connect(self._show_progress)
 
         self._apply_params_to_controls()
         self._apply_plot_options_to_controls()
@@ -145,8 +213,14 @@ class MainWindow(QMainWindow):
         hints = QGuiApplication.styleHints()
         if hasattr(hints, 'colorSchemeChanged'):
             hints.colorSchemeChanged.connect(lambda _scheme: self.theme_mode == 'System' and self.set_theme('System'))
+
+        self._restore_window_state()
+        if restore_session is None:
+            restore_session = not files and self.restore_action.isChecked()
+        if restore_session:
+            self._restore_last_session()
         for path in files or []:
-            self.add_file(path)
+            self.open_path(path)
 
     # -- worker ------------------------------------------------------------------------------------------------------
 
@@ -156,9 +230,13 @@ class MainWindow(QMainWindow):
         self._worker.moveToThread(self._thread)
         self.request.connect(self._worker.run)
         self._worker.finished.connect(self._on_finished)
+        self._worker.progress.connect(self._on_progress)
         self._thread.start()
 
     def closeEvent(self, event) -> None:
+        self._save_window_state()
+        if self._cancel_event is not None:
+            self._cancel_event.set()
         self._thread.quit()
         self._thread.wait(5000)
         super().closeEvent(event)
@@ -168,6 +246,12 @@ class MainWindow(QMainWindow):
         Request a recomputation. Requests arriving while a calculation runs collapse into one follow-up request.
         """
         self._debounce.start()
+
+    def cancel_calculation(self) -> None:
+        if self._busy and self._cancel_event is not None:
+            self._pending = False
+            self._cancel_event.set()
+            self._set_status('Cancelling…')
 
     def _dispatch(self) -> None:
         if self._busy:
@@ -179,12 +263,44 @@ class MainWindow(QMainWindow):
             return
         self._busy = True
         self._pending = False
+        self._cancel_event = threading.Event()
+        self._calculation_start = time.perf_counter()
+        self._slow_timer.start()
         self._set_status('Calculating…')
-        self.request.emit(next(self._request_ids), copy.deepcopy(self.params), jobs)
+        self.request.emit(next(self._request_ids), copy.deepcopy(self.params), jobs, self._cancel_event)
 
-    @Slot(int, object, str, float)
-    def _on_finished(self, _request_id: int, results: dict, error: str, elapsed: float) -> None:
+    def _show_progress(self) -> None:
+        if self._busy:
+            self.progress_bar.show()
+            self.cancel_button.show()
+
+    def _hide_progress(self) -> None:
+        self._slow_timer.stop()
+        self.progress_bar.hide()
+        self.progress_bar.setValue(0)
+        self.cancel_button.hide()
+
+    @Slot(int, float)
+    def _on_progress(self, _request_id: int, fraction: float) -> None:
+        self.progress_bar.setValue(int(round(fraction * 100)))
+        if self.progress_bar.isVisible():
+            elapsed = time.perf_counter() - self._calculation_start
+            remaining = elapsed / fraction - elapsed if fraction > 0.02 else None
+            text = f'Calculating… {fraction * 100:.0f} %'
+            if remaining is not None:
+                text += f', about {remaining:.0f} s left'
+            self._set_status(text)
+
+    @Slot(int, object, str, float, bool)
+    def _on_finished(self, _request_id: int, results: dict, error: str, elapsed: float, cancelled: bool) -> None:
         self._busy = False
+        self._hide_progress()
+        if cancelled:
+            self._set_status('Calculation cancelled; the plots show the previous results')
+            if self._pending:
+                self._dispatch()
+            return
+
         by_id = {item.id: item for item in self.items}
         for item_id, result in results.items():
             item = by_id.get(item_id)
@@ -197,6 +313,7 @@ class MainWindow(QMainWindow):
         self._refresh_table_values()
         self._refresh_partials()
         self._refresh_plots()
+        self._refresh_particle_view()
 
         atoms = sum(item.result.num_atoms for item in self.items if item.visible and item.result is not None)
         if error:
@@ -210,23 +327,57 @@ class MainWindow(QMainWindow):
 
     def _build_ui(self) -> None:
         self.plot_panel = PlotPanel()
+        self.cursor_label = QLabel(' ')
+        self.cursor_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self.plot_panel.cursorMoved.connect(lambda text: self.cursor_label.setText(text or ' '))
+        plot_area = QWidget()
+        plot_layout = QVBoxLayout(plot_area)
+        plot_layout.setContentsMargins(0, 0, 0, 0)
+        plot_layout.setSpacing(2)
+        plot_layout.addWidget(self.plot_panel, 1)
+        plot_layout.addWidget(self.cursor_label)
+
         self.tabs = QTabWidget()
         self.tabs.addTab(self._scroll(self._structures_tab()), 'Structures')
+        self.tabs.addTab(self._scroll(self._data_tab()), 'Data')
         self.tabs.addTab(self._scroll(self._scattering_tab()), 'Scattering')
         self.tabs.addTab(self._scroll(self._plot_tab()), 'Plot')
         self.tabs.addTab(self._scroll(self._performance_tab()), 'Performance')
         self.tabs.setMinimumWidth(460)
 
-        splitter = QSplitter()
-        splitter.addWidget(self.tabs)
-        splitter.addWidget(self.plot_panel)
-        splitter.setStretchFactor(1, 1)
-        splitter.setCollapsible(0, False)
-        splitter.setSizes([520, 980])
-        self.setCentralWidget(splitter)
+        self.splitter = QSplitter()
+        self.splitter.addWidget(self.tabs)
+        self.splitter.addWidget(plot_area)
+        self.splitter.setStretchFactor(1, 1)
+        self.splitter.setCollapsible(0, False)
+        self.splitter.setSizes([520, 980])
+        self.setCentralWidget(self.splitter)
+
+        self.particle_view = ParticleView()
+        self.particle_dock = QDockWidget('Particle', self)
+        self.particle_dock.setObjectName('particle_dock')
+        self.particle_dock.setWidget(self.particle_view)
+        self.particle_dock.setAllowedAreas(Qt.AllDockWidgetAreas)
+        self.particle_view.setMinimumWidth(260)
+        self.addDockWidget(Qt.RightDockWidgetArea, self.particle_dock)
+        self.particle_dock.hide()
+        self.particle_dock.visibilityChanged.connect(lambda visible: visible and self._refresh_particle_view())
 
         self.status_label = QLabel()
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setMaximumWidth(180)
+        self.cancel_button = QPushButton('Cancel')
+        self.cancel_button.setToolTip('Stop the running calculation (Esc)')
+        self.cancel_button.clicked.connect(self.cancel_calculation)
         self.statusBar().addWidget(self.status_label, 1)
+        self.statusBar().addPermanentWidget(self.progress_bar)
+        self.statusBar().addPermanentWidget(self.cancel_button)
+        self._hide_progress_widgets()
+
+    def _hide_progress_widgets(self) -> None:
+        self.progress_bar.hide()
+        self.cancel_button.hide()
 
     @staticmethod
     def _scroll(widget: QWidget) -> QScrollArea:
@@ -246,6 +397,22 @@ class MainWindow(QMainWindow):
             row.addWidget(button)
         return row
 
+    @staticmethod
+    def _make_table(headers: List[str], stretch_column: int) -> QTableWidget:
+        table = QTableWidget(0, len(headers))
+        table.setHorizontalHeaderLabels(headers)
+        header = table.horizontalHeader()
+        for column in range(len(headers)):
+            header.setSectionResizeMode(column, QHeaderView.Stretch if column == stretch_column
+                                        else QHeaderView.ResizeToContents)
+        table.verticalHeader().setVisible(False)
+        table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        table.setSelectionMode(QAbstractItemView.SingleSelection)
+        table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        table.setWordWrap(False)
+        table.setTextElideMode(Qt.ElideMiddle)
+        return table
+
     def _structures_tab(self) -> QWidget:
         page = QWidget()
         layout = QVBoxLayout(page)
@@ -256,18 +423,7 @@ class MainWindow(QMainWindow):
             ('Remove', self.remove_selected, 'Remove the selected structure'),
         ]))
 
-        self.table = QTableWidget(0, 4)
-        self.table.setHorizontalHeaderLabels(['', '', 'Structure', 'Atoms'])
-        header = self.table.horizontalHeader()
-        header.setSectionResizeMode(2, QHeaderView.Stretch)
-        for column in (0, 1, 3):
-            header.setSectionResizeMode(column, QHeaderView.ResizeToContents)
-        self.table.verticalHeader().setVisible(False)
-        self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.table.setSelectionMode(QAbstractItemView.SingleSelection)
-        self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.table.setWordWrap(False)
-        self.table.setTextElideMode(Qt.ElideMiddle)
+        self.table = self._make_table(['', '', 'Structure', 'Atoms'], stretch_column=2)
         self.table.setMinimumHeight(190)
         self.table.itemSelectionChanged.connect(self._on_selection_changed)
         layout.addWidget(self.table)
@@ -278,7 +434,7 @@ class MainWindow(QMainWindow):
             ('Remove all', self.remove_all, None),
         ]))
 
-        hint = QLabel('Tip: drop structure files onto the window to add them.')
+        hint = QLabel('Tip: drop structure or data files onto the window to add them.')
         hint.setEnabled(False)
         layout.addWidget(hint)
 
@@ -304,6 +460,14 @@ class MainWindow(QMainWindow):
         self.partial_combo = QComboBox()
         self.partial_combo.currentIndexChanged.connect(self._on_partial_changed)
         form.addRow('Partial', self.partial_combo)
+        self.show_partials_check = QCheckBox('Show all element-pair partials')
+        self.show_partials_check.setToolTip('Draw every element-pair contribution as a dashed curve; '
+                                            'the partials add up to the total')
+        self.show_partials_check.toggled.connect(self._on_show_partials_toggled)
+        form.addRow('', self.show_partials_check)
+        view_button = QPushButton('Show particle in 3D')
+        view_button.clicked.connect(self.show_particle_view)
+        form.addRow('', view_button)
         self.detail_box.setEnabled(False)
         layout.addWidget(self.detail_box)
 
@@ -318,6 +482,58 @@ class MainWindow(QMainWindow):
         recolor.clicked.connect(self.recolor_all)
         color_layout.addWidget(recolor)
         layout.addWidget(colors)
+        layout.addStretch(1)
+        return page
+
+    def _data_tab(self) -> QWidget:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.addLayout(self._button_row([
+            ('Load data…', self.add_data_dialog, 'Load measured I(Q), S(Q), F(Q) or G(r) (two-column text files)'),
+            ('Remove', self.remove_selected_data, None),
+        ]))
+        self.data_table = self._make_table(['', 'Data', 'Function', 'Rw'], stretch_column=1)
+        self.data_table.setMinimumHeight(150)
+        self.data_table.itemSelectionChanged.connect(self._on_data_selection_changed)
+        layout.addWidget(self.data_table)
+
+        self.data_box = QGroupBox('Selected data')
+        form = QFormLayout(self.data_box)
+        form.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
+        self.data_label_edit = QLineEdit()
+        self.data_label_edit.textEdited.connect(self._on_data_changed)
+        form.addRow('Label', self.data_label_edit)
+        self.data_function_combo = QComboBox()
+        for key, (title, *_) in FUNCTIONS.items():
+            self.data_function_combo.addItem(title, key)
+        self.data_function_combo.currentIndexChanged.connect(self._on_data_changed)
+        form.addRow('Function', self.data_function_combo)
+        self.data_unit_combo = QComboBox()
+        self.data_unit_combo.addItems(['Q', '2θ'])
+        self.data_unit_combo.setToolTip('x-axis of the file for I(Q) data; 2θ is converted to Q with the wavelength '
+                                        'set in the Plot tab')
+        self.data_unit_combo.currentIndexChanged.connect(self._on_data_changed)
+        form.addRow('x-axis of file', self.data_unit_combo)
+        self.data_compare_combo = QComboBox()
+        self.data_compare_combo.currentIndexChanged.connect(self._on_data_changed)
+        form.addRow('Compare with', self.data_compare_combo)
+        self.data_fit_check = QCheckBox('Fit scale of the calculation to the data')
+        self.data_fit_check.toggled.connect(self._on_data_changed)
+        form.addRow('', self.data_fit_check)
+        self.data_difference_check = QCheckBox('Show difference curve')
+        self.data_difference_check.toggled.connect(self._on_data_changed)
+        form.addRow('', self.data_difference_check)
+        self.data_result_label = QLabel('')
+        self.data_result_label.setWordWrap(True)
+        form.addRow('', self.data_result_label)
+        self.data_box.setEnabled(False)
+        layout.addWidget(self.data_box)
+
+        note = QLabel('Rw = √(Σ(d − s·c)² / Σd²) over the data points inside the calculated range, '
+                      'with s the fitted scale (1 without fit).')
+        note.setWordWrap(True)
+        note.setEnabled(False)
+        layout.addWidget(note)
         layout.addStretch(1)
         return page
 
@@ -424,6 +640,28 @@ class MainWindow(QMainWindow):
         form.addRow('Plots per row', self.columns_spin)
         layout.addWidget(arrangement)
 
+        axis_box = QGroupBox('I(Q) axis')
+        axis_form = QFormLayout(axis_box)
+        self.iq_axis_combo = QComboBox()
+        self.iq_axis_combo.addItems(['Q [Å⁻¹]', '2θ [°]'])
+        self.iq_axis_combo.currentIndexChanged.connect(self._on_plot_options_changed)
+        axis_form.addRow('x-axis', self.iq_axis_combo)
+        wavelength_row = QHBoxLayout()
+        self.wavelength_combo = QComboBox()
+        self.wavelength_combo.addItems(list(WAVELENGTHS))
+        self.wavelength_combo.currentTextChanged.connect(self._on_wavelength_preset)
+        self.wavelength_spin = QDoubleSpinBox()
+        self.wavelength_spin.setDecimals(4)
+        self.wavelength_spin.setRange(0.01, 10.0)
+        self.wavelength_spin.setSingleStep(0.01)
+        self.wavelength_spin.setSuffix(' Å')
+        self.wavelength_spin.setKeyboardTracking(False)
+        self.wavelength_spin.valueChanged.connect(self._on_wavelength_changed)
+        wavelength_row.addWidget(self.wavelength_combo, 1)
+        wavelength_row.addWidget(self.wavelength_spin)
+        axis_form.addRow('Wavelength', wavelength_row)
+        layout.addWidget(axis_box)
+
         appearance = QGroupBox('Appearance')
         appearance_layout = QGridLayout(appearance)
         self.normalize_check = QCheckBox('Normalise curves')
@@ -435,22 +673,26 @@ class MainWindow(QMainWindow):
         self.auto_range_check = QCheckBox('Auto-range')
         self.auto_range_check.setToolTip('Rescale the axes to the data on every update.\n'
                                          'Off: keep the current zoom while parameters change.')
+        self.cursor_check = QCheckBox('Cursor readout')
+        self.cursor_check.setToolTip('Crosshair with the values of all curves below the plots')
         self.legend_check = QCheckBox('Legend')
         checks = [self.normalize_check, self.log_iq_check, self.log_q_check, self.grid_check, self.markers_check,
-                  self.auto_range_check, self.legend_check]
+                  self.auto_range_check, self.cursor_check, self.legend_check]
         for index, check in enumerate(checks):
             check.toggled.connect(self._on_plot_options_changed)
             appearance_layout.addWidget(check, index // 2, index % 2)
+        row = len(checks) // 2
+        appearance_layout.addWidget(QLabel('Legend position'), row, 0)
         self.legend_combo = QComboBox()
         self.legend_combo.addItems(list(LEGEND_POSITIONS))
         self.legend_combo.currentIndexChanged.connect(self._on_plot_options_changed)
-        appearance_layout.addWidget(self.legend_combo, len(checks) // 2, 1)
+        appearance_layout.addWidget(self.legend_combo, row, 1)
         self.line_width_slider = FloatSlider('Line width', 0.5, 5.0, 1.5, decimals=1, step=0.5, label_width=70)
         self.line_width_slider.valueChanged.connect(self._on_plot_options_changed)
-        appearance_layout.addWidget(self.line_width_slider, len(checks) // 2 + 1, 0, 1, 2)
+        appearance_layout.addWidget(self.line_width_slider, row + 1, 0, 1, 2)
         reset_view = QPushButton('Reset view (Ctrl+R)')
         reset_view.clicked.connect(self.plot_panel.reset_view)
-        appearance_layout.addWidget(reset_view, len(checks) // 2 + 2, 0, 1, 2)
+        appearance_layout.addWidget(reset_view, row + 2, 0, 1, 2)
         layout.addWidget(appearance)
 
         export = QGroupBox('Figure export')
@@ -512,39 +754,46 @@ class MainWindow(QMainWindow):
         self.live_check.setChecked(True)
         self.live_check.toggled.connect(self._on_live_toggled)
         updates_layout.addWidget(self.live_check)
+        cancel_hint = QLabel(f'Calculations taking longer than {SLOW_CALCULATION_MS} ms show a progress bar '
+                             'and can be cancelled with Esc.')
+        cancel_hint.setWordWrap(True)
+        cancel_hint.setEnabled(False)
+        updates_layout.addWidget(cancel_hint)
         layout.addWidget(updates)
         layout.addStretch(1)
         return page
 
     def _build_menu(self) -> None:
         file_menu = self.menuBar().addMenu('&File')
-        entries = [
-            ('Add structure files…', QKeySequence.Open, self.add_files_dialog),
-            (None, None, None),
-            ('Open session…', None, self.load_session_dialog),
-            ('Save session…', QKeySequence.Save, self.save_session_dialog),
-            (None, None, None),
-            ('Export data (CSV)…', QKeySequence('Ctrl+E'), self.export_data_dialog),
-            ('Export figure (PNG/SVG/PDF)…', QKeySequence('Ctrl+Shift+E'), self.export_figure_dialog),
-            ('Export particles (XYZ)…', None, self.export_particles_dialog),
-            (None, None, None),
-            ('Quit', QKeySequence.Quit, self.close),
-        ]
-        for text, shortcut, slot in entries:
-            if text is None:
-                file_menu.addSeparator()
-                continue
+
+        def add(menu, text, slot, shortcut=None):
             action = QAction(text, self)
             if shortcut is not None:
                 action.setShortcut(shortcut)
             action.triggered.connect(slot)
-            file_menu.addAction(action)
+            menu.addAction(action)
+            return action
+
+        add(file_menu, 'Add structure files…', self.add_files_dialog, QKeySequence.Open)
+        add(file_menu, 'Load experimental data…', self.add_data_dialog, QKeySequence('Ctrl+D'))
+        self.recent_menu = file_menu.addMenu('Open recent')
+        self._update_recent_menu()
+        file_menu.addSeparator()
+        add(file_menu, 'Open session…', self.load_session_dialog)
+        add(file_menu, 'Save session…', self.save_session_dialog, QKeySequence.Save)
+        file_menu.addSeparator()
+        add(file_menu, 'Export data (CSV)…', self.export_data_dialog, QKeySequence('Ctrl+E'))
+        add(file_menu, 'Export figure (PNG/SVG/PDF)…', self.export_figure_dialog, QKeySequence('Ctrl+Shift+E'))
+        add(file_menu, 'Export particles (XYZ)…', self.export_particles_dialog)
+        file_menu.addSeparator()
+        add(file_menu, 'Quit', self.close, QKeySequence.Quit)
 
         view_menu = self.menuBar().addMenu('&View')
-        reset = QAction('Reset view', self)
-        reset.setShortcut(QKeySequence('Ctrl+R'))
-        reset.triggered.connect(self.plot_panel.reset_view)
-        view_menu.addAction(reset)
+        add(view_menu, 'Reset view', self.plot_panel.reset_view, QKeySequence('Ctrl+R'))
+        particle_action = self.particle_dock.toggleViewAction()
+        particle_action.setText('Particle (3D)')
+        particle_action.setShortcut(QKeySequence('Ctrl+3'))
+        view_menu.addAction(particle_action)
         theme_menu = view_menu.addMenu('Theme')
         group = QActionGroup(self)
         self.theme_actions = {}
@@ -554,8 +803,18 @@ class MainWindow(QMainWindow):
             group.addAction(action)
             theme_menu.addAction(action)
             self.theme_actions[mode] = action
+        view_menu.addSeparator()
+        self.restore_action = QAction('Restore last session at startup', self, checkable=True)
+        self.restore_action.setChecked(self.settings.value('restore_session', True, type=bool))
+        self.restore_action.toggled.connect(lambda checked: self.settings.setValue('restore_session', checked))
+        view_menu.addAction(self.restore_action)
 
-    # -- theme -------------------------------------------------------------------------------------------------------
+        cancel = QAction('Cancel calculation', self)
+        cancel.setShortcut(QKeySequence(Qt.Key_Escape))
+        cancel.triggered.connect(self.cancel_calculation)
+        self.addAction(cancel)
+
+    # -- theme and window state --------------------------------------------------------------------------------------
 
     def set_theme(self, mode: str) -> None:
         self.theme_mode = mode if mode in THEME_MODES else 'System'
@@ -563,28 +822,95 @@ class MainWindow(QMainWindow):
         self.settings.setValue('theme', self.theme_mode)
         self.theme_actions[self.theme_mode].setChecked(True)
         self.plot_panel.set_dark(self.dark)
+        self.particle_view.set_dark(self.dark)
         self._refresh_table_values()
         self._set_status(self.status_label.text(), error=self.status_label.property('error') is True)
+
+    def _save_window_state(self) -> None:
+        self.settings.setValue('geometry', self.saveGeometry())
+        self.settings.setValue('window_state', self.saveState())
+        self.settings.setValue('splitter', self.splitter.saveState())
+        self.settings.setValue('last_session', json.dumps(self.session()))
+
+    def _restore_window_state(self) -> None:
+        for key, restore in (('geometry', self.restoreGeometry), ('window_state', self.restoreState),
+                             ('splitter', self.splitter.restoreState)):
+            value = self.settings.value(key)
+            if value is not None:
+                restore(value)
+
+    def _restore_last_session(self) -> None:
+        text = self.settings.value('last_session')
+        if not text:
+            return
+        try:
+            session = json.loads(text)
+            session['structures'] = [s for s in session.get('structures', []) if Path(s['spec']['path']).is_file()]
+            session['data'] = [d for d in session.get('data', []) if Path(d['path']).is_file()]
+            self.load_session(session)
+        except (ValueError, KeyError, TypeError, OSError):
+            pass
+
+    # -- recent files ------------------------------------------------------------------------------------------------
+
+    def _last_directory(self) -> str:
+        return str(self.settings.value('last_directory', ''))
+
+    def _remember(self, path: str) -> None:
+        path = str(Path(path).resolve())
+        self.settings.setValue('last_directory', str(Path(path).parent))
+        recent = [p for p in self.settings.value('recent_files', [], type=list) if p != path]
+        self.settings.setValue('recent_files', [path] + recent[:MAX_RECENT - 1])
+        self._update_recent_menu()
+
+    def _update_recent_menu(self) -> None:
+        self.recent_menu.clear()
+        recent = [p for p in self.settings.value('recent_files', [], type=list) if Path(p).is_file()]
+        for path in recent:
+            action = QAction(Path(path).name, self)
+            action.setToolTip(path)
+            action.triggered.connect(lambda _=False, p=path: self.open_path(p))
+            self.recent_menu.addAction(action)
+        self.recent_menu.setEnabled(bool(recent))
+        if recent:
+            self.recent_menu.addSeparator()
+            clear = QAction('Clear list', self)
+            clear.triggered.connect(lambda: (self.settings.setValue('recent_files', []), self._update_recent_menu()))
+            self.recent_menu.addAction(clear)
+
+    def open_path(self, path: str) -> None:
+        """
+        Add a structure or data file, depending on its suffix.
+        """
+        if Path(path).suffix.lower() in DATA_SUFFIXES:
+            self.add_data(path)
+        else:
+            self.add_file(path)
 
     # -- structures --------------------------------------------------------------------------------------------------
 
     def add_files_dialog(self) -> None:
         patterns = ' '.join(f'*{suffix}' for suffix in STRUCTURE_SUFFIXES)
-        paths, _ = QFileDialog.getOpenFileNames(self, 'Add structure files', '', f'Structures ({patterns});;All files (*)')
+        paths, _ = QFileDialog.getOpenFileNames(self, 'Add structure files', self._last_directory(),
+                                                f'Structures ({patterns});;All files (*)')
         for path in paths:
             self.add_file(path)
 
     def add_file(self, path: str, radius: float = 10.0, label: Optional[str] = None, color: Optional[str] = None,
-                 visible: bool = True, lightweight: bool = False, partial: Optional[str] = None) -> StructureItem:
-        spec = StructureSpec(path=str(Path(path).resolve()), radius=radius, lightweight=lightweight, partial=partial)
+                 visible: bool = True, lightweight: bool = False, partial: Optional[str] = None,
+                 show_partials: bool = False) -> StructureItem:
+        spec = StructureSpec(path=str(Path(path).resolve()), radius=radius, lightweight=lightweight, partial=partial,
+                             show_partials=show_partials)
         if label is None:
             label = Path(path).stem + (f' (r = {radius:g} Å)' if spec.is_cif else '')
         if color is None:
             color = palette_colors(self.palette_name, len(self.items) + 1)[-1]
         item = StructureItem(spec, label, QColor(color), visible)
         self.items.append(item)
+        self._remember(path)
         self._rebuild_table()
         self.table.selectRow(len(self.items) - 1)
+        self._refresh_compare_combo()
         self.schedule()
         return item
 
@@ -594,7 +920,7 @@ class MainWindow(QMainWindow):
             return
         spec = item.spec
         self.add_file(spec.path, radius=spec.radius, label=f'{item.label} (copy)', lightweight=spec.lightweight,
-                      partial=spec.partial)
+                      partial=spec.partial, show_partials=spec.show_partials)
 
     def remove_selected(self) -> None:
         item = self._selected_item()
@@ -602,12 +928,14 @@ class MainWindow(QMainWindow):
             return
         self.items.remove(item)
         self._rebuild_table()
+        self._refresh_compare_combo()
         self._refresh_plots()
         self.schedule()
 
     def remove_all(self) -> None:
         self.items = []
         self._rebuild_table()
+        self._refresh_compare_combo()
         self._refresh_plots()
         self._set_status('')
 
@@ -641,21 +969,24 @@ class MainWindow(QMainWindow):
         rows = self.table.selectionModel().selectedRows() if self.table.selectionModel() else []
         return self.items[rows[0].row()] if rows and rows[0].row() < len(self.items) else None
 
+    def _visibility_cell(self, checked: bool, slot) -> QWidget:
+        check = QCheckBox()
+        check.setChecked(checked)
+        check.setToolTip('Show')
+        check.toggled.connect(slot)
+        cell = QWidget()
+        layout = QHBoxLayout(cell)
+        layout.setContentsMargins(6, 0, 0, 0)
+        layout.addWidget(check)
+        return cell
+
     def _rebuild_table(self) -> None:
         selected = self._selected_item()
         self.table.blockSignals(True)
         self.table.setRowCount(len(self.items))
         for row, item in enumerate(self.items):
-            visible = QCheckBox()
-            visible.setChecked(item.visible)
-            visible.setToolTip('Show and calculate')
-            visible.toggled.connect(lambda checked, it=item: self._on_visible_toggled(it, checked))
-            cell = QWidget()
-            cell_layout = QHBoxLayout(cell)
-            cell_layout.setContentsMargins(6, 0, 0, 0)
-            cell_layout.addWidget(visible)
-            self.table.setCellWidget(row, 0, cell)
-
+            self.table.setCellWidget(row, 0, self._visibility_cell(
+                item.visible, lambda checked, it=item: self._on_visible_toggled(it, checked)))
             color = ColorButton(item.color)
             color.colorChanged.connect(lambda c, it=item: self._on_color_changed(it, c))
             self.table.setCellWidget(row, 1, color)
@@ -694,8 +1025,10 @@ class MainWindow(QMainWindow):
         self.lightweight_check.setEnabled(item.spec.is_cif)
         self.radius_slider.setValue(item.spec.radius)
         self.lightweight_check.setChecked(item.spec.lightweight)
+        self.show_partials_check.setChecked(item.spec.show_partials)
         self._fill_partials(item)
         self._updating_controls = False
+        self._refresh_particle_view()
 
     def _fill_partials(self, item: StructureItem) -> None:
         self.partial_combo.blockSignals(True)
@@ -706,6 +1039,7 @@ class MainWindow(QMainWindow):
         index = self.partial_combo.findData(item.spec.partial)
         self.partial_combo.setCurrentIndex(max(index, 0))
         self.partial_combo.blockSignals(False)
+        self.show_partials_check.setEnabled(item.spec.partial is None)
 
     def _refresh_partials(self) -> None:
         item = self._selected_item()
@@ -726,6 +1060,7 @@ class MainWindow(QMainWindow):
         if item is not None:
             item.label = text
             self._refresh_table_values()
+            self._refresh_compare_combo()
             self._refresh_plots()
 
     def _set_item_radius(self, item: StructureItem, radius: float) -> None:
@@ -741,6 +1076,7 @@ class MainWindow(QMainWindow):
         self._set_item_radius(item, radius)
         self.label_edit.setText(item.label)
         self._refresh_table_values()
+        self._refresh_compare_combo()
         self.schedule()
 
     def _on_lightweight_toggled(self, checked: bool) -> None:
@@ -753,7 +1089,175 @@ class MainWindow(QMainWindow):
         item = self._selected_item()
         if item is not None and not self._updating_controls:
             item.spec.partial = self.partial_combo.currentData()
+            self.show_partials_check.setEnabled(item.spec.partial is None)
             self.schedule()
+
+    def _on_show_partials_toggled(self, checked: bool) -> None:
+        item = self._selected_item()
+        if item is not None and not self._updating_controls:
+            item.spec.show_partials = checked
+            self.schedule()
+
+    # -- particle view -----------------------------------------------------------------------------------------------
+
+    def show_particle_view(self) -> None:
+        self.particle_dock.show()
+        self.particle_dock.raise_()
+        if not self.particle_dock.isFloating():
+            # After the dock has been laid out
+            QTimer.singleShot(0, lambda: self.particle_dock.width() < 380 and
+                              self.resizeDocks([self.particle_dock], [440], Qt.Horizontal))
+        self._refresh_particle_view()
+        QTimer.singleShot(50, lambda: self.particle_view.viewbox.autoRange(padding=0.05))
+
+    def _refresh_particle_view(self) -> None:
+        if not self.particle_dock.isVisible():
+            return
+        item = self._selected_item()
+        particle = self._worker.engine._particles.get_item(item.spec.particle_key()) if item is not None else None
+        if particle is None:
+            self.particle_view.set_particle(None, None, item.label if item is not None else '')
+        else:
+            self.particle_view.set_particle(particle.elements, particle.xyz, item.label)
+
+    # -- experimental data -------------------------------------------------------------------------------------------
+
+    def add_data_dialog(self) -> None:
+        patterns = ' '.join(f'*{suffix}' for suffix in DATA_SUFFIXES)
+        paths, _ = QFileDialog.getOpenFileNames(self, 'Load experimental data', self._last_directory(),
+                                                f'Data ({patterns});;All files (*)')
+        for path in paths:
+            self.add_data(path)
+
+    def add_data(self, path: str, **kwargs) -> Optional[DataItem]:
+        kwargs.setdefault('function', guess_function(path))
+        kwargs.setdefault('wavelength', self.plot_options.wavelength)
+        if 'compare_id' not in kwargs and self.items:
+            selected = self._selected_item()
+            kwargs['compare_id'] = (selected or self.items[0]).id
+        try:
+            item = DataItem(path, **kwargs)
+        except (OSError, ValueError) as error:
+            QMessageBox.warning(self, 'Load experimental data', f'Could not read {path}:\n{error}')
+            return None
+        self.data_items.append(item)
+        self._remember(path)
+        if item.function not in self.plot_options.functions:
+            self.plot_options.functions = tuple(f for f in FUNCTIONS if f in self.plot_options.functions + (item.function,))
+            self._apply_plot_options_to_controls()
+            self.plot_panel.set_options(self.plot_options)
+        self._rebuild_data_table()
+        self.data_table.selectRow(len(self.data_items) - 1)
+        self.tabs.setCurrentIndex(1)
+        self._refresh_plots()
+        return item
+
+    def remove_selected_data(self) -> None:
+        item = self._selected_data()
+        if item is not None:
+            self.data_items.remove(item)
+            self._rebuild_data_table()
+            self._refresh_plots()
+
+    def _selected_data(self) -> Optional[DataItem]:
+        rows = self.data_table.selectionModel().selectedRows() if self.data_table.selectionModel() else []
+        return self.data_items[rows[0].row()] if rows and rows[0].row() < len(self.data_items) else None
+
+    def _rebuild_data_table(self) -> None:
+        selected = self._selected_data()
+        self.data_table.blockSignals(True)
+        self.data_table.setRowCount(len(self.data_items))
+        for row, item in enumerate(self.data_items):
+            self.data_table.setCellWidget(row, 0, self._visibility_cell(
+                item.visible, lambda checked, it=item: self._on_data_visible_toggled(it, checked)))
+            for column in (1, 2, 3):
+                cell = QTableWidgetItem()
+                if column == 3:
+                    cell.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                self.data_table.setItem(row, column, cell)
+        if selected in self.data_items:
+            self.data_table.selectRow(self.data_items.index(selected))
+        self.data_table.blockSignals(False)
+        self._refresh_data_table_values()
+        self._on_data_selection_changed()
+
+    def _refresh_data_table_values(self) -> None:
+        if self.data_table.rowCount() != len(self.data_items):
+            return
+        for row, item in enumerate(self.data_items):
+            cells = [self.data_table.item(row, column) for column in (1, 2, 3)]
+            if any(cell is None for cell in cells):
+                continue
+            cells[0].setText(item.label)
+            cells[0].setToolTip(item.path)
+            cells[1].setText(FUNCTIONS[item.function][0])
+            cells[2].setText(f'{item.comparison.rw:.4f}' if item.comparison is not None else '–')
+
+    def _refresh_compare_combo(self) -> None:
+        item = self._selected_data()
+        self.data_compare_combo.blockSignals(True)
+        self.data_compare_combo.clear()
+        self.data_compare_combo.addItem('Nothing', None)
+        for structure in self.items:
+            self.data_compare_combo.addItem(structure.label, structure.id)
+        if item is not None:
+            self.data_compare_combo.setCurrentIndex(max(self.data_compare_combo.findData(item.compare_id), 0))
+        self.data_compare_combo.blockSignals(False)
+
+    def _on_data_selection_changed(self) -> None:
+        item = self._selected_data()
+        self.data_box.setEnabled(item is not None)
+        if item is None:
+            self.data_result_label.setText('')
+            return
+        self._updating_controls = True
+        self.data_label_edit.setText(item.label)
+        self.data_function_combo.setCurrentIndex(max(self.data_function_combo.findData(item.function), 0))
+        self.data_unit_combo.setCurrentText(item.x_unit)
+        self.data_unit_combo.setEnabled(item.function == 'i')
+        self._refresh_compare_combo()
+        self.data_fit_check.setChecked(item.fit_scale)
+        self.data_difference_check.setChecked(item.show_difference)
+        self._updating_controls = False
+        self._refresh_data_result()
+
+    def _on_data_changed(self, *_args) -> None:
+        item = self._selected_data()
+        if item is None or self._updating_controls:
+            return
+        item.label = self.data_label_edit.text()
+        item.function = self.data_function_combo.currentData()
+        item.x_unit = self.data_unit_combo.currentText()
+        item.wavelength = self.plot_options.wavelength
+        item.compare_id = self.data_compare_combo.currentData()
+        item.fit_scale = self.data_fit_check.isChecked()
+        item.show_difference = self.data_difference_check.isChecked()
+        self.data_unit_combo.setEnabled(item.function == 'i')
+        if item.function not in self.plot_options.functions:
+            self._set_functions(self.plot_options.functions + (item.function,))
+        self._refresh_plots()
+
+    def _on_data_visible_toggled(self, item: DataItem, checked: bool) -> None:
+        item.visible = checked
+        self._refresh_plots()
+
+    def _refresh_data_result(self) -> None:
+        item = self._selected_data()
+        if item is None or item.comparison is None:
+            self.data_result_label.setText('No overlap with the compared calculation' if item and item.compare_id
+                                           is not None else '')
+            return
+        c = item.comparison
+        text = f'Scale {c.scale:.5g}   Rw {c.rw:.4f}   ({c.x.size} points)'
+        compared = next((s for s in self.items if s.id == item.compare_id and s.result is not None), None)
+        if compared is not None and c.x.size > 1:
+            calc_x = compared.result.r if item.function == 'g' else compared.result.q
+            calc_step, data_step = float(np.median(np.diff(calc_x))), float(np.median(np.diff(c.x)))
+            if calc_step > 2 * data_step:
+                name = 'rstep' if item.function == 'g' else 'Qstep'
+                text += (f'\nThe calculated {name} ({calc_step:.3g}) is coarser than the data spacing '
+                         f'({data_step:.3g}); a smaller {name} gives a more accurate comparison.')
+        self.data_result_label.setText(text)
 
     # -- parameters --------------------------------------------------------------------------------------------------
 
@@ -848,12 +1352,18 @@ class MainWindow(QMainWindow):
         self.offset_slider.setEnabled(o.mode == 'Stacked')
         self.columns_spin.setValue(o.columns)
         self.columns_spin.setEnabled(o.mode != 'Separate')
+        self.iq_axis_combo.setCurrentIndex(1 if o.iq_two_theta else 0)
+        preset = next((name for name, value in WAVELENGTHS.items() if value == o.wavelength), 'Custom')
+        self.wavelength_combo.setCurrentText(preset)
+        self.wavelength_spin.setValue(o.wavelength)
         self.normalize_check.setChecked(o.normalize)
         self.log_iq_check.setChecked(o.log_iq)
         self.log_q_check.setChecked(o.log_q)
+        self.log_q_check.setText('Log 2θ axis (I(Q))' if o.iq_two_theta else 'Log Q axis (I(Q))')
         self.grid_check.setChecked(o.grid)
         self.markers_check.setChecked(o.markers)
         self.auto_range_check.setChecked(o.auto_range)
+        self.cursor_check.setChecked(o.cursor)
         self.legend_check.setChecked(o.legend)
         self.legend_combo.setCurrentText(o.legend_position)
         self.legend_combo.setEnabled(o.legend)
@@ -863,6 +1373,22 @@ class MainWindow(QMainWindow):
         self.panel_height_spin.setValue(o.export_panel_height)
         self._updating_controls = False
 
+    def _on_wavelength_preset(self, name: str) -> None:
+        value = WAVELENGTHS.get(name)
+        if value is not None and not self._updating_controls:
+            self.wavelength_spin.setValue(value)
+
+    def _on_wavelength_changed(self, value: float) -> None:
+        if self._updating_controls:
+            return
+        preset = next((name for name, v in WAVELENGTHS.items() if v == value), 'Custom')
+        self.wavelength_combo.blockSignals(True)
+        self.wavelength_combo.setCurrentText(preset)
+        self.wavelength_combo.blockSignals(False)
+        for item in self.data_items:
+            item.wavelength = value
+        self._on_plot_options_changed()
+
     def _on_plot_options_changed(self, *_args) -> None:
         if self._updating_controls:
             return
@@ -871,12 +1397,15 @@ class MainWindow(QMainWindow):
         o.mode = self.mode_combo.currentText()
         o.offset = self.offset_slider.value()
         o.columns = self.columns_spin.value()
+        o.iq_two_theta = self.iq_axis_combo.currentIndex() == 1
+        o.wavelength = self.wavelength_spin.value()
         o.normalize = self.normalize_check.isChecked()
         o.log_iq = self.log_iq_check.isChecked()
         o.log_q = self.log_q_check.isChecked()
         o.grid = self.grid_check.isChecked()
         o.markers = self.markers_check.isChecked()
         o.auto_range = self.auto_range_check.isChecked()
+        o.cursor = self.cursor_check.isChecked()
         o.legend = self.legend_check.isChecked()
         o.legend_position = self.legend_combo.currentText()
         o.line_width = self.line_width_slider.value()
@@ -886,12 +1415,41 @@ class MainWindow(QMainWindow):
         self.offset_slider.setEnabled(o.mode == 'Stacked')
         self.columns_spin.setEnabled(o.mode != 'Separate')
         self.legend_combo.setEnabled(o.legend)
+        self.log_q_check.setText('Log 2θ axis (I(Q))' if o.iq_two_theta else 'Log Q axis (I(Q))')
         self.plot_panel.set_options(o)
+        self._refresh_plots()
+
+    def _plot_entries(self):
+        shown = [item for item in self.items if item.visible and item.result is not None]
+        index_of = {item.id: index for index, item in enumerate(shown)}
+        entries = [PlotEntry(item.label, item.color, item.result) for item in shown]
+
+        data_entries = []
+        for data in self.data_items:
+            data.comparison = None
+            compared = next((item for item in shown if item.id == data.compare_id), None)
+            if compared is not None:
+                result = compared.result
+                calc_x = result.r if data.function == 'g' else result.q
+                data.comparison = compare(data.x, data.y, calc_x, getattr(result, data.function), data.fit_scale)
+                if data.comparison is not None and data.fit_scale and data.visible:
+                    entries[index_of[compared.id]].scales[data.function] = data.comparison.scale
+            if not data.visible:
+                continue
+            show_difference = data.show_difference and data.comparison is not None
+            data_entries.append(DataEntry(
+                label=data.label, color=data.color, function=data.function, x=data.x, y=data.y,
+                compare_index=index_of.get(data.compare_id),
+                difference_x=data.comparison.x if show_difference else None,
+                difference_y=data.comparison.difference if show_difference else None,
+            ))
+        return entries, data_entries
 
     def _refresh_plots(self) -> None:
-        entries = [PlotEntry(item.label, item.color, item.result) for item in self.items
-                   if item.visible and item.result is not None]
-        self.plot_panel.set_entries(entries)
+        entries, data_entries = self._plot_entries()
+        self.plot_panel.set_entries(entries, data_entries)
+        self._refresh_data_table_values()
+        self._refresh_data_result()
 
     def _set_status(self, text: str, error: bool = False) -> None:
         self.status_label.setText(text)
@@ -909,7 +1467,7 @@ class MainWindow(QMainWindow):
         for url in event.mimeData().urls():
             path = url.toLocalFile()
             if path and Path(path).is_file():
-                self.add_file(path)
+                self.open_path(path)
 
     # -- export ------------------------------------------------------------------------------------------------------
 
@@ -924,37 +1482,45 @@ class MainWindow(QMainWindow):
         for key, value in self.params.to_dict().items():
             lines.append(f'# {key}: {value}')
         lines.append(f'# qstep (effective): {self.params.effective_qstep():.6g}')
+        if self.plot_options.iq_two_theta:
+            lines.append(f'# wavelength [Å]: {self.plot_options.wavelength:g}')
         return lines
 
     def export_data_dialog(self) -> None:
-        directory = QFileDialog.getExistingDirectory(self, 'Export data to folder')
+        directory = QFileDialog.getExistingDirectory(self, 'Export data to folder', self._last_directory())
         if directory:
             written = self.export_data(directory)
             self._set_status(f'Wrote {len(written)} files to {directory}')
 
     def export_data(self, directory: str) -> List[Path]:
         """
-        Write <label>_Q.csv (Q, I, S, F) and <label>_r.csv (r, G) for every shown structure.
+        Write <label>_Q.csv (Q, [2θ,] I, S, F) and <label>_r.csv (r, G) for every shown structure, and
+        <label>_<pair>_Q.csv / _r.csv for shown partials.
         """
-        import numpy as np
         written = []
+        two_theta = self.plot_options.iq_two_theta
         for item in self.items:
             if not item.visible or item.result is None:
                 continue
             stem = file_stem(item.label, f'structure_{item.id}')
             header = '\n'.join(self._metadata_lines(item))
             result = item.result
-            q_path = Path(directory) / f'{stem}_Q.csv'
-            np.savetxt(q_path, np.column_stack([result.q, result.i, result.s, result.f]), delimiter=',',
-                       header=header + '\nQ [1/Å],I(Q),S(Q),F(Q)', comments='')
-            r_path = Path(directory) / f'{stem}_r.csv'
-            np.savetxt(r_path, np.column_stack([result.r, result.g]), delimiter=',',
-                       header=header + '\nr [Å],G(r)', comments='')
-            written += [q_path, r_path]
+            sets = [(stem, {name: getattr(result, name) for name in 'isfg'})]
+            sets += [(f'{stem}_{pair}', values) for pair, values in result.partials.items()]
+            for name, values in sets:
+                q_columns = [result.q] + ([q_to_two_theta(result.q, self.plot_options.wavelength)] if two_theta else [])
+                q_header = 'Q [1/Å],' + ('2θ [deg],' if two_theta else '') + 'I(Q),S(Q),F(Q)'
+                q_path = Path(directory) / f'{name}_Q.csv'
+                np.savetxt(q_path, np.column_stack(q_columns + [values['i'], values['s'], values['f']]),
+                           delimiter=',', header=header + '\n' + q_header, comments='')
+                r_path = Path(directory) / f'{name}_r.csv'
+                np.savetxt(r_path, np.column_stack([result.r, values['g']]), delimiter=',',
+                           header=header + '\nr [Å],G(r)', comments='')
+                written += [q_path, r_path]
         return written
 
     def export_figure_dialog(self) -> None:
-        path, _ = QFileDialog.getSaveFileName(self, 'Export figure', 'debyecalculator.png',
+        path, _ = QFileDialog.getSaveFileName(self, 'Export figure', str(Path(self._last_directory()) / 'debyecalculator.png'),
                                               'PNG (*.png);;SVG (*.svg);;PDF (*.pdf)')
         if path:
             try:
@@ -964,7 +1530,7 @@ class MainWindow(QMainWindow):
                 self._set_status(f'Figure export failed: {error}', error=True)
 
     def export_particles_dialog(self) -> None:
-        directory = QFileDialog.getExistingDirectory(self, 'Export particles to folder')
+        directory = QFileDialog.getExistingDirectory(self, 'Export particles to folder', self._last_directory())
         if directory:
             written = self.export_particles(directory)
             self._set_status(f'Wrote {len(written)} files to {directory}')
@@ -989,16 +1555,20 @@ class MainWindow(QMainWindow):
 
     def session(self) -> dict:
         return dict(parameters=self.params.to_dict(), plot=asdict(self.plot_options), palette=self.palette_name,
-                    structures=[item.to_dict() for item in self.items])
+                    structures=[item.to_dict() for item in self.items],
+                    data=[dict(item.to_dict(), compare_index=next(
+                        (index for index, s in enumerate(self.items) if s.id == item.compare_id), None))
+                          for item in self.data_items])
 
     def save_session_dialog(self) -> None:
-        path, _ = QFileDialog.getSaveFileName(self, 'Save session', 'session.json', 'Session (*.json)')
+        path, _ = QFileDialog.getSaveFileName(self, 'Save session', str(Path(self._last_directory()) / 'session.json'),
+                                              'Session (*.json)')
         if path:
             Path(path).write_text(json.dumps(self.session(), indent=1))
             self._set_status(f'Saved session to {path}')
 
     def load_session_dialog(self) -> None:
-        path, _ = QFileDialog.getOpenFileName(self, 'Open session', '', 'Session (*.json)')
+        path, _ = QFileDialog.getOpenFileName(self, 'Open session', self._last_directory(), 'Session (*.json)')
         if path:
             try:
                 self.load_session(json.loads(Path(path).read_text()))
@@ -1023,6 +1593,7 @@ class MainWindow(QMainWindow):
         self.palette_combo.setCurrentText(self.palette_name)
         self.palette_combo.blockSignals(False)
         self.items = []
+        self.data_items = []
         self._apply_params_to_controls()
         self._apply_plot_options_to_controls()
         self.plot_panel.set_options(self.plot_options)
@@ -1030,6 +1601,15 @@ class MainWindow(QMainWindow):
             spec = entry['spec']
             self.add_file(spec['path'], radius=spec.get('radius', 10.0), label=entry.get('label'),
                           color=entry.get('color'), visible=entry.get('visible', True),
-                          lightweight=spec.get('lightweight', False), partial=spec.get('partial'))
+                          lightweight=spec.get('lightweight', False), partial=spec.get('partial'),
+                          show_partials=spec.get('show_partials', False))
+        for entry in session.get('data', []):
+            compare_index = entry.get('compare_index')
+            compare_id = self.items[compare_index].id if compare_index is not None and compare_index < len(self.items) else None
+            self.add_data(entry['path'], function=entry.get('function', 'i'), x_unit=entry.get('x_unit', 'Q'),
+                          wavelength=entry.get('wavelength', options.wavelength), label=entry.get('label'),
+                          visible=entry.get('visible', True), color=entry.get('color'), compare_id=compare_id,
+                          fit_scale=entry.get('fit_scale', True), show_difference=entry.get('show_difference', True))
+        self.tabs.setCurrentIndex(0)
         self._refresh_plots()
         self.schedule()
