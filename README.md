@@ -140,6 +140,7 @@ debyecalculator-gui particle.cif other.xyz
 - Every parameter updates the plots while a slider moves: particle radius, Q- and r-range, Qstep, Qdamp, B<sub>iso</sub>, r<sub>thres</sub>, Lorch modification, radiation type, partial pair, device and precision.
 - Co-plot structures overlaid, stacked with an adjustable offset, or in separate rows; normalise curves and use logarithmic axes.
 - Presets for small-angle scattering, powder diffraction and total scattering.
+- Light and dark theme (View → Theme), following the operating system by default.
 - Export data (CSV with metadata), figures (PNG, SVG, PDF), generated particles (XYZ), and save or reopen a session.
 
 The notebook widget below (`DebyeCalculator().interact()`) remains available.

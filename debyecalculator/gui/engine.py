@@ -43,6 +43,8 @@ class Parameters:
     device: str = 'cpu'
     dtype: str = 'float32'
     batch_size: int = 3_000_000
+    include_self_scattering: bool = True  # in I(Q); S(Q), F(Q) and G(r) use the pair contribution only
+    num_threads: int = 0  # CPU threads; 0 keeps the PyTorch default
 
     def effective_qstep(self) -> float:
         return self.qstep if self.qstep else math.pi / (self.rmax + self.rstep)
@@ -187,6 +189,8 @@ class Engine:
         if params.rmax <= params.rmin:
             raise ValueError('rmax must be larger than rmin')
 
+        if params.num_threads > 0 and torch.get_num_threads() != params.num_threads:
+            torch.set_num_threads(params.num_threads)
         calc = self._calculator(params)
         q_key_params = tuple(getattr(params, name) for name in Q_PARAMETERS) + (
             params.effective_qstep(), params.device, params.dtype)
@@ -202,12 +206,12 @@ class Engine:
                     warnings.simplefilter('ignore')
                     structure = calc._initialize_structures((list(particle.elements), particle.xyz))[0]
                     pair_iq, self_iq = calc._compute_iq_parts(structure, partial)
-                    iq = pair_iq + self_iq
                     sq = calc.compute_sq(pair_iq, structure)
                     fq = calc.compute_fq(sq)
-                cached = (iq, sq, fq)
+                cached = (pair_iq, self_iq, sq, fq)
                 self._q_results.put(key, cached)
-            iq, sq, fq = cached
+            pair_iq, self_iq, sq, fq = cached
+            iq = pair_iq + self_iq if params.include_self_scattering else pair_iq
             gr = calc.compute_gr(fq)
             results.append(Result(
                 q=calc.q.squeeze(-1).cpu().numpy(),

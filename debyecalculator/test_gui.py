@@ -63,7 +63,7 @@ def test_window_smoke(tmp_path, monkeypatch):
     assert all(item.result is not None for item in window.items)
     for mode in ('Stacked', 'Separate', 'Overlay'):
         window.mode_combo.setCurrentText(mode)
-    window.qdamp_slider.setValue(0.1)
+    window.qdamp_slider.spin.setValue(0.1)
     settle()
 
     assert len(window.export_data(str(tmp_path))) == 4
