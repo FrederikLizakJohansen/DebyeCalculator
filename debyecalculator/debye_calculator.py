@@ -11,6 +11,8 @@ import time
 import yaml
 import importlib.resources
 import warnings
+import threading
+import contextlib
 from glob import glob
 from datetime import datetime, timezone
 from typing import Union, Tuple, Any, List, Type, Optional
@@ -92,6 +94,30 @@ else:
         List[Atoms],
     ]
 
+_THREADS_LOCK = threading.Lock()
+_THREADS_STATE = {'active': 0, 'saved': None}
+
+
+@contextlib.contextmanager
+def _single_intra_op_thread():
+    """
+    Set PyTorch's process-wide intra-op thread count to 1 while threaded pair sums run, and restore the value from
+    before the first of any overlapping calls once the last one finishes.
+    """
+    with _THREADS_LOCK:
+        if _THREADS_STATE['active'] == 0:
+            _THREADS_STATE['saved'] = torch.get_num_threads()
+            torch.set_num_threads(1)
+        _THREADS_STATE['active'] += 1
+    try:
+        yield
+    finally:
+        with _THREADS_LOCK:
+            _THREADS_STATE['active'] -= 1
+            if _THREADS_STATE['active'] == 0:
+                torch.set_num_threads(_THREADS_STATE['saved'])
+
+
 class _Grid:
     """
     Batches and distance grid of a pair sum (see DebyeCalculator._compute_iq_parts).
@@ -154,15 +180,17 @@ class DebyeCalculator:
         rthres: float = 0.0,
         biso: float = 0.3,
         device: str = 'cuda',
-        batch_size: Union[int, None] = 3000000,
+        batch_size: Union[int, None] = None,
         lorch_mod: bool = False,
         radiation_type: str = None,
         rad_type: str = None,
         profile: bool = False,
         _max_batch_size: int = 4000,
         _lightweight_mode: bool = False,
-        _spread_step_factor: Union[float, None] = None,
         dtype: torch.dtype = torch.float32,
+        pair_sum: str = 'grid',
+        num_threads: Union[int, None] = None,
+        _spread_step_factor: Union[float, None] = None,
     ) -> None:
         """
         Initialize a DebyeCalculator instance with specified parameters.
@@ -178,12 +206,19 @@ class DebyeCalculator:
             rthres (float): Threshold value for exclusion of distances below this value in the scattering calculation. Default is 0.0.
             biso (float): Debye-Waller isotropic atomic displacement parameter. Default is 0.3.
             device (str): Device to use for computations ('cuda' for CUDA-enabled GPU's or 'cpu' for CPU)
-            batch_size (int or None): Number of atom pairs processed per batch (shared between CPU threads). If None, the batch size will be automatically set. Default is 3000000.
+            batch_size (int or None): Number of atom pairs processed per batch (shared between CPU threads); this bounds the memory use. Default is None, which chooses 3,000,000 for pair_sum='grid' and 10,000 for pair_sum='direct'.
             lorch_mod (bool): Flag to enable Lorch modification. Default is False.
             radiation_type (str): Type of radiation for form factor calculations ('xray' or 'neutron'). Default is 'xray'
             rad_type (str): Alias for 'radiation_type'. Default is 'xray'.
             profile (bool): Activate profiler. Default is False.
             dtype (torch.dtype): Data type for tensors. 32-bit and 64-bit floats are currently supported. Default is torch.float32.
+            pair_sum (str): Algorithm of the pair sum. 'grid' (default) spreads the pairs onto a distance grid (relative
+                deviation from the exact sum ~1e-7 in float32 and ~1e-10 in float64); 'direct' evaluates sinc(Q d) for every
+                pair, as in versions 1.0.x.
+            num_threads (int or None): Number of CPU threads for the pair sum. Default is None, which uses
+                torch.get_num_threads(). With more than one thread, PyTorch's process-wide thread count is set to 1 while
+                the pair sum runs and restored afterwards; 1 runs the batches sequentially and leaves PyTorch's thread
+                settings untouched.
         """
 
         # Handling CUDA availability
@@ -216,6 +251,8 @@ class DebyeCalculator:
         self.rthres = rthres
         self.biso = biso
         self.batch_size = batch_size
+        self.pair_sum = pair_sum
+        self.num_threads = num_threads
         self.lorch_mod = lorch_mod
         self.dtype = dtype
 
@@ -266,7 +303,7 @@ class DebyeCalculator:
             # Should not reach this point, here for safety
             raise ValueError("Invalid radiation type")
 
-        # Max batch size
+        # Accepted for compatibility with 1.0.x; batch_size=None chooses the batch size (see _effective_batch_size)
         self._max_batch_size = _max_batch_size
         
         # Lightweight mode
@@ -294,7 +331,8 @@ class DebyeCalculator:
             f"{'rad_type:':<12} {self.radiation_type}\n"
             f"{'lorch_mod:':<12} {self.lorch_mod}\n"
             f"\n"
-            f"{'batch_size:':<12} {self.batch_size}\n"
+            f"{'batch_size:':<12} {self._effective_batch_size()}\n"
+            f"{'pair_sum:':<12} {self.pair_sum}\n"
             f"{'device:':<12} {self.device}\n"
             f"{'profile:':<12} {self.profile}\n"
         )
@@ -334,6 +372,10 @@ class DebyeCalculator:
         # Batch-size constraints
         if self.batch_size is not None and self.batch_size < 0:
             raise ValueError("batch_size must be non-negative.")
+        if self.pair_sum not in ('grid', 'direct'):
+            raise ValueError("pair_sum must be 'grid' or 'direct'.")
+        if self.num_threads is not None and self.num_threads < 1:
+            raise ValueError("num_threads must be at least 1.")
 
         # Device constraints
         if self.device not in ['cpu', 'cuda', 'mps']:
@@ -678,6 +720,15 @@ class DebyeCalculator:
 
         return iq
 
+    def _effective_batch_size(self) -> int:
+        """
+        The batch size in atom pairs: batch_size if set, otherwise 3,000,000 for the grid pair sum and 10,000 (the 1.0.x
+        default) for the direct pair sum, whose memory per pair grows with the number of Q-points.
+        """
+        if self.batch_size:
+            return int(self.batch_size)
+        return 3_000_000 if self.pair_sum == 'grid' else 10_000
+
     def _parse_partial(
         self,
         structure: StructureTuple,
@@ -790,13 +841,9 @@ class DebyeCalculator:
         n_workers = min(n_threads, len(jobs))
         if n_workers <= 1:
             return [run(jobs)]
-        intra_op_threads = torch.get_num_threads()
-        torch.set_num_threads(1)
-        try:
+        with _single_intra_op_thread():
             with ThreadPoolExecutor(n_workers) as executor:
                 return list(executor.map(lambda worker: run(jobs[worker::n_workers]), range(n_workers)))
-        finally:
-            torch.set_num_threads(intra_op_threads)
 
     def _grid_pair_sums(self, xyz: torch.Tensor, occupancy: torch.Tensor, grid: '_Grid') -> torch.Tensor:
         """
@@ -843,7 +890,7 @@ class DebyeCalculator:
         r = (torch.arange(n_nodes, device=self.device, dtype=acc_dtype) - 1) * grid.dr
         h_nodes = torch.zeros((n_nodes, grid.n_element_pairs), device=self.device, dtype=acc_dtype)
         k_nodes = torch.zeros_like(h_nodes)
-        nodes_per_chunk = max(1, self.batch_size // max(1, q.numel()))
+        nodes_per_chunk = max(1, self._effective_batch_size() // max(1, q.numel()))
         for start in range(0, n_nodes, nodes_per_chunk):
             r_chunk = r[start:start + nodes_per_chunk].unsqueeze(-1)
             x = r_chunk * q.unsqueeze(0)
@@ -921,19 +968,27 @@ class DebyeCalculator:
         q: torch.Tensor,
     ) -> torch.Tensor:
         """
-        Pair contribution to I(Q) by direct summation over all pairs, for small structures.
+        Pair contribution to I(Q) by direct summation of sinc(Q d) over all pairs, in batches of atom pairs (as in 1.0.x).
+        Used for small structures and for pair_sum='direct'; differentiable with plain autograd.
         """
         pair_iq = torch.zeros(q.numel(), device=self.device, dtype=self.dtype)
+        batch_size = self._effective_batch_size()
         for a, b in element_pairs:
             idx_a, idx_b = atom_indices[a], atom_indices[b]
-            d = torch.cdist(xyz[idx_a], xyz[idx_b], compute_mode='donot_use_mm_for_euclid_dist')
-            w = occupancy[idx_a].unsqueeze(-1) * occupancy[idx_b].unsqueeze(0)
-            valid = d >= self.rthres
-            if a == b:
-                valid &= torch.ones_like(valid).triu(diagonal=1)
-            d, w = d[valid], w[valid]
-            sinc_sum = w @ torch.sinc(d.unsqueeze(-1) * q.unsqueeze(0) / math.pi)
-            pair_iq += form_factors[a] * form_factors[b] * sinc_sum
+            n_b = idx_b.numel()
+            rows_per_batch = max(1, batch_size // max(1, n_b))
+            sinc_sum = torch.zeros(q.numel(), device=self.device, dtype=self.dtype)
+            for start in range(0, idx_a.numel(), rows_per_batch):
+                stop = min(start + rows_per_batch, idx_a.numel())
+                d = torch.cdist(xyz[idx_a[start:stop]], xyz[idx_b], compute_mode='donot_use_mm_for_euclid_dist')
+                w = occupancy[idx_a[start:stop]].unsqueeze(-1) * occupancy[idx_b].unsqueeze(0)
+                valid = d >= self.rthres
+                if a == b:
+                    rows = torch.arange(start, stop, device=self.device).unsqueeze(-1)
+                    valid &= torch.arange(n_b, device=self.device).unsqueeze(0) > rows
+                d, w = d[valid], w[valid]
+                sinc_sum = sinc_sum + w @ torch.sinc(d.unsqueeze(-1) * q.unsqueeze(0) / math.pi)
+            pair_iq = pair_iq + form_factors[a] * form_factors[b] * sinc_sum
         return pair_iq
 
     def _finish_iq_parts(
@@ -1011,7 +1066,7 @@ class DebyeCalculator:
 
         # Chunks of coarse blocks, bounded by the batch size
         sums = torch.zeros((n_pairs, q.numel()), device=self.device, dtype=acc_dtype)
-        blocks_per_chunk = max(1, self.batch_size // max(1, n_pairs * q.numel()))
+        blocks_per_chunk = max(1, self._effective_batch_size() // max(1, n_pairs * q.numel()))
         for start in range(0, C, blocks_per_chunk):
             stop = min(start + blocks_per_chunk, C)
             r_coarse = ((torch.arange(start, stop, device=self.device, dtype=acc_dtype) * B - 1) * dr).unsqueeze(-1) * q
@@ -1052,9 +1107,6 @@ class DebyeCalculator:
         Returns:
             Tuple[torch.Tensor, Union[torch.Tensor, None]]: The pair contribution and the self-scattering contribution (None if not requested).
         """
-        if self.batch_size is None:
-            self.batch_size = self._max_batch_size
-
         partial_elements = self._parse_partial(structure, partial)
 
         unique_elements = list(np.unique(structure.elements))
@@ -1087,20 +1139,21 @@ class DebyeCalculator:
         n_nodes = int(math.ceil(d_max / dr)) + 5
         atom_indices = [torch.nonzero(element_index == i).squeeze(-1) for i in range(len(unique_elements))]
 
-        # With fewer pairs than grid nodes, the direct sum is cheaper than the grid evaluation
+        # The direct sum on request, and for structures with fewer pairs than grid nodes, where it is also cheaper
         n_pairs = sum(
             atom_indices[a].numel() * (atom_indices[a].numel() - 1) // 2 if a == b else atom_indices[a].numel() * atom_indices[b].numel()
             for a, b in element_pairs
         )
-        if n_pairs <= n_nodes:
+        if self.pair_sum == 'direct' or n_pairs <= n_nodes:
             pair_iq = self._direct_pair_iq(xyz, occupancy, atom_indices, element_pairs, form_factors, q)
             return self._finish_iq_parts(pair_iq, q, element_index, occupancy, form_factors, unique_elements, partial_elements, include_self_scattering)
 
         # On CPU, independent batches run in threads (PyTorch releases the GIL) with one intra-op thread each,
         # since the scatter into the histogram runs on a single thread. The batch size is shared between the threads
         # Threads are only worth starting for at least ~2^16 pairs each
-        n_threads = min(torch.get_num_threads(), max(1, n_pairs // 2**16)) if self.device == 'cpu' else 1
-        pairs_per_job = max(1, self.batch_size // n_threads)
+        max_threads = self.num_threads if self.num_threads is not None else torch.get_num_threads()
+        n_threads = min(max_threads, max(1, n_pairs // 2**16)) if self.device == 'cpu' else 1
+        pairs_per_job = max(1, self._effective_batch_size() // n_threads)
 
         # Batches of rows for each element pair
         jobs = []
@@ -1471,7 +1524,7 @@ class DebyeCalculator:
         rthres = self.rthres
         biso = self.biso
         device = 'cuda' if torch.cuda.is_available() else self.device
-        batch_size = self.batch_size
+        batch_size = self._effective_batch_size()
         lorch_mod = self.lorch_mod
         radiation_type = self.radiation_type
         profile = False
