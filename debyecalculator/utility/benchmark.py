@@ -1,7 +1,7 @@
 import tempfile
 import os
 import csv
-import pkg_resources
+from pathlib import Path
 import argparse
 import warnings
 import torch
@@ -115,7 +115,7 @@ class DebyeBenchmarker:
         """
 
         self.set_radii(list(radii))
-        self.cif = pkg_resources.resource_filename(__name__, 'benchmark_structure.cif')
+        self.cif = str(Path(__file__).parent / 'benchmark_structure.cif')
         self.custom_cif = custom_cif
         
         with warnings.catch_warnings():
@@ -134,11 +134,11 @@ class DebyeBenchmarker:
 
         self.show_progress_bar = show_progress_bar
 
-        self.ref_stat_csv_titan_10k = pkg_resources.resource_filename(__name__, 'benchmark_reference_TITANRTX.csv')
+        self.ref_stat_csv_titan_10k = str(Path(__file__).parent / 'benchmark_reference_TITANRTX.csv')
         self.reference_stat_titan_10k = from_csv(self.ref_stat_csv_titan_10k)
         self.reference_stat_titan_10k.name = 'TITAN RTX'
         
-        self.ref_stat_csv_diffpy = pkg_resources.resource_filename(__name__, 'benchmark_reference_DiffPy.csv')
+        self.ref_stat_csv_diffpy = str(Path(__file__).parent / 'benchmark_reference_DiffPy.csv')
         self.reference_stat_diffpy = from_csv(self.ref_stat_csv_diffpy)
         self.reference_stat_diffpy.name = 'DiffPy'
 
