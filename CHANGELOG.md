@@ -6,7 +6,7 @@
 - The 3D structure viewer can show the selected nanoparticle independently of plot visibility, or show input,
   primitive, conventional, Niggli-reduced and LLL-reduced unit cells with lattice outlines and boundary atoms.
 - The 3D viewer has a center control, and its Structures-tab button toggles between showing and hiding the view.
-- Particles above 10,000 atoms use a clearly labelled performance mode that renders an 8,000-atom outer shell;
+- Particles above 5,000 atoms use a clearly labelled performance mode that renders a 4,000-atom outer shell;
   scattering calculations and particle exports continue to use every atom.
 
 ### Fixed
