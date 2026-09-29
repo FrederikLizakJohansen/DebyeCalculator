@@ -87,10 +87,14 @@ class ParticleView(QWidget):
         self.plot = self.canvas.addPlot(viewBox=self.viewbox)
         self.plot.hideAxis('left')
         self.plot.hideAxis('bottom')
-        self.cell = pg.PlotCurveItem(connect='finite')
-        self.plot.addItem(self.cell)
+        self.cell_back = pg.PlotCurveItem(connect='finite')
+        self.cell_back.setZValue(-1)
+        self.plot.addItem(self.cell_back)
         self.scatter = pg.ScatterPlotItem(pxMode=False)
         self.plot.addItem(self.scatter)
+        self.cell_front = pg.PlotCurveItem(connect='finite')
+        self.cell_front.setZValue(1)
+        self.plot.addItem(self.cell_front)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(6, 6, 6, 6)
@@ -160,12 +164,14 @@ class ParticleView(QWidget):
     def _draw(self) -> None:
         if len(self._cell_edges):
             projected_edges = self._cell_edges @ self._rotation.T
-            separated = np.concatenate((projected_edges, np.full((len(projected_edges), 1, 3), np.nan)), axis=1)
-            points = separated.reshape(-1, 3)
+            front = np.mean(projected_edges[:, :, 2], axis=1) >= 0
             cell_color = '#a6a6a6' if self._background.lightness() < 128 else '#666666'
-            self.cell.setData(points[:, 0], points[:, 1], pen=pg.mkPen(cell_color, width=1.5), connect='finite')
+            pen = pg.mkPen(cell_color, width=1.5)
+            self._draw_edges(self.cell_back, projected_edges[~front], pen)
+            self._draw_edges(self.cell_front, projected_edges[front], pen)
         else:
-            self.cell.clear()
+            self.cell_back.clear()
+            self.cell_front.clear()
         if len(self._elements) == 0:
             self.scatter.clear()
             return
@@ -194,3 +200,12 @@ class ParticleView(QWidget):
             pens.append(pen)
         sizes = np.array([2 * 0.75 * self._radii_table.get(e, 1.0) for e in elements])
         self.scatter.setData(x=projected[order, 0], y=projected[order, 1], size=sizes, brush=brushes, pen=pens)
+
+    @staticmethod
+    def _draw_edges(curve: pg.PlotCurveItem, edges: np.ndarray, pen) -> None:
+        if not len(edges):
+            curve.clear()
+            return
+        separated = np.concatenate((edges, np.full((len(edges), 1, 3), np.nan)), axis=1)
+        points = separated.reshape(-1, 3)
+        curve.setData(points[:, 0], points[:, 1], pen=pen, connect='finite')

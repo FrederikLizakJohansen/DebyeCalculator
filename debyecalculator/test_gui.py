@@ -221,7 +221,7 @@ def test_hidden_particle_and_unit_cell_view(tmp_path, monkeypatch):
     pytest.importorskip('pyqtgraph')
     monkeypatch.setenv('QT_QPA_PLATFORM', 'offscreen')
     from PySide6.QtCore import QEventLoop, QSettings, QTimer
-    from PySide6.QtWidgets import QApplication
+    from PySide6.QtWidgets import QApplication, QCheckBox
     from debyecalculator.gui.window import MainWindow
 
     app = QApplication.instance() or QApplication([])
@@ -250,6 +250,16 @@ def test_hidden_particle_and_unit_cell_view(tmp_path, monkeypatch):
     window.particle_mode_combo.setCurrentIndex(window.particle_mode_combo.findData('input'))
     wait_for_view()
     assert len(window.particle_view._cell_edges) == 12
+    visibility_check = window.table.cellWidget(0, 0).findChild(QCheckBox)
+    visibility_check.setChecked(True)
+    visibility_check.setChecked(False)
+    app.processEvents()
+    assert window._selected_item() is item and not item.visible
+    assert len(window.particle_view._cell_edges) == 12
+    assert len(window.particle_view.cell_back.getData()[0]) > 0
+    assert len(window.particle_view.cell_front.getData()[0]) > 0
+    assert window.particle_view.cell_back.zValue() < window.particle_view.scatter.zValue()
+    assert window.particle_view.cell_front.zValue() > window.particle_view.scatter.zValue()
     window.particle_view.center_view()
 
     window.view_button.click()
