@@ -1,5 +1,5 @@
 [![pypi](https://img.shields.io/pypi/v/Debyecalculator?label=pypi)](https://pypi.org/project/DebyeCalculator/)
-[![Python](https://img.shields.io/badge/python-3.8%E2%80%933.13-blue)](https://www.python.org/downloads/)
+[![Python](https://img.shields.io/badge/python-3.8%E2%80%933.14-blue)](https://www.python.org/downloads/)
 [![License](https://img.shields.io/github/license/FrederikLizakJohansen/DebyeCalculator)]([https://github.com/lfwa/carbontracker/blob/master/LICENSE](https://github.com/FrederikLizakJohansen/DebyeCalculator/blob/main/LICENSE.txt))
 [![ChemRxiv](https://img.shields.io/badge/ChemRxiv%20%20-8A2BE2)](https://chemrxiv.org/engage/chemrxiv/article-details/651ec9668bab5d2055b2d009)
 [![ReadTheDocs](https://img.shields.io/readthedocs/debyecalculator)](https://debyecalculator.readthedocs.io/en/latest/)
@@ -35,7 +35,7 @@ Here, we provide an optimised code for the calculation of the Debye scattering e
 
 ## Prerequisites
 
-`DebyeCalculator` requires Python 3.8–3.13. If needed, create an environment with one of these Python versions:
+`DebyeCalculator` requires Python 3.8–3.14. If needed, create an environment with one of these Python versions:
 ```bash
 conda create -n debyecalculator_env python=3.12
 ```
@@ -49,7 +49,7 @@ Before installing the `DebyeCalculator` package, ensure that you have PyTorch in
 
 ## Install with [pip](https://pypi.org/project/DebyeCalculator/)
 
-Run the following command to install the __DebyeCalculator__ package. (**Requires**: Python 3.8–3.13)
+Run the following command to install the __DebyeCalculator__ package. (**Requires**: Python 3.8–3.14)
 ```
 pip install debyecalculator
 ```
@@ -61,7 +61,7 @@ Clone the repo
 git clone https://github.com/FrederikLizakJohansen/DebyeCalculator.git
 ```
 
-Run the following command to install the __DebyeCalculator__ package. (**Requires**: Python 3.8–3.13)
+Run the following command to install the __DebyeCalculator__ package. (**Requires**: Python 3.8–3.14)
 ```
 python -m pip install .
 ```
@@ -84,7 +84,7 @@ Version 1.1 is a minor release in the sense of [semantic versioning](https://sem
 | Change | Public API | What it means when upgrading |
 |---|---|---|
 | Function signatures and return types | Unchanged | `iq`, `sq`, `fq`, `gr`, `generate_nanoparticles` and `interact()` take the same arguments and return the same types. The constructor keeps the 1.0.14 parameter order; the new parameters `pair_sum` and `num_threads` are appended with defaults. |
-| Python support | Extended; 3.7 dropped | Python 3.8–3.13 (1.0.14: 3.7–3.11). pip reads `Requires-Python: >=3.8` and installs the newest compatible release, so users on Python 3.7 keep getting 1.0.14 from `pip install debyecalculator`. |
+| Python support | Extended; 3.7 dropped | Python 3.8–3.14 (1.0.14: 3.7–3.11). pip reads `Requires-Python: >=3.8,<3.15` and installs the newest compatible release, so users on Python 3.7 keep getting 1.0.14 from `pip install debyecalculator`. |
 | Numerical results | Within floating-point precision | The default `pair_sum='grid'` deviates from 1.0.14 by at most ~3e-6 (float32) and ~1e-9 (float64), relative to each function's maximum. `pair_sum='direct'` is the 1.0.x algorithm and reproduces 1.0.14 to ~1e-15 in float64 (~1e-6 in float32, from summation order). |
 | Generated nanoparticles | Unchanged | Bit-identical to 1.0.14. |
 | `batch_size` | Meaning unchanged, default changed | Still the number of atom pairs per batch, bounding memory. The default `None` now chooses the batch size: 3,000,000 pairs for `pair_sum='grid'`, 10,000 (the 1.0.14 default) for `pair_sum='direct'`. Explicit values are used as given; small ones such as 10,000 run faster than 1.0.14 but about 35× slower than the automatic choice. |
@@ -275,4 +275,3 @@ If you need help using our software, please reach out to us on our GitHub reposi
 # References
 <a id="1">[1]</a>
 Waasmaier, D., & Kirfel, A. (1995). New analytical scattering-factor functions for free atoms and ions. Acta Crystallographica Section A, 51(3), 416–431. https://doi.org/10.1107/S0108767394013292
-
