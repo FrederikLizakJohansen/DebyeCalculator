@@ -157,3 +157,40 @@ def test_window_data_overlay_and_session(tmp_path, monkeypatch):
     assert [d.label for d in restored.data_items] == ['measured.gr']
     assert restored.items[0].spec.show_partials
     restored.close()
+
+
+def test_window_layout_stays_bounded_with_many_files(tmp_path, monkeypatch):
+    pytest.importorskip('PySide6')
+    pytest.importorskip('pyqtgraph')
+    monkeypatch.setenv('QT_QPA_PLATFORM', 'offscreen')
+    from PySide6.QtCore import QSettings
+    from PySide6.QtWidgets import QApplication
+    from debyecalculator.gui.window import MainWindow
+
+    app = QApplication.instance() or QApplication([])
+    settings = QSettings(str(tmp_path / 'settings.ini'), QSettings.IniFormat)
+    window = MainWindow(settings=settings, restore_session=False)
+    window.schedule = lambda: None
+    window.resize(1100, 900)
+    window.show()
+    app.processEvents()
+
+    assert window.table.height() > window.table.sizeHint().height()
+    window.tabs.setCurrentIndex(1)
+    app.processEvents()
+    assert window.data_table.height() > window.data_table.sizeHint().height()
+
+    for index in range(20):
+        window.add_file(CIF, label=f'A very long structure label {index}')
+    minimum_width = window.minimumSizeHint().width()
+    long_text = 'I(Q)  Q = 1.234   ' + '   '.join(f'{item.label}: 12345.6789' for item in window.items)
+    window.cursor_label.setText(long_text)
+    window._set_status('/a/very/long/path/' * 100)
+    window._refresh_compare_combo()
+    app.processEvents()
+
+    assert window.minimumSizeHint().width() == minimum_width
+    assert window.cursor_label.fullText() == long_text
+    assert window.cursor_label.toolTip() == long_text
+    assert window.cursor_label.text().endswith('…')
+    window.close()

@@ -18,7 +18,7 @@ from PySide6.QtGui import QAction, QActionGroup, QColor, QGuiApplication, QKeySe
 from PySide6.QtWidgets import (
     QAbstractItemView, QCheckBox, QComboBox, QDockWidget, QDoubleSpinBox, QFileDialog, QFormLayout, QGridLayout,
     QGroupBox, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMainWindow, QMessageBox, QProgressBar, QPushButton,
-    QScrollArea, QSpinBox, QSplitter, QTabWidget, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
+    QScrollArea, QSizePolicy, QSpinBox, QSplitter, QTabWidget, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
 from debyecalculator.debye_calculator import CalculationCancelled
@@ -31,7 +31,7 @@ from debyecalculator.gui.plots import (
     FUNCTIONS, LEGEND_POSITIONS, MODES, DataEntry, PlotEntry, PlotOptions, PlotPanel,
 )
 from debyecalculator.gui.theme import THEME_MODES, apply_theme
-from debyecalculator.gui.widgets import ColorButton, FloatSlider
+from debyecalculator.gui.widgets import ColorButton, ElidedLabel, FloatSlider
 
 
 def package_version() -> str:
@@ -327,7 +327,7 @@ class MainWindow(QMainWindow):
 
     def _build_ui(self) -> None:
         self.plot_panel = PlotPanel()
-        self.cursor_label = QLabel(' ')
+        self.cursor_label = ElidedLabel(' ')
         self.cursor_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
         self.plot_panel.cursorMoved.connect(lambda text: self.cursor_label.setText(text or ' '))
         plot_area = QWidget()
@@ -364,6 +364,8 @@ class MainWindow(QMainWindow):
         self.particle_dock.visibilityChanged.connect(lambda visible: visible and self._refresh_particle_view())
 
         self.status_label = QLabel()
+        self.status_label.setMinimumWidth(0)
+        self.status_label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         self.progress_bar = QProgressBar()
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setMaximumWidth(180)
@@ -426,7 +428,7 @@ class MainWindow(QMainWindow):
         self.table = self._make_table(['', '', 'Structure', 'Atoms'], stretch_column=2)
         self.table.setMinimumHeight(190)
         self.table.itemSelectionChanged.connect(self._on_selection_changed)
-        layout.addWidget(self.table)
+        layout.addWidget(self.table, 1)
 
         layout.addLayout(self._button_row([
             ('Show all', lambda: self._set_all_visible(True), None),
@@ -482,7 +484,6 @@ class MainWindow(QMainWindow):
         recolor.clicked.connect(self.recolor_all)
         color_layout.addWidget(recolor)
         layout.addWidget(colors)
-        layout.addStretch(1)
         return page
 
     def _data_tab(self) -> QWidget:
@@ -495,7 +496,7 @@ class MainWindow(QMainWindow):
         self.data_table = self._make_table(['', 'Data', 'Function', 'Rw'], stretch_column=1)
         self.data_table.setMinimumHeight(150)
         self.data_table.itemSelectionChanged.connect(self._on_data_selection_changed)
-        layout.addWidget(self.data_table)
+        layout.addWidget(self.data_table, 1)
 
         self.data_box = QGroupBox('Selected data')
         form = QFormLayout(self.data_box)
@@ -515,6 +516,8 @@ class MainWindow(QMainWindow):
         self.data_unit_combo.currentIndexChanged.connect(self._on_data_changed)
         form.addRow('x-axis of file', self.data_unit_combo)
         self.data_compare_combo = QComboBox()
+        self.data_compare_combo.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+        self.data_compare_combo.setMinimumContentsLength(12)
         self.data_compare_combo.currentIndexChanged.connect(self._on_data_changed)
         form.addRow('Compare with', self.data_compare_combo)
         self.data_fit_check = QCheckBox('Fit scale of the calculation to the data')
@@ -534,7 +537,6 @@ class MainWindow(QMainWindow):
         note.setWordWrap(True)
         note.setEnabled(False)
         layout.addWidget(note)
-        layout.addStretch(1)
         return page
 
     def _scattering_tab(self) -> QWidget:
@@ -1453,6 +1455,7 @@ class MainWindow(QMainWindow):
 
     def _set_status(self, text: str, error: bool = False) -> None:
         self.status_label.setText(text)
+        self.status_label.setToolTip(text)
         self.status_label.setProperty('error', error)
         color = ('#ff6b68' if self.dark else '#c62828') if error else ''
         self.status_label.setStyleSheet(f'color: {color};' if color else '')

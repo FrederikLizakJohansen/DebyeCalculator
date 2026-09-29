@@ -10,7 +10,7 @@ import numpy as np
 import pyqtgraph as pg
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
-from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QLabel, QSizePolicy, QVBoxLayout, QWidget
 
 from debyecalculator.utility.generate import load_elements_info
 
@@ -75,6 +75,8 @@ class ParticleView(QWidget):
         self.info = QLabel()
         self.info.setWordWrap(True)
         self.info.setTextFormat(Qt.RichText)
+        self.info.setMinimumWidth(0)
+        self.info.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         hint = QLabel('Drag to rotate, scroll to zoom, right-drag to pan')
         hint.setEnabled(False)
         hint.setWordWrap(True)

@@ -8,8 +8,35 @@ from typing import Optional
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
-    QColorDialog, QDoubleSpinBox, QHBoxLayout, QLabel, QPushButton, QSlider, QToolButton, QWidget,
+    QColorDialog, QDoubleSpinBox, QHBoxLayout, QLabel, QPushButton, QSizePolicy, QSlider, QToolButton, QWidget,
 )
+
+
+class ElidedLabel(QLabel):
+    """Single-line label that keeps changing text inside its available width."""
+
+    def __init__(self, text: str = '', parent=None):
+        super().__init__(parent)
+        self._full_text = ''
+        self.setMinimumWidth(0)
+        self.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        self.setText(text)
+
+    def setText(self, text: str) -> None:
+        self._full_text = text
+        self.setToolTip(text if text.strip() else '')
+        self._update_text()
+
+    def fullText(self) -> str:
+        return self._full_text
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._update_text()
+
+    def _update_text(self) -> None:
+        width = max(0, self.contentsRect().width())
+        super().setText(self.fontMetrics().elidedText(self._full_text, Qt.ElideRight, width))
 
 
 class FloatSlider(QWidget):
