@@ -238,7 +238,7 @@ def generate_nanoparticles(
         size_check = cell.get_positions().max(axis=0) >= (r_max * 2 + 5) # Check if the supercell is larger than diameter of largest particle + 5 Angstroms of padding
         
     # Center the supercell # NOTE Newer versions of ASE might work differently
-    cell.center(about=0.)
+    cell.center(about=(0.0, 0.0, 0.0))
 
     # Convert positions to torch and send to device
     positions = torch.from_numpy(cell.get_positions()).to(dtype = torch.float32, device = device)

@@ -56,6 +56,7 @@ try:
     from pymatgen.core import Structure
     pymatgen_available = True
 except ImportError:
+    Structure = None
     pymatgen_available = False
 
 # NamedTuple definitions
@@ -616,7 +617,7 @@ class DebyeCalculator:
             triu_indices, unique_inverse, unique_form_factors, form_avg_sq, structure_inverse = parse_elements(elements, size)
 
             return StructureTuple(elements, size, occupancy, xyz, triu_indices, unique_inverse, unique_form_factors, form_avg_sq, structure_inverse)
-        elif isinstance(structure_source, Structure):
+        elif pymatgen_available and isinstance(structure_source, Structure):
             try:
                 elements = [site.species_string for site in structure_source.sites]
                 size = len(elements)

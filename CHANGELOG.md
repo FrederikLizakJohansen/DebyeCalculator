@@ -3,7 +3,7 @@
 ## 1.1.0
 
 ### Upgrading from 1.0.x
-Code written for 1.0.x runs unchanged: function signatures, return types and the constructor's parameter order are the same, Python support is unchanged, generated nanoparticles are bit-identical, and results agree with 1.0.14 within floating-point precision. `pair_sum='direct'` reproduces 1.0.14 to ~1e-15 in float64. The README section "Upgrading from 1.0.x" lists every change in behaviour.
+Code written for 1.0.x runs unchanged: function signatures, return types and the constructor's parameter order are the same, generated nanoparticles are bit-identical, and results agree with 1.0.14 within floating-point precision. `pair_sum='direct'` reproduces 1.0.14 to ~1e-15 in float64. Python 3.7 is no longer supported; pip reads `Requires-Python: >=3.8,<3.15` and keeps Python 3.7 users on 1.0.14. The README section "Upgrading from 1.0.x" lists every change in behaviour.
 
 ### Performance
 - The Debye sum spreads pair weights onto a distance grid with cubic Lagrange interpolation and evaluates the sum on the grid nodes. G(r) for 3,833 atoms takes 0.07 s on a 12-thread laptop CPU (10 s in 1.0.14); 190,000 atoms take about 2 minutes.
@@ -15,6 +15,8 @@ Code written for 1.0.x runs unchanged: function signatures, return types and the
 - Results converted to NumPy (`keep_on_device=False`) are detached, so positions with `requires_grad=True` no longer raise an error there.
 
 ### Changed
+- Supports Python 3.8–3.14, numpy 2 and ase ≥ 3.23 (tested with Python 3.8, 3.10, 3.13 and 3.14, numpy up to 2.5, ase up to 3.29). Python 3.7 is no longer supported; pip keeps Python 3.7 users on 1.0.14 (`Requires-Python: >=3.8,<3.15`).
+- Dependency versions have lower bounds only; `prettytable` is no longer pinned to 3.0.0.
 - `batch_size` still counts atom pairs per batch (shared between CPU threads). Its default `None` chooses 3,000,000 pairs for the grid pair sum and 10,000 for the direct pair sum; in 1.0.14 the default was 10,000 and `None` meant 4,000.
 - On the CPU, the pair sum runs in a thread pool; PyTorch's process-wide thread count is 1 while it runs and is restored afterwards, also for overlapping calls.
 - `StructureTuple.triu_indices` and `StructureTuple.unique_inverse` are `None`; pairs are enumerated per batch.
@@ -22,8 +24,14 @@ Code written for 1.0.x runs unchanged: function signatures, return types and the
 
 ### Fixed
 - `.xyz` files with an occupancy column (five columns) load.
+- Nanoparticle generation works with ase ≥ 3.23 (`Atoms.center` is called with a point); particles are identical across ase versions.
+- An unsupported structure type raises `TypeError` instead of `NameError` when pymatgen is not installed.
+- The benchmark utility locates its reference files without the deprecated `pkg_resources`.
 
 ### Added
 - `pair_sum='direct'`: the 1.0.x pair sum, for exact reproduction of earlier results.
 - `num_threads`: number of CPU threads for the pair sum; `num_threads=1` leaves PyTorch's thread settings untouched.
+- Desktop app (`pip install "debyecalculator[gui]"`, `debyecalculator-gui`): live-updating I(Q), S(Q), F(Q) and G(r) for several structures, co-plotting modes, element-pair partials, comparison with experimental data, 2θ axis, 3D particle view, light and dark theme, and export of data, figures, particles and sessions.
+- `DebyeCalculator.progress_callback` and `CalculationCancelled` for progress reporting and cancellation of long calculations.
+- CI on Python 3.8–3.14 (Linux) and 3.10/3.14 (Windows, macOS).
 - `paper/benchmark/run_benchmark.py`: timing and pattern comparison of a release against the current source on CPU and GPU.
