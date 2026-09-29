@@ -20,8 +20,9 @@ Here, we provide an optimised code for the calculation of the Debye scattering e
     4. [Upgrading from 1.0.x](#upgrading-from-10x)
     5. [GPU support](#gpu-support)
 3. [Usage](#usage)
-    1. [Interactive mode](#interactive-mode)
-    2. [Example usage](#example-usage)
+    1. [Desktop app](#desktop-app)
+    2. [Interactive mode](#interactive-mode)
+    3. [Example usage](#example-usage)
 3. [Demo](#demo)
 4. [Additional implementation details](#additional-implementation-details)
 5. [Authors](#authors)
@@ -124,6 +125,30 @@ calc = DebyeCalculator(device='cuda')
 ```
 
 # Usage
+
+## Desktop app
+
+A standalone desktop app (Windows, macOS, Linux) calculates and plots I(Q), S(Q), F(Q) and G(r) live while parameters change. Install it with the `gui` extra (Python 3.8 or later) and start it from a terminal:
+
+```bash
+pip install "debyecalculator[gui]"
+debyecalculator-gui                      # or: python -m debyecalculator.gui
+debyecalculator-gui particle.cif other.xyz
+```
+
+- Load several `.cif`, `.xyz` or other ASE-readable files at once (dialog or drag-and-drop); duplicate a CIF to compare particle radii.
+- Every parameter updates the plots while a slider moves: particle radius, Q- and r-range, Qstep, Qdamp, B<sub>iso</sub>, r<sub>thres</sub>, Lorch modification, radiation type, partial pair, device and precision.
+- Co-plot structures overlaid, stacked with an adjustable offset, or in separate rows; normalise curves and use logarithmic axes.
+- Presets for small-angle scattering, powder diffraction and total scattering.
+- Show all element-pair partials of a structure as dashed curves.
+- Overlay measured I(Q), S(Q), F(Q) or G(r) (two-column text files, I(Q) against Q or 2θ), with a fitted scale, difference curve and Rw.
+- I(Q) against 2θ for a chosen wavelength; a cursor readout of all curves; a rotatable 3D view of the particle.
+- Calculations longer than a quarter of a second show progress and can be cancelled (Esc).
+- Light and dark theme (View → Theme), following the operating system by default.
+- Recent files, and the last session and window layout restored at startup.
+- Export data (CSV with metadata), figures (PNG, SVG, PDF), generated particles (XYZ), and save or reopen a session.
+
+The notebook widget below (`DebyeCalculator().interact()`) remains available.
 
 ## Interactive mode
 <b>IMPORTANT: </b> CHANGES TO INTERACTIVE MODE AS OF JANUARY 2024 (DebyeCalculator version >=1.0.5)

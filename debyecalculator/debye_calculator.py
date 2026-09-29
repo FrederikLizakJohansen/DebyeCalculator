@@ -118,6 +118,33 @@ def _single_intra_op_thread():
                 torch.set_num_threads(_THREADS_STATE['saved'])
 
 
+
+class CalculationCancelled(Exception):
+    """
+    Raised when a progress callback of DebyeCalculator returns False.
+    """
+
+
+class _Progress:
+    """
+    Thread-safe counter of completed pair-sum batches that reports to a progress callback.
+    """
+
+    def __init__(self, total: int, callback):
+        self.total = max(1, total)
+        self.callback = callback
+        self.done = 0
+        self.cancelled = False
+        self._lock = threading.Lock()
+
+    def step(self) -> None:
+        with self._lock:
+            self.done += 1
+            if not self.cancelled and self.callback(self.done / self.total) is False:
+                self.cancelled = True
+            if self.cancelled:
+                raise CalculationCancelled()
+
 class _Grid:
     """
     Batches and distance grid of a pair sum (see DebyeCalculator._compute_iq_parts).
@@ -312,6 +339,10 @@ class DebyeCalculator:
         # Distance-grid spacing times q_max (see _compute_iq_parts). The interpolation error scales as its fourth power;
         # None gives ~1e-7 relative error for float32 and ~1e-10 for float64
         self._spread_step_factor = _spread_step_factor
+
+        # Optional callable receiving the completed fraction (0 to 1) of each pair sum; returning False cancels the
+        # calculation with CalculationCancelled
+        self.progress_callback = None
 
     def __repr__(self):
         return (
@@ -763,6 +794,7 @@ class DebyeCalculator:
         n_nodes: int,
         dr: float,
         acc_dtype: torch.dtype,
+        progress: Optional['_Progress'] = None,
     ) -> torch.Tensor:
         """
         Accumulate the moments of the fractional bin position for the given batches (see _compute_iq_parts).
@@ -775,6 +807,7 @@ class DebyeCalculator:
             n_nodes: Number of grid nodes.
             dr: Grid spacing.
             acc_dtype: Data type of the accumulated histogram.
+            progress: Progress counter, advanced after each batch.
 
         Returns:
             torch.Tensor: Moments sum(w), sum(w s), sum(w s^2), sum(w s^3) per distance bin, of shape (n_element_pairs, n_nodes, 4).
@@ -826,6 +859,8 @@ class DebyeCalculator:
             batch_moments.zero_()
             batch_moments.index_add_(1, bins.long(), moments)
             hist[pair_number] += batch_moments.T
+            if progress is not None:
+                progress.step()
 
         return hist
 
@@ -849,7 +884,8 @@ class DebyeCalculator:
         """
         Forward pass of _GridPairSum: sum_p w_p sinc(q d_p) per element pair, of shape (n_element_pairs, nq).
         """
-        spread_args = (xyz, occupancy, grid.atom_indices, grid.n_element_pairs, grid.n_nodes, grid.dr, grid.acc_dtype)
+        spread_args = (xyz, occupancy, grid.atom_indices, grid.n_element_pairs, grid.n_nodes, grid.dr, grid.acc_dtype,
+                       getattr(grid, 'progress', None))
         hists = self._run_jobs(lambda jobs: self._spread_pairs(jobs, *spread_args), grid.jobs, grid.n_threads)
         hist = torch.stack(hists).sum(0)
 
@@ -1166,6 +1202,7 @@ class DebyeCalculator:
                 jobs.append((pair_number, a, b, start, min(start + rows_per_batch, n_a)))
 
         grid = _Grid(jobs, atom_indices, len(element_pairs), n_nodes, dr, acc_dtype, q, n_threads)
+        grid.progress = _Progress(len(jobs), self.progress_callback) if self.progress_callback is not None else None
         sinc_sums = _GridPairSum.apply(xyz, occupancy, self, grid)
 
         pair_iq = torch.zeros(nq, device=self.device, dtype=self.dtype)
