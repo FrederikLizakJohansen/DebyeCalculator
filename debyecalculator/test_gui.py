@@ -190,7 +190,8 @@ def test_window_layout_stays_bounded_with_many_files(tmp_path, monkeypatch):
     app = QApplication.instance() or QApplication([])
     settings = QSettings(str(tmp_path / 'settings.ini'), QSettings.IniFormat)
     window = MainWindow(settings=settings, restore_session=False)
-    window.schedule = lambda: None
+    schedule_calls = []
+    window.schedule = lambda: schedule_calls.append(True)
     window.resize(1100, 900)
     window.show()
     app.processEvents()
@@ -200,8 +201,11 @@ def test_window_layout_stays_bounded_with_many_files(tmp_path, monkeypatch):
     app.processEvents()
     assert window.data_table.height() > window.data_table.sizeHint().height()
 
-    for index in range(20):
-        window.add_file(CIF, label=f'A very long structure label {index}')
+    window.add_files([CIF] * 20)
+    assert len(schedule_calls) == 1
+    for index, item in enumerate(window.items):
+        item.label = f'A very long structure label {index}'
+    window._refresh_table_values()
     minimum_width = window.minimumSizeHint().width()
     long_text = 'I(Q)  Q = 1.234   ' + '   '.join(f'{item.label}: 12345.6789' for item in window.items)
     window.cursor_label.setText(long_text)
@@ -261,6 +265,16 @@ def test_hidden_particle_and_unit_cell_view(tmp_path, monkeypatch):
     assert window.particle_view.cell_back.zValue() < window.particle_view.scatter.zValue()
     assert window.particle_view.cell_front.zValue() > window.particle_view.scatter.zValue()
     window.particle_view.center_view()
+
+    from debyecalculator.gui import particle_view as particle_view_module
+    monkeypatch.setattr(particle_view_module, 'LARGE_PARTICLE_THRESHOLD', 10)
+    monkeypatch.setattr(particle_view_module, 'RENDER_ATOM_LIMIT', 6)
+    xyz = np.column_stack((np.arange(12), np.zeros(12), np.zeros(12)))
+    window.particle_view.set_particle(['C'] * 12, xyz, 'Large particle')
+    assert len(window.particle_view._elements) == 6
+    assert window.particle_view._atom_count == 12
+    assert np.allclose(window.particle_view._xyz[:, 0], [-5.5, -4.5, -3.5, 3.5, 4.5, 5.5])
+    assert 'particles above 10 atoms show an outer shell (6 atoms displayed)' in window.particle_view.info.text()
 
     window.view_button.click()
     assert window.particle_dock.isHidden()

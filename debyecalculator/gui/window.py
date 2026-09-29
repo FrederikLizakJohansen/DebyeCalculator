@@ -215,9 +215,13 @@ class MainWindow(QMainWindow):
         self._cancel_event: Optional[threading.Event] = None
         self._calculation_start = 0.0
         self._updating_controls = False
+        self._closing = False
         self._pending_view_key = None
         self._displayed_view_key = None
         self._displayed_view = None
+        self._queued_view = None
+        self._view_debounce = QTimer(self, singleShot=True, interval=40)
+        self._view_debounce.timeout.connect(self._dispatch_particle_view)
 
         self._build_ui()
         self._build_menu()
@@ -240,8 +244,7 @@ class MainWindow(QMainWindow):
             restore_session = not files and self.restore_action.isChecked()
         if restore_session:
             self._restore_last_session()
-        for path in files or []:
-            self.open_path(path)
+        self.open_paths(files or [])
 
     # -- worker ------------------------------------------------------------------------------------------------------
 
@@ -257,11 +260,18 @@ class MainWindow(QMainWindow):
         self._thread.start()
 
     def closeEvent(self, event) -> None:
-        self._save_window_state()
-        if self._cancel_event is not None:
-            self._cancel_event.set()
-        self._thread.quit()
-        self._thread.wait(5000)
+        if not self._closing:
+            self._closing = True
+            self._save_window_state()
+            self._view_debounce.stop()
+            if self._cancel_event is not None:
+                self._cancel_event.set()
+            self._thread.quit()
+        if not self._thread.wait(100):
+            self._set_status('Closing safely after the current structure operation…')
+            event.ignore()
+            QTimer.singleShot(100, self.close)
+            return
         super().closeEvent(event)
 
     def schedule(self) -> None:
@@ -931,18 +941,31 @@ class MainWindow(QMainWindow):
         else:
             self.add_file(path)
 
+    def open_paths(self, paths: List[str]) -> None:
+        """Open several dropped or command-line files with batched GUI updates."""
+        data_paths = [path for path in paths if Path(path).suffix.lower() in DATA_SUFFIXES]
+        structure_paths = [path for path in paths if Path(path).suffix.lower() not in DATA_SUFFIXES]
+        self.add_files(structure_paths)
+        self.add_data_files(data_paths)
+
     # -- structures --------------------------------------------------------------------------------------------------
 
     def add_files_dialog(self) -> None:
         patterns = ' '.join(f'*{suffix}' for suffix in STRUCTURE_SUFFIXES)
         paths, _ = QFileDialog.getOpenFileNames(self, 'Add structure files', self._last_directory(),
                                                 f'Structures ({patterns});;All files (*)')
-        for path in paths:
-            self.add_file(path)
+        self.add_files(paths)
+
+    def add_files(self, paths: List[str]) -> List[StructureItem]:
+        """Add several structures with one table rebuild and one calculation request."""
+        added = [self.add_file(path, _refresh=False) for path in paths]
+        if added:
+            self._finish_adding_files()
+        return added
 
     def add_file(self, path: str, radius: float = 10.0, label: Optional[str] = None, color: Optional[str] = None,
                  visible: bool = True, lightweight: bool = False, partial: Optional[str] = None,
-                 show_partials: bool = False) -> StructureItem:
+                 show_partials: bool = False, _refresh: bool = True) -> StructureItem:
         spec = StructureSpec(path=str(Path(path).resolve()), radius=radius, lightweight=lightweight, partial=partial,
                              show_partials=show_partials)
         if label is None:
@@ -952,11 +975,17 @@ class MainWindow(QMainWindow):
         item = StructureItem(spec, label, QColor(color), visible)
         self.items.append(item)
         self._remember(path)
-        self._rebuild_table()
-        self.table.selectRow(len(self.items) - 1)
-        self._refresh_compare_combo()
-        self.schedule()
+        if _refresh:
+            self._finish_adding_files()
         return item
+
+    def _finish_adding_files(self, schedule: bool = True) -> None:
+        self._rebuild_table()
+        if self.items:
+            self.table.selectRow(len(self.items) - 1)
+        self._refresh_compare_combo()
+        if schedule:
+            self.schedule()
 
     def duplicate_selected(self) -> None:
         item = self._selected_item()
@@ -1171,6 +1200,10 @@ class MainWindow(QMainWindow):
         self.view_button.setText('Hide particle in 3D' if visible else 'Show particle in 3D')
         if visible:
             self._refresh_particle_view()
+        elif self._view_debounce.isActive():
+            self._view_debounce.stop()
+            self._queued_view = None
+            self._pending_view_key = None
 
     def _on_particle_mode_changed(self, _index: int) -> None:
         self.settings.setValue('particle_mode', self.particle_mode_combo.currentData())
@@ -1199,6 +1232,8 @@ class MainWindow(QMainWindow):
         item = self._selected_item()
         key = self._current_view_key()
         if item is None or key is None:
+            self._view_debounce.stop()
+            self._queued_view = None
             self._pending_view_key = None
             self._displayed_view_key = None
             self._displayed_view = None
@@ -1211,7 +1246,19 @@ class MainWindow(QMainWindow):
             return
         self._pending_view_key = key
         self.particle_view.set_message(item.label, 'Loading…')
-        self.view_request.emit(key, copy.deepcopy(item.spec), self.particle_mode_combo.currentData())
+        self._queued_view = (key, copy.deepcopy(item.spec), self.particle_mode_combo.currentData())
+        self._view_debounce.start()
+
+    def _dispatch_particle_view(self) -> None:
+        request, self._queued_view = self._queued_view, None
+        if request is None:
+            return
+        key, spec, mode = request
+        if self.particle_dock.isHidden() or key != self._current_view_key():
+            if key == self._pending_view_key:
+                self._pending_view_key = None
+            return
+        self.view_request.emit(key, spec, mode)
 
     @Slot(object, object, str)
     def _on_view_ready(self, key: tuple, structure, error: str) -> None:
@@ -1235,10 +1282,16 @@ class MainWindow(QMainWindow):
         patterns = ' '.join(f'*{suffix}' for suffix in DATA_SUFFIXES)
         paths, _ = QFileDialog.getOpenFileNames(self, 'Load experimental data', self._last_directory(),
                                                 f'Data ({patterns});;All files (*)')
-        for path in paths:
-            self.add_data(path)
+        self.add_data_files(paths)
 
-    def add_data(self, path: str, **kwargs) -> Optional[DataItem]:
+    def add_data_files(self, paths: List[str]) -> List[DataItem]:
+        """Load several data files with one table and plot refresh."""
+        added = [item for path in paths if (item := self.add_data(path, _refresh=False)) is not None]
+        if added:
+            self._finish_adding_data()
+        return added
+
+    def add_data(self, path: str, _refresh: bool = True, **kwargs) -> Optional[DataItem]:
         kwargs.setdefault('function', guess_function(path))
         kwargs.setdefault('wavelength', self.plot_options.wavelength)
         if 'compare_id' not in kwargs and self.items:
@@ -1253,13 +1306,18 @@ class MainWindow(QMainWindow):
         self._remember(path)
         if item.function not in self.plot_options.functions:
             self.plot_options.functions = tuple(f for f in FUNCTIONS if f in self.plot_options.functions + (item.function,))
-            self._apply_plot_options_to_controls()
-            self.plot_panel.set_options(self.plot_options)
-        self._rebuild_data_table()
-        self.data_table.selectRow(len(self.data_items) - 1)
-        self.tabs.setCurrentIndex(1)
-        self._refresh_plots()
+        if _refresh:
+            self._finish_adding_data()
         return item
+
+    def _finish_adding_data(self) -> None:
+        self._apply_plot_options_to_controls()
+        self.plot_panel.set_options(self.plot_options)
+        self._rebuild_data_table()
+        if self.data_items:
+            self.data_table.selectRow(len(self.data_items) - 1)
+            self.tabs.setCurrentIndex(1)
+        self._refresh_plots()
 
     def remove_selected_data(self) -> None:
         item = self._selected_data()
@@ -1574,10 +1632,8 @@ class MainWindow(QMainWindow):
             event.acceptProposedAction()
 
     def dropEvent(self, event) -> None:
-        for url in event.mimeData().urls():
-            path = url.toLocalFile()
-            if path and Path(path).is_file():
-                self.open_path(path)
+        paths = [url.toLocalFile() for url in event.mimeData().urls()]
+        self.open_paths([path for path in paths if path and Path(path).is_file()])
 
     # -- export ------------------------------------------------------------------------------------------------------
 
@@ -1712,14 +1768,17 @@ class MainWindow(QMainWindow):
             self.add_file(spec['path'], radius=spec.get('radius', 10.0), label=entry.get('label'),
                           color=entry.get('color'), visible=entry.get('visible', True),
                           lightweight=spec.get('lightweight', False), partial=spec.get('partial'),
-                          show_partials=spec.get('show_partials', False))
+                          show_partials=spec.get('show_partials', False), _refresh=False)
+        self._finish_adding_files(schedule=False)
         for entry in session.get('data', []):
             compare_index = entry.get('compare_index')
             compare_id = self.items[compare_index].id if compare_index is not None and compare_index < len(self.items) else None
-            self.add_data(entry['path'], function=entry.get('function', 'i'), x_unit=entry.get('x_unit', 'Q'),
+            self.add_data(entry['path'], _refresh=False, function=entry.get('function', 'i'),
+                          x_unit=entry.get('x_unit', 'Q'),
                           wavelength=entry.get('wavelength', options.wavelength), label=entry.get('label'),
                           visible=entry.get('visible', True), color=entry.get('color'), compare_id=compare_id,
                           fit_scale=entry.get('fit_scale', True), show_difference=entry.get('show_difference', True))
+        self._finish_adding_data()
         self.tabs.setCurrentIndex(0)
         self._refresh_plots()
         self.schedule()
