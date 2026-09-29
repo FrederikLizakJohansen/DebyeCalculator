@@ -40,6 +40,26 @@ def test_engine_partial_and_invalid_parameters():
         engine.compute(Parameters(qmin=5.0, qmax=2.0), [StructureSpec(CIF, radius=6)])
 
 
+def test_engine_unit_cell_views():
+    engine = Engine()
+    views = {'input': engine.unit_cell(CIF, 'input')}
+    try:
+        import pymatgen  # noqa: F401
+    except ImportError:
+        with pytest.raises(ValueError, match='requires pymatgen'):
+            engine.unit_cell(CIF, 'primitive')
+    else:
+        views.update({mode: engine.unit_cell(CIF, mode) for mode in
+                      ('primitive', 'conventional', 'reduced_niggli', 'reduced_lll')})
+    for view in views.values():
+        assert view.lattice.shape == (3, 3)
+        assert abs(np.linalg.det(view.lattice)) > 0
+        assert len(view.elements) >= view.atom_count
+        assert view.xyz.shape == (len(view.elements), 3)
+    if 'primitive' in views:
+        assert views['primitive'].atom_count <= views['conventional'].atom_count
+
+
 def test_window_smoke(tmp_path, monkeypatch):
     pytest.importorskip('PySide6')
     pytest.importorskip('pyqtgraph')
@@ -193,4 +213,46 @@ def test_window_layout_stays_bounded_with_many_files(tmp_path, monkeypatch):
     assert window.cursor_label.fullText() == long_text
     assert window.cursor_label.toolTip() == long_text
     assert window.cursor_label.text().endswith('…')
+    window.close()
+
+
+def test_hidden_particle_and_unit_cell_view(tmp_path, monkeypatch):
+    pytest.importorskip('PySide6')
+    pytest.importorskip('pyqtgraph')
+    monkeypatch.setenv('QT_QPA_PLATFORM', 'offscreen')
+    from PySide6.QtCore import QEventLoop, QSettings, QTimer
+    from PySide6.QtWidgets import QApplication
+    from debyecalculator.gui.window import MainWindow
+
+    app = QApplication.instance() or QApplication([])
+    settings = QSettings(str(tmp_path / 'settings.ini'), QSettings.IniFormat)
+    window = MainWindow(settings=settings, restore_session=False)
+    window.schedule = lambda: None
+    item = window.add_file(CIF, radius=6, visible=False)
+    window.show()
+    app.processEvents()
+
+    def wait_for_view():
+        for _ in range(500):
+            loop = QEventLoop()
+            QTimer.singleShot(10, loop.quit)
+            loop.exec()
+            if window._pending_view_key is None and window._displayed_view is not None:
+                return
+        pytest.fail('3D structure view did not finish loading')
+
+    window.view_button.click()
+    wait_for_view()
+    assert window.view_button.text() == 'Hide particle in 3D'
+    assert item.result is None and not item.visible
+    assert len(window.particle_view._elements) > 0
+
+    window.particle_mode_combo.setCurrentIndex(window.particle_mode_combo.findData('input'))
+    wait_for_view()
+    assert len(window.particle_view._cell_edges) == 12
+    window.particle_view.center_view()
+
+    window.view_button.click()
+    assert window.particle_dock.isHidden()
+    assert window.view_button.text() == 'Show particle in 3D'
     window.close()

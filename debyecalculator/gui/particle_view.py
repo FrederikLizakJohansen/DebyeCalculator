@@ -68,6 +68,8 @@ class ParticleView(QWidget):
         self._radii_table = {key: value[13] for key, value in load_elements_info().items()}
         self._elements: List[str] = []
         self._xyz = np.zeros((0, 3))
+        self._cell_edges = np.zeros((0, 2, 3))
+        self._atom_count = 0
         self._rotation = rotation(np.array([1.0, 0.0, 0.0]), -0.35) @ rotation(np.array([0.0, 1.0, 0.0]), 0.5)
         self._background = QColor('#ffffff')
         self._key = None
@@ -85,6 +87,8 @@ class ParticleView(QWidget):
         self.plot = self.canvas.addPlot(viewBox=self.viewbox)
         self.plot.hideAxis('left')
         self.plot.hideAxis('bottom')
+        self.cell = pg.PlotCurveItem(connect='finite')
+        self.plot.addItem(self.cell)
         self.scatter = pg.ScatterPlotItem(pxMode=False)
         self.plot.addItem(self.scatter)
 
@@ -101,18 +105,52 @@ class ParticleView(QWidget):
         self._draw()
 
     def set_particle(self, elements: Optional[List[str]], xyz: Optional[np.ndarray], label: str = '') -> None:
-        key = (label, len(elements or []), None if xyz is None else float(np.sum(xyz)))
-        new_particle = key != self._key
+        self.set_structure(elements, xyz, label)
+
+    def set_structure(self, elements: Optional[List[str]], xyz: Optional[np.ndarray], label: str = '',
+                      lattice: Optional[np.ndarray] = None, atom_count: Optional[int] = None) -> None:
+        key = (label, len(elements or []), None if xyz is None else float(np.sum(xyz)),
+               None if lattice is None else tuple(np.asarray(lattice).flat))
+        new_structure = key != self._key
         self._key = key
         self._elements = list(elements or [])
-        self._xyz = np.zeros((0, 3)) if xyz is None else np.asarray(xyz, dtype=float) - np.mean(xyz, axis=0)
+        self._atom_count = atom_count if atom_count is not None else len(self._elements)
+        coordinates = np.zeros((0, 3)) if xyz is None else np.asarray(xyz, dtype=float)
+        if lattice is None:
+            center = np.mean(coordinates, axis=0) if len(coordinates) else np.zeros(3)
+            self._cell_edges = np.zeros((0, 2, 3))
+        else:
+            lattice = np.asarray(lattice, dtype=float)
+            center = np.sum(lattice, axis=0) / 2
+            corners = np.asarray([i * lattice[0] + j * lattice[1] + k * lattice[2]
+                                  for i in (0, 1) for j in (0, 1) for k in (0, 1)]) - center
+            corner = lambda i, j, k: corners[4 * i + 2 * j + k]
+            self._cell_edges = np.asarray([
+                (corner(0, j, k), corner(1, j, k)) for j in (0, 1) for k in (0, 1)
+            ] + [
+                (corner(i, 0, k), corner(i, 1, k)) for i in (0, 1) for k in (0, 1)
+            ] + [
+                (corner(i, j, 0), corner(i, j, 1)) for i in (0, 1) for j in (0, 1)
+            ])
+        self._xyz = coordinates - center
         unique = sorted(set(self._elements))
         legend = '&nbsp;&nbsp;'.join(f'<span style="color:{element_color(e).name()}">●</span>&nbsp;{e}' for e in unique)
-        count = f'{len(self._elements):,} atoms' if self._elements else 'No particle calculated yet'
+        count = f'{self._atom_count:,} atoms' if self._elements else 'No structure selected'
         self.info.setText(f'<b>{label}</b><br>{count}&nbsp;&nbsp;&nbsp;{legend}')
         self._draw()
-        if new_particle:
-            self.viewbox.autoRange(padding=0.05)
+        if new_structure:
+            self.center_view()
+
+    def set_message(self, label: str, message: str) -> None:
+        self._key = None
+        self._elements = []
+        self._xyz = np.zeros((0, 3))
+        self._cell_edges = np.zeros((0, 2, 3))
+        self.info.setText(f'<b>{label}</b><br>{message}')
+        self._draw()
+
+    def center_view(self) -> None:
+        self.viewbox.autoRange(padding=0.05)
 
     def rotate(self, dx: float, dy: float) -> None:
         self._rotation = (rotation(np.array([0.0, 1.0, 0.0]), dx * 0.01)
@@ -120,6 +158,14 @@ class ParticleView(QWidget):
         self._draw()
 
     def _draw(self) -> None:
+        if len(self._cell_edges):
+            projected_edges = self._cell_edges @ self._rotation.T
+            separated = np.concatenate((projected_edges, np.full((len(projected_edges), 1, 3), np.nan)), axis=1)
+            points = separated.reshape(-1, 3)
+            cell_color = '#a6a6a6' if self._background.lightness() < 128 else '#666666'
+            self.cell.setData(points[:, 0], points[:, 1], pen=pg.mkPen(cell_color, width=1.5), connect='finite')
+        else:
+            self.cell.clear()
         if len(self._elements) == 0:
             self.scatter.clear()
             return

@@ -63,6 +63,14 @@ WAVELENGTHS = {'Cu Kα (1.5406 Å)': 1.5406, 'Co Kα (1.7890 Å)': 1.7890, 'Mo K
 
 MAX_RECENT = 10
 SLOW_CALCULATION_MS = 250  # show progress and the cancel button after this time
+STRUCTURE_VIEW_MODES = (
+    ('Particle', 'particle'),
+    ('Input cell', 'input'),
+    ('Primitive cell', 'primitive'),
+    ('Conventional cell', 'conventional'),
+    ('Reduced cell (Niggli)', 'reduced_niggli'),
+    ('Reduced cell (LLL)', 'reduced_lll'),
+)
 
 
 def palette_colors(name: str, n: int) -> List[str]:
@@ -143,6 +151,7 @@ class DataItem:
 class ComputeWorker(QObject):
     finished = Signal(int, object, str, float, bool)
     progress = Signal(int, float)
+    viewReady = Signal(object, object, str)
 
     def __init__(self):
         super().__init__()
@@ -172,9 +181,18 @@ class ComputeWorker(QObject):
                 errors.append(f'{Path(spec.path).name}: {error}')
         self.finished.emit(request_id, results, '; '.join(errors), time.perf_counter() - start, False)
 
+    @Slot(object, object, str)
+    def load_view(self, key: tuple, spec: StructureSpec, mode: str) -> None:
+        try:
+            structure = self.engine.particle(spec) if mode == 'particle' else self.engine.unit_cell(spec.path, mode)
+            self.viewReady.emit(key, structure, '')
+        except Exception as error:
+            self.viewReady.emit(key, None, str(error))
+
 
 class MainWindow(QMainWindow):
     request = Signal(int, object, object, object)
+    view_request = Signal(object, object, str)
 
     def __init__(self, files: Optional[List[str]] = None, restore_session: Optional[bool] = None,
                  settings: Optional[QSettings] = None):
@@ -197,6 +215,9 @@ class MainWindow(QMainWindow):
         self._cancel_event: Optional[threading.Event] = None
         self._calculation_start = 0.0
         self._updating_controls = False
+        self._pending_view_key = None
+        self._displayed_view_key = None
+        self._displayed_view = None
 
         self._build_ui()
         self._build_menu()
@@ -229,8 +250,10 @@ class MainWindow(QMainWindow):
         self._worker = ComputeWorker()
         self._worker.moveToThread(self._thread)
         self.request.connect(self._worker.run)
+        self.view_request.connect(self._worker.load_view)
         self._worker.finished.connect(self._on_finished)
         self._worker.progress.connect(self._on_progress)
+        self._worker.viewReady.connect(self._on_view_ready)
         self._thread.start()
 
     def closeEvent(self, event) -> None:
@@ -354,14 +377,32 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(self.splitter)
 
         self.particle_view = ParticleView()
+        particle_panel = QWidget()
+        particle_layout = QVBoxLayout(particle_panel)
+        particle_layout.setContentsMargins(0, 0, 0, 0)
+        particle_controls = QHBoxLayout()
+        particle_controls.addWidget(QLabel('View'))
+        self.particle_mode_combo = QComboBox()
+        for label, mode in STRUCTURE_VIEW_MODES:
+            self.particle_mode_combo.addItem(label, mode)
+        saved_mode = str(self.settings.value('particle_mode', 'particle'))
+        self.particle_mode_combo.setCurrentIndex(max(0, self.particle_mode_combo.findData(saved_mode)))
+        self.particle_mode_combo.currentIndexChanged.connect(self._on_particle_mode_changed)
+        particle_controls.addWidget(self.particle_mode_combo, 1)
+        center_button = QPushButton('Center')
+        center_button.setToolTip('Center the structure and reset zoom')
+        center_button.clicked.connect(self.particle_view.center_view)
+        particle_controls.addWidget(center_button)
+        particle_layout.addLayout(particle_controls)
+        particle_layout.addWidget(self.particle_view, 1)
         self.particle_dock = QDockWidget('Particle', self)
         self.particle_dock.setObjectName('particle_dock')
-        self.particle_dock.setWidget(self.particle_view)
+        self.particle_dock.setWidget(particle_panel)
         self.particle_dock.setAllowedAreas(Qt.AllDockWidgetAreas)
         self.particle_view.setMinimumWidth(260)
         self.addDockWidget(Qt.RightDockWidgetArea, self.particle_dock)
         self.particle_dock.hide()
-        self.particle_dock.visibilityChanged.connect(lambda visible: visible and self._refresh_particle_view())
+        self.particle_dock.visibilityChanged.connect(self._on_particle_view_visibility_changed)
 
         self.status_label = QLabel()
         self.status_label.setMinimumWidth(0)
@@ -467,9 +508,9 @@ class MainWindow(QMainWindow):
                                             'the partials add up to the total')
         self.show_partials_check.toggled.connect(self._on_show_partials_toggled)
         form.addRow('', self.show_partials_check)
-        view_button = QPushButton('Show particle in 3D')
-        view_button.clicked.connect(self.show_particle_view)
-        form.addRow('', view_button)
+        self.view_button = QPushButton('Show particle in 3D')
+        self.view_button.clicked.connect(self.toggle_particle_view)
+        form.addRow('', self.view_button)
         self.detail_box.setEnabled(False)
         layout.addWidget(self.detail_box)
 
@@ -832,6 +873,7 @@ class MainWindow(QMainWindow):
         self.settings.setValue('geometry', self.saveGeometry())
         self.settings.setValue('window_state', self.saveState())
         self.settings.setValue('splitter', self.splitter.saveState())
+        self.settings.setValue('particle_mode', self.particle_mode_combo.currentData())
         self.settings.setValue('last_session', json.dumps(self.session()))
 
     def _restore_window_state(self) -> None:
@@ -1020,6 +1062,7 @@ class MainWindow(QMainWindow):
         item = self._selected_item()
         self.detail_box.setEnabled(item is not None)
         if item is None:
+            self._refresh_particle_view()
             return
         self._updating_controls = True
         self.label_edit.setText(item.label)
@@ -1051,6 +1094,7 @@ class MainWindow(QMainWindow):
     def _on_visible_toggled(self, item: StructureItem, checked: bool) -> None:
         item.visible = checked
         self._refresh_plots()
+        self._refresh_particle_view()
         self.schedule()
 
     def _on_color_changed(self, item: StructureItem, color: QColor) -> None:
@@ -1064,6 +1108,7 @@ class MainWindow(QMainWindow):
             self._refresh_table_values()
             self._refresh_compare_combo()
             self._refresh_plots()
+            self._refresh_particle_view()
 
     def _set_item_radius(self, item: StructureItem, radius: float) -> None:
         old_suffix = f' (r = {item.spec.radius:g} Å)'
@@ -1079,12 +1124,14 @@ class MainWindow(QMainWindow):
         self.label_edit.setText(item.label)
         self._refresh_table_values()
         self._refresh_compare_combo()
+        self._refresh_particle_view()
         self.schedule()
 
     def _on_lightweight_toggled(self, checked: bool) -> None:
         item = self._selected_item()
         if item is not None and not self._updating_controls:
             item.spec.lightweight = checked
+            self._refresh_particle_view()
             self.schedule()
 
     def _on_partial_changed(self, _index: int) -> None:
@@ -1102,25 +1149,85 @@ class MainWindow(QMainWindow):
 
     # -- particle view -----------------------------------------------------------------------------------------------
 
+    def toggle_particle_view(self) -> None:
+        if self.particle_dock.isHidden():
+            self.particle_dock.show()
+            self.particle_dock.raise_()
+            if not self.particle_dock.isFloating():
+                # After the dock has been laid out
+                QTimer.singleShot(0, lambda: self.particle_dock.width() < 380 and
+                                  self.resizeDocks([self.particle_dock], [440], Qt.Horizontal))
+            self._refresh_particle_view()
+            QTimer.singleShot(50, self.particle_view.center_view)
+        else:
+            self.particle_dock.hide()
+
     def show_particle_view(self) -> None:
-        self.particle_dock.show()
-        self.particle_dock.raise_()
-        if not self.particle_dock.isFloating():
-            # After the dock has been laid out
-            QTimer.singleShot(0, lambda: self.particle_dock.width() < 380 and
-                              self.resizeDocks([self.particle_dock], [440], Qt.Horizontal))
+        """Compatibility helper for callers that explicitly open the viewer."""
+        if self.particle_dock.isHidden():
+            self.toggle_particle_view()
+
+    def _on_particle_view_visibility_changed(self, visible: bool) -> None:
+        self.view_button.setText('Hide particle in 3D' if visible else 'Show particle in 3D')
+        if visible:
+            self._refresh_particle_view()
+
+    def _on_particle_mode_changed(self, _index: int) -> None:
+        self.settings.setValue('particle_mode', self.particle_mode_combo.currentData())
         self._refresh_particle_view()
-        QTimer.singleShot(50, lambda: self.particle_view.viewbox.autoRange(padding=0.05))
+
+    def _current_view_key(self):
+        item = self._selected_item()
+        if item is None:
+            return None
+        mode = self.particle_mode_combo.currentData()
+        geometry_key = item.spec.particle_key() if mode == 'particle' else (item.spec.path, mode)
+        return item.id, mode, geometry_key
+
+    def _show_view_geometry(self, structure) -> None:
+        item = self._selected_item()
+        if item is None:
+            return
+        self.particle_view.set_structure(
+            structure.elements, structure.xyz, item.label,
+            lattice=getattr(structure, 'lattice', None), atom_count=getattr(structure, 'atom_count', None),
+        )
 
     def _refresh_particle_view(self) -> None:
-        if not self.particle_dock.isVisible():
+        if self.particle_dock.isHidden():
             return
         item = self._selected_item()
-        particle = self._worker.engine._particles.get_item(item.spec.particle_key()) if item is not None else None
-        if particle is None:
-            self.particle_view.set_particle(None, None, item.label if item is not None else '')
-        else:
-            self.particle_view.set_particle(particle.elements, particle.xyz, item.label)
+        key = self._current_view_key()
+        if item is None or key is None:
+            self._pending_view_key = None
+            self._displayed_view_key = None
+            self._displayed_view = None
+            self.particle_view.set_structure(None, None)
+            return
+        if key == self._displayed_view_key and self._displayed_view is not None:
+            self._show_view_geometry(self._displayed_view)
+            return
+        if key == self._pending_view_key:
+            return
+        self._pending_view_key = key
+        self.particle_view.set_message(item.label, 'Loading…')
+        self.view_request.emit(key, copy.deepcopy(item.spec), self.particle_mode_combo.currentData())
+
+    @Slot(object, object, str)
+    def _on_view_ready(self, key: tuple, structure, error: str) -> None:
+        if key == self._pending_view_key:
+            self._pending_view_key = None
+        if key != self._current_view_key() or self.particle_dock.isHidden():
+            return
+        item = self._selected_item()
+        if error:
+            self._displayed_view_key = None
+            self._displayed_view = None
+            self.particle_view.set_message(item.label if item is not None else '', error)
+            return
+        self._displayed_view_key = key
+        self._displayed_view = structure
+        self._show_view_geometry(structure)
 
     # -- experimental data -------------------------------------------------------------------------------------------
 
