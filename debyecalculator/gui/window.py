@@ -518,6 +518,10 @@ class MainWindow(QMainWindow):
                                             'the partials add up to the total')
         self.show_partials_check.toggled.connect(self._on_show_partials_toggled)
         form.addRow('', self.show_partials_check)
+        self.partials_only_check = QCheckBox('Hide total curve')
+        self.partials_only_check.setToolTip('Show every element-pair partial without drawing the total curve')
+        self.partials_only_check.toggled.connect(self._on_partials_only_toggled)
+        form.addRow('', self.partials_only_check)
         self.view_button = QPushButton('Show particle in 3D')
         self.view_button.clicked.connect(self.toggle_particle_view)
         form.addRow('', self.view_button)
@@ -965,9 +969,9 @@ class MainWindow(QMainWindow):
 
     def add_file(self, path: str, radius: float = 10.0, label: Optional[str] = None, color: Optional[str] = None,
                  visible: bool = True, lightweight: bool = False, partial: Optional[str] = None,
-                 show_partials: bool = False, _refresh: bool = True) -> StructureItem:
+                 show_partials: bool = False, partials_only: bool = False, _refresh: bool = True) -> StructureItem:
         spec = StructureSpec(path=str(Path(path).resolve()), radius=radius, lightweight=lightweight, partial=partial,
-                             show_partials=show_partials)
+                             show_partials=show_partials, partials_only=partials_only)
         if label is None:
             label = Path(path).stem + (f' (r = {radius:g} Å)' if spec.is_cif else '')
         if color is None:
@@ -993,7 +997,7 @@ class MainWindow(QMainWindow):
             return
         spec = item.spec
         self.add_file(spec.path, radius=spec.radius, label=f'{item.label} (copy)', lightweight=spec.lightweight,
-                      partial=spec.partial, show_partials=spec.show_partials)
+                      partial=spec.partial, show_partials=spec.show_partials, partials_only=spec.partials_only)
 
     def remove_selected(self) -> None:
         item = self._selected_item()
@@ -1100,6 +1104,7 @@ class MainWindow(QMainWindow):
         self.radius_slider.setValue(item.spec.radius)
         self.lightweight_check.setChecked(item.spec.lightweight)
         self.show_partials_check.setChecked(item.spec.show_partials)
+        self.partials_only_check.setChecked(item.spec.partials_only)
         self._fill_partials(item)
         self._updating_controls = False
         self._refresh_particle_view()
@@ -1114,6 +1119,7 @@ class MainWindow(QMainWindow):
         self.partial_combo.setCurrentIndex(max(index, 0))
         self.partial_combo.blockSignals(False)
         self.show_partials_check.setEnabled(item.spec.partial is None)
+        self.partials_only_check.setEnabled(item.spec.partial is None and item.spec.show_partials)
 
     def _refresh_partials(self) -> None:
         item = self._selected_item()
@@ -1168,13 +1174,22 @@ class MainWindow(QMainWindow):
         if item is not None and not self._updating_controls:
             item.spec.partial = self.partial_combo.currentData()
             self.show_partials_check.setEnabled(item.spec.partial is None)
+            self.partials_only_check.setEnabled(item.spec.partial is None and item.spec.show_partials)
             self.schedule()
 
     def _on_show_partials_toggled(self, checked: bool) -> None:
         item = self._selected_item()
         if item is not None and not self._updating_controls:
             item.spec.show_partials = checked
+            self.partials_only_check.setEnabled(checked and item.spec.partial is None)
+            self._refresh_plots()
             self.schedule()
+
+    def _on_partials_only_toggled(self, checked: bool) -> None:
+        item = self._selected_item()
+        if item is not None and not self._updating_controls:
+            item.spec.partials_only = checked
+            self._refresh_plots()
 
     # -- particle view -----------------------------------------------------------------------------------------------
 
@@ -1589,7 +1604,10 @@ class MainWindow(QMainWindow):
     def _plot_entries(self):
         shown = [item for item in self.items if item.visible and item.result is not None]
         index_of = {item.id: index for index, item in enumerate(shown)}
-        entries = [PlotEntry(item.label, item.color, item.result) for item in shown]
+        entries = [PlotEntry(item.label, item.color, item.result,
+                             show_total=not (item.spec.partial is None and item.spec.show_partials
+                                             and item.spec.partials_only),
+                             show_partials=item.spec.partial is None and item.spec.show_partials) for item in shown]
 
         data_entries = []
         for data in self.data_items:
@@ -1768,7 +1786,8 @@ class MainWindow(QMainWindow):
             self.add_file(spec['path'], radius=spec.get('radius', 10.0), label=entry.get('label'),
                           color=entry.get('color'), visible=entry.get('visible', True),
                           lightweight=spec.get('lightweight', False), partial=spec.get('partial'),
-                          show_partials=spec.get('show_partials', False), _refresh=False)
+                          show_partials=spec.get('show_partials', False),
+                          partials_only=spec.get('partials_only', False), _refresh=False)
         self._finish_adding_files(schedule=False)
         for entry in session.get('data', []):
             compare_index = entry.get('compare_index')

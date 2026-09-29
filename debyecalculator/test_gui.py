@@ -170,12 +170,24 @@ def test_window_data_overlay_and_session(tmp_path, monkeypatch):
     window.show_partials_check.setChecked(True)
     settle()
     assert len(item.result.partials) == 3
+    window.partials_only_check.setChecked(True)
+    from debyecalculator.gui.plots import build_curves
+    entries, data_entries = window._plot_entries()
+    curves = build_curves(entries, data_entries, window.plot_options, 'g', [0], '#202020')
+    calculated_labels = [curve.label for curve in curves if curve.label.startswith(item.label)]
+    assert len(calculated_labels) == 3
+    assert all(' · ' in label for label in calculated_labels)
+    item.spec.partial = 'Co-O'
+    pair_entry = window._plot_entries()[0][0]
+    assert pair_entry.show_total and not pair_entry.show_partials
+    item.spec.partial = None
     assert len(window.export_data(str(tmp_path))) == 8  # total + 3 partials, Q and r files each
 
     window.close()  # saves the session to the settings
     restored = MainWindow(settings=settings)
     assert [d.label for d in restored.data_items] == ['measured.gr']
     assert restored.items[0].spec.show_partials
+    assert restored.items[0].spec.partials_only
     restored.close()
 
 

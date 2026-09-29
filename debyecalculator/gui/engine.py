@@ -61,6 +61,7 @@ class StructureSpec:
     lightweight: bool = False
     partial: Optional[str] = None
     show_partials: bool = False  # also calculate every element-pair partial
+    partials_only: bool = False  # hide the total curve while showing every partial
 
     @property
     def is_cif(self) -> bool:

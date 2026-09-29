@@ -8,6 +8,7 @@
 - The 3D viewer has a center control, and its Structures-tab button toggles between showing and hiding the view.
 - Particles above 5,000 atoms use a clearly labelled performance mode that renders a 4,000-atom outer shell;
   scattering calculations and particle exports continue to use every atom.
+- All element-pair partials can be plotted with or without the total curve.
 
 ### Fixed
 - Structure and experimental-data lists use the available vertical space to show more imported files.

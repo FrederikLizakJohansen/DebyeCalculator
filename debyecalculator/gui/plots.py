@@ -42,6 +42,8 @@ class PlotEntry:
     color: QColor
     result: Result
     scales: Dict[str, float] = field(default_factory=dict)  # per function, e.g. fitted to experimental data
+    show_total: bool = True
+    show_partials: bool = True
 
 
 @dataclass
@@ -138,8 +140,9 @@ def build_curves(entries: List[PlotEntry], data: List[DataEntry], options: PlotO
         y, norm = base[k]
         x = x_values(options, function, getattr(entry.result, x_attr))
         symbol = 'o' if options.markers else None
-        curves.append(Curve(entry.label, entry.color, x, shift(y, position_of[k]), symbol=symbol))
-        for number, (pair, values) in enumerate(entry.result.partials.items()):
+        if entry.show_total:
+            curves.append(Curve(entry.label, entry.color, x, shift(y, position_of[k]), symbol=symbol))
+        for number, (pair, values) in enumerate(entry.result.partials.items() if entry.show_partials else ()):
             partial_y = np.asarray(values[function], dtype=float) * entry.scales.get(function, 1.0) / norm
             shade = entry.color.darker(140) if number % 2 == 0 else entry.color.lighter(135 + 15 * number)
             curves.append(Curve(f'{entry.label} · {pair}', shade, x, shift(partial_y, position_of[k]),
