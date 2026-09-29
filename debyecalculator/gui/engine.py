@@ -61,6 +61,7 @@ class StructureSpec:
     lightweight: bool = False
     partial: Optional[str] = None
     show_partials: bool = False  # also calculate every element-pair partial
+    partials_only: bool = False  # hide the total curve while showing every partial
 
     @property
     def is_cif(self) -> bool:
@@ -84,6 +85,16 @@ class Particle:
     def element_pairs(self) -> List[str]:
         unique = sorted(set(self.elements))
         return [f'{a}-{b}' for i, a in enumerate(unique) for b in unique[i:]]
+
+
+@dataclass
+class StructureView:
+    """Atoms and optional lattice vectors for the 3D structure viewer."""
+
+    elements: List[str]
+    xyz: np.ndarray
+    lattice: Optional[np.ndarray] = None
+    atom_count: Optional[int] = None
 
 
 @dataclass
@@ -146,13 +157,74 @@ def load_particle(spec: StructureSpec) -> Particle:
         return Particle(list(atoms.get_chemical_symbols()), np.asarray(atoms.get_positions(), dtype=np.float64))
 
 
+def _cell_with_boundary_images(elements: List[str], fractional: np.ndarray,
+                               lattice: np.ndarray) -> StructureView:
+    """Wrap atoms into a cell and include their images on opposite cell boundaries."""
+    fractional = np.mod(np.asarray(fractional, dtype=np.float64), 1.0)
+    fractional[np.isclose(fractional, 1.0, atol=1e-7)] = 0.0
+    displayed_elements, displayed_fractional, seen = [], [], set()
+    for element, coordinate in zip(elements, fractional):
+        boundary_axes = np.flatnonzero(np.isclose(coordinate, 0.0, atol=1e-7))
+        for mask in range(1 << len(boundary_axes)):
+            image = coordinate.copy()
+            for bit, axis in enumerate(boundary_axes):
+                if mask & (1 << bit):
+                    image[axis] = 1.0
+            key = (element,) + tuple(np.round(image, 8))
+            if key not in seen:
+                seen.add(key)
+                displayed_elements.append(element)
+                displayed_fractional.append(image)
+    positions = np.asarray(displayed_fractional, dtype=np.float64) @ lattice
+    return StructureView(displayed_elements, positions, lattice, atom_count=len(elements))
+
+
+def load_unit_cell(path: str, mode: str = 'input') -> StructureView:
+    """Load one of the unit-cell representations offered by Materials Project."""
+    from ase.io import read
+
+    with warnings.catch_warnings():
+        warnings.simplefilter('ignore')
+        atoms = read(path)
+    lattice = np.asarray(atoms.cell.array, dtype=np.float64)
+    if getattr(atoms.cell, 'rank', np.linalg.matrix_rank(lattice)) < 3:
+        raise ValueError('This structure does not contain a three-dimensional unit cell')
+
+    if mode == 'input':
+        fractional = np.asarray(atoms.get_scaled_positions(wrap=True), dtype=np.float64)
+        return _cell_with_boundary_images(list(atoms.get_chemical_symbols()), fractional, lattice)
+
+    try:
+        from pymatgen.io.ase import AseAtomsAdaptor
+        from pymatgen.symmetry.analyzer import SpacegroupAnalyzer
+    except ImportError as error:
+        raise ValueError('This unit-cell mode requires pymatgen (Python 3.10 or newer)') from error
+
+    structure = AseAtomsAdaptor.get_structure(atoms)
+    if mode == 'primitive':
+        structure = structure.get_primitive_structure()
+    elif mode == 'conventional':
+        structure = SpacegroupAnalyzer(structure, symprec=0.1).get_conventional_standard_structure()
+    elif mode == 'reduced_niggli':
+        structure = structure.get_reduced_structure(reduction_algo='niggli')
+    elif mode == 'reduced_lll':
+        structure = structure.get_reduced_structure(reduction_algo='LLL')
+    else:
+        raise ValueError(f'Unknown unit-cell mode: {mode}')
+
+    lattice = np.asarray(structure.lattice.matrix, dtype=np.float64)
+    elements = [site.specie.symbol for site in structure]
+    return _cell_with_boundary_images(elements, np.asarray(structure.frac_coords), lattice)
+
+
 class Engine:
-    def __init__(self, particle_cache_size: int = 64, result_cache_size: int = 64):
+    def __init__(self, particle_cache_size: int = 64, result_cache_size: int = 64, cell_cache_size: int = 32):
         self._calc: Optional[DebyeCalculator] = None
         self._calc_key = None
         self._applied: Dict[str, object] = {}
         self._particles = LRUCache(particle_cache_size)
         self._q_results = LRUCache(result_cache_size)
+        self._cells = LRUCache(cell_cache_size)
 
     def particle(self, spec: StructureSpec) -> Particle:
         key = spec.particle_key()
@@ -161,6 +233,14 @@ class Engine:
             particle = load_particle(spec)
             self._particles.put(key, particle)
         return particle
+
+    def unit_cell(self, path: str, mode: str) -> StructureView:
+        key = (str(Path(path).resolve()), mode)
+        structure = self._cells.get_item(key)
+        if structure is None:
+            structure = load_unit_cell(path, mode)
+            self._cells.put(key, structure)
+        return structure
 
     def _calculator(self, params: Parameters) -> DebyeCalculator:
         dtype = getattr(torch, params.dtype)

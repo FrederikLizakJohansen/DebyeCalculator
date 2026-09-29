@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.1.1
+
+### Added
+- The 3D structure viewer can show the selected nanoparticle independently of plot visibility, or show input,
+  primitive, conventional, Niggli-reduced and LLL-reduced unit cells with lattice outlines and boundary atoms.
+- The 3D viewer has a center control, and its Structures-tab button toggles between showing and hiding the view.
+- Particles above 5,000 atoms use a clearly labelled performance mode that renders a 4,000-atom outer shell;
+  scattering calculations and particle exports continue to use every atom.
+- All element-pair partials can be plotted with or without the total curve.
+
+### Fixed
+- Structure and experimental-data lists use the available vertical space to show more imported files.
+- Long cursor readouts, status messages, particle labels and structure names no longer increase the GUI window width. Cursor readouts are elided on screen and remain available in full as a tooltip.
+- Unit-cell edges are depth-layered so the rear edges pass behind atoms and the front edges pass over them.
+- 3D rotation redraws, rapidly changed structure selections and multi-file imports do less duplicate work.
+- Closing the GUI during a long structure operation waits for the worker to finish safely.
+
 ## 1.1.0
 
 ### Upgrading from 1.0.x

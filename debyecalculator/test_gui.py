@@ -40,6 +40,26 @@ def test_engine_partial_and_invalid_parameters():
         engine.compute(Parameters(qmin=5.0, qmax=2.0), [StructureSpec(CIF, radius=6)])
 
 
+def test_engine_unit_cell_views():
+    engine = Engine()
+    views = {'input': engine.unit_cell(CIF, 'input')}
+    try:
+        import pymatgen  # noqa: F401
+    except ImportError:
+        with pytest.raises(ValueError, match='requires pymatgen'):
+            engine.unit_cell(CIF, 'primitive')
+    else:
+        views.update({mode: engine.unit_cell(CIF, mode) for mode in
+                      ('primitive', 'conventional', 'reduced_niggli', 'reduced_lll')})
+    for view in views.values():
+        assert view.lattice.shape == (3, 3)
+        assert abs(np.linalg.det(view.lattice)) > 0
+        assert len(view.elements) >= view.atom_count
+        assert view.xyz.shape == (len(view.elements), 3)
+    if 'primitive' in views:
+        assert views['primitive'].atom_count <= views['conventional'].atom_count
+
+
 def test_window_smoke(tmp_path, monkeypatch):
     pytest.importorskip('PySide6')
     pytest.importorskip('pyqtgraph')
@@ -150,10 +170,125 @@ def test_window_data_overlay_and_session(tmp_path, monkeypatch):
     window.show_partials_check.setChecked(True)
     settle()
     assert len(item.result.partials) == 3
+    window.partials_only_check.setChecked(True)
+    from debyecalculator.gui.plots import build_curves
+    entries, data_entries = window._plot_entries()
+    curves = build_curves(entries, data_entries, window.plot_options, 'g', [0], '#202020')
+    calculated_labels = [curve.label for curve in curves if curve.label.startswith(item.label)]
+    assert len(calculated_labels) == 3
+    assert all(' · ' in label for label in calculated_labels)
+    item.spec.partial = 'Co-O'
+    pair_entry = window._plot_entries()[0][0]
+    assert pair_entry.show_total and not pair_entry.show_partials
+    item.spec.partial = None
     assert len(window.export_data(str(tmp_path))) == 8  # total + 3 partials, Q and r files each
 
     window.close()  # saves the session to the settings
     restored = MainWindow(settings=settings)
     assert [d.label for d in restored.data_items] == ['measured.gr']
     assert restored.items[0].spec.show_partials
+    assert restored.items[0].spec.partials_only
     restored.close()
+
+
+def test_window_layout_stays_bounded_with_many_files(tmp_path, monkeypatch):
+    pytest.importorskip('PySide6')
+    pytest.importorskip('pyqtgraph')
+    monkeypatch.setenv('QT_QPA_PLATFORM', 'offscreen')
+    from PySide6.QtCore import QSettings
+    from PySide6.QtWidgets import QApplication
+    from debyecalculator.gui.window import MainWindow
+
+    app = QApplication.instance() or QApplication([])
+    settings = QSettings(str(tmp_path / 'settings.ini'), QSettings.IniFormat)
+    window = MainWindow(settings=settings, restore_session=False)
+    schedule_calls = []
+    window.schedule = lambda: schedule_calls.append(True)
+    window.resize(1100, 900)
+    window.show()
+    app.processEvents()
+
+    assert window.table.height() > window.table.sizeHint().height()
+    window.tabs.setCurrentIndex(1)
+    app.processEvents()
+    assert window.data_table.height() > window.data_table.sizeHint().height()
+
+    window.add_files([CIF] * 20)
+    assert len(schedule_calls) == 1
+    for index, item in enumerate(window.items):
+        item.label = f'A very long structure label {index}'
+    window._refresh_table_values()
+    minimum_width = window.minimumSizeHint().width()
+    long_text = 'I(Q)  Q = 1.234   ' + '   '.join(f'{item.label}: 12345.6789' for item in window.items)
+    window.cursor_label.setText(long_text)
+    window._set_status('/a/very/long/path/' * 100)
+    window._refresh_compare_combo()
+    app.processEvents()
+
+    assert window.minimumSizeHint().width() == minimum_width
+    assert window.cursor_label.fullText() == long_text
+    assert window.cursor_label.toolTip() == long_text
+    assert window.cursor_label.text().endswith('…')
+    window.close()
+
+
+def test_hidden_particle_and_unit_cell_view(tmp_path, monkeypatch):
+    pytest.importorskip('PySide6')
+    pytest.importorskip('pyqtgraph')
+    monkeypatch.setenv('QT_QPA_PLATFORM', 'offscreen')
+    from PySide6.QtCore import QEventLoop, QSettings, QTimer
+    from PySide6.QtWidgets import QApplication, QCheckBox
+    from debyecalculator.gui.window import MainWindow
+
+    app = QApplication.instance() or QApplication([])
+    settings = QSettings(str(tmp_path / 'settings.ini'), QSettings.IniFormat)
+    window = MainWindow(settings=settings, restore_session=False)
+    window.schedule = lambda: None
+    item = window.add_file(CIF, radius=6, visible=False)
+    window.show()
+    app.processEvents()
+
+    def wait_for_view():
+        for _ in range(500):
+            loop = QEventLoop()
+            QTimer.singleShot(10, loop.quit)
+            loop.exec()
+            if window._pending_view_key is None and window._displayed_view is not None:
+                return
+        pytest.fail('3D structure view did not finish loading')
+
+    window.view_button.click()
+    wait_for_view()
+    assert window.view_button.text() == 'Hide particle in 3D'
+    assert item.result is None and not item.visible
+    assert len(window.particle_view._elements) > 0
+
+    window.particle_mode_combo.setCurrentIndex(window.particle_mode_combo.findData('input'))
+    wait_for_view()
+    assert len(window.particle_view._cell_edges) == 12
+    visibility_check = window.table.cellWidget(0, 0).findChild(QCheckBox)
+    visibility_check.setChecked(True)
+    visibility_check.setChecked(False)
+    app.processEvents()
+    assert window._selected_item() is item and not item.visible
+    assert len(window.particle_view._cell_edges) == 12
+    assert len(window.particle_view.cell_back.getData()[0]) > 0
+    assert len(window.particle_view.cell_front.getData()[0]) > 0
+    assert window.particle_view.cell_back.zValue() < window.particle_view.scatter.zValue()
+    assert window.particle_view.cell_front.zValue() > window.particle_view.scatter.zValue()
+    window.particle_view.center_view()
+
+    from debyecalculator.gui import particle_view as particle_view_module
+    monkeypatch.setattr(particle_view_module, 'LARGE_PARTICLE_THRESHOLD', 10)
+    monkeypatch.setattr(particle_view_module, 'RENDER_ATOM_LIMIT', 6)
+    xyz = np.column_stack((np.arange(12), np.zeros(12), np.zeros(12)))
+    window.particle_view.set_particle(['C'] * 12, xyz, 'Large particle')
+    assert len(window.particle_view._elements) == 6
+    assert window.particle_view._atom_count == 12
+    assert np.allclose(window.particle_view._xyz[:, 0], [-5.5, -4.5, -3.5, 3.5, 4.5, 5.5])
+    assert 'particles above 10 atoms show an outer shell (6 atoms displayed)' in window.particle_view.info.text()
+
+    window.view_button.click()
+    assert window.particle_dock.isHidden()
+    assert window.view_button.text() == 'Show particle in 3D'
+    window.close()

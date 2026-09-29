@@ -18,7 +18,7 @@ from PySide6.QtGui import QAction, QActionGroup, QColor, QGuiApplication, QKeySe
 from PySide6.QtWidgets import (
     QAbstractItemView, QCheckBox, QComboBox, QDockWidget, QDoubleSpinBox, QFileDialog, QFormLayout, QGridLayout,
     QGroupBox, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMainWindow, QMessageBox, QProgressBar, QPushButton,
-    QScrollArea, QSpinBox, QSplitter, QTabWidget, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
+    QScrollArea, QSizePolicy, QSpinBox, QSplitter, QTabWidget, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
 from debyecalculator.debye_calculator import CalculationCancelled
@@ -31,7 +31,7 @@ from debyecalculator.gui.plots import (
     FUNCTIONS, LEGEND_POSITIONS, MODES, DataEntry, PlotEntry, PlotOptions, PlotPanel,
 )
 from debyecalculator.gui.theme import THEME_MODES, apply_theme
-from debyecalculator.gui.widgets import ColorButton, FloatSlider
+from debyecalculator.gui.widgets import ColorButton, ElidedLabel, FloatSlider
 
 
 def package_version() -> str:
@@ -63,6 +63,14 @@ WAVELENGTHS = {'Cu Kα (1.5406 Å)': 1.5406, 'Co Kα (1.7890 Å)': 1.7890, 'Mo K
 
 MAX_RECENT = 10
 SLOW_CALCULATION_MS = 250  # show progress and the cancel button after this time
+STRUCTURE_VIEW_MODES = (
+    ('Particle', 'particle'),
+    ('Input cell', 'input'),
+    ('Primitive cell', 'primitive'),
+    ('Conventional cell', 'conventional'),
+    ('Reduced cell (Niggli)', 'reduced_niggli'),
+    ('Reduced cell (LLL)', 'reduced_lll'),
+)
 
 
 def palette_colors(name: str, n: int) -> List[str]:
@@ -143,6 +151,7 @@ class DataItem:
 class ComputeWorker(QObject):
     finished = Signal(int, object, str, float, bool)
     progress = Signal(int, float)
+    viewReady = Signal(object, object, str)
 
     def __init__(self):
         super().__init__()
@@ -172,9 +181,18 @@ class ComputeWorker(QObject):
                 errors.append(f'{Path(spec.path).name}: {error}')
         self.finished.emit(request_id, results, '; '.join(errors), time.perf_counter() - start, False)
 
+    @Slot(object, object, str)
+    def load_view(self, key: tuple, spec: StructureSpec, mode: str) -> None:
+        try:
+            structure = self.engine.particle(spec) if mode == 'particle' else self.engine.unit_cell(spec.path, mode)
+            self.viewReady.emit(key, structure, '')
+        except Exception as error:
+            self.viewReady.emit(key, None, str(error))
+
 
 class MainWindow(QMainWindow):
     request = Signal(int, object, object, object)
+    view_request = Signal(object, object, str)
 
     def __init__(self, files: Optional[List[str]] = None, restore_session: Optional[bool] = None,
                  settings: Optional[QSettings] = None):
@@ -197,6 +215,13 @@ class MainWindow(QMainWindow):
         self._cancel_event: Optional[threading.Event] = None
         self._calculation_start = 0.0
         self._updating_controls = False
+        self._closing = False
+        self._pending_view_key = None
+        self._displayed_view_key = None
+        self._displayed_view = None
+        self._queued_view = None
+        self._view_debounce = QTimer(self, singleShot=True, interval=40)
+        self._view_debounce.timeout.connect(self._dispatch_particle_view)
 
         self._build_ui()
         self._build_menu()
@@ -219,8 +244,7 @@ class MainWindow(QMainWindow):
             restore_session = not files and self.restore_action.isChecked()
         if restore_session:
             self._restore_last_session()
-        for path in files or []:
-            self.open_path(path)
+        self.open_paths(files or [])
 
     # -- worker ------------------------------------------------------------------------------------------------------
 
@@ -229,16 +253,25 @@ class MainWindow(QMainWindow):
         self._worker = ComputeWorker()
         self._worker.moveToThread(self._thread)
         self.request.connect(self._worker.run)
+        self.view_request.connect(self._worker.load_view)
         self._worker.finished.connect(self._on_finished)
         self._worker.progress.connect(self._on_progress)
+        self._worker.viewReady.connect(self._on_view_ready)
         self._thread.start()
 
     def closeEvent(self, event) -> None:
-        self._save_window_state()
-        if self._cancel_event is not None:
-            self._cancel_event.set()
-        self._thread.quit()
-        self._thread.wait(5000)
+        if not self._closing:
+            self._closing = True
+            self._save_window_state()
+            self._view_debounce.stop()
+            if self._cancel_event is not None:
+                self._cancel_event.set()
+            self._thread.quit()
+        if not self._thread.wait(100):
+            self._set_status('Closing safely after the current structure operation…')
+            event.ignore()
+            QTimer.singleShot(100, self.close)
+            return
         super().closeEvent(event)
 
     def schedule(self) -> None:
@@ -327,7 +360,7 @@ class MainWindow(QMainWindow):
 
     def _build_ui(self) -> None:
         self.plot_panel = PlotPanel()
-        self.cursor_label = QLabel(' ')
+        self.cursor_label = ElidedLabel(' ')
         self.cursor_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
         self.plot_panel.cursorMoved.connect(lambda text: self.cursor_label.setText(text or ' '))
         plot_area = QWidget()
@@ -354,16 +387,36 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(self.splitter)
 
         self.particle_view = ParticleView()
+        particle_panel = QWidget()
+        particle_layout = QVBoxLayout(particle_panel)
+        particle_layout.setContentsMargins(0, 0, 0, 0)
+        particle_controls = QHBoxLayout()
+        particle_controls.addWidget(QLabel('View'))
+        self.particle_mode_combo = QComboBox()
+        for label, mode in STRUCTURE_VIEW_MODES:
+            self.particle_mode_combo.addItem(label, mode)
+        saved_mode = str(self.settings.value('particle_mode', 'particle'))
+        self.particle_mode_combo.setCurrentIndex(max(0, self.particle_mode_combo.findData(saved_mode)))
+        self.particle_mode_combo.currentIndexChanged.connect(self._on_particle_mode_changed)
+        particle_controls.addWidget(self.particle_mode_combo, 1)
+        center_button = QPushButton('Center')
+        center_button.setToolTip('Center the structure and reset zoom')
+        center_button.clicked.connect(self.particle_view.center_view)
+        particle_controls.addWidget(center_button)
+        particle_layout.addLayout(particle_controls)
+        particle_layout.addWidget(self.particle_view, 1)
         self.particle_dock = QDockWidget('Particle', self)
         self.particle_dock.setObjectName('particle_dock')
-        self.particle_dock.setWidget(self.particle_view)
+        self.particle_dock.setWidget(particle_panel)
         self.particle_dock.setAllowedAreas(Qt.AllDockWidgetAreas)
         self.particle_view.setMinimumWidth(260)
         self.addDockWidget(Qt.RightDockWidgetArea, self.particle_dock)
         self.particle_dock.hide()
-        self.particle_dock.visibilityChanged.connect(lambda visible: visible and self._refresh_particle_view())
+        self.particle_dock.visibilityChanged.connect(self._on_particle_view_visibility_changed)
 
         self.status_label = QLabel()
+        self.status_label.setMinimumWidth(0)
+        self.status_label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         self.progress_bar = QProgressBar()
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setMaximumWidth(180)
@@ -426,7 +479,7 @@ class MainWindow(QMainWindow):
         self.table = self._make_table(['', '', 'Structure', 'Atoms'], stretch_column=2)
         self.table.setMinimumHeight(190)
         self.table.itemSelectionChanged.connect(self._on_selection_changed)
-        layout.addWidget(self.table)
+        layout.addWidget(self.table, 1)
 
         layout.addLayout(self._button_row([
             ('Show all', lambda: self._set_all_visible(True), None),
@@ -465,9 +518,13 @@ class MainWindow(QMainWindow):
                                             'the partials add up to the total')
         self.show_partials_check.toggled.connect(self._on_show_partials_toggled)
         form.addRow('', self.show_partials_check)
-        view_button = QPushButton('Show particle in 3D')
-        view_button.clicked.connect(self.show_particle_view)
-        form.addRow('', view_button)
+        self.partials_only_check = QCheckBox('Hide total curve')
+        self.partials_only_check.setToolTip('Show every element-pair partial without drawing the total curve')
+        self.partials_only_check.toggled.connect(self._on_partials_only_toggled)
+        form.addRow('', self.partials_only_check)
+        self.view_button = QPushButton('Show particle in 3D')
+        self.view_button.clicked.connect(self.toggle_particle_view)
+        form.addRow('', self.view_button)
         self.detail_box.setEnabled(False)
         layout.addWidget(self.detail_box)
 
@@ -482,7 +539,6 @@ class MainWindow(QMainWindow):
         recolor.clicked.connect(self.recolor_all)
         color_layout.addWidget(recolor)
         layout.addWidget(colors)
-        layout.addStretch(1)
         return page
 
     def _data_tab(self) -> QWidget:
@@ -495,7 +551,7 @@ class MainWindow(QMainWindow):
         self.data_table = self._make_table(['', 'Data', 'Function', 'Rw'], stretch_column=1)
         self.data_table.setMinimumHeight(150)
         self.data_table.itemSelectionChanged.connect(self._on_data_selection_changed)
-        layout.addWidget(self.data_table)
+        layout.addWidget(self.data_table, 1)
 
         self.data_box = QGroupBox('Selected data')
         form = QFormLayout(self.data_box)
@@ -515,6 +571,8 @@ class MainWindow(QMainWindow):
         self.data_unit_combo.currentIndexChanged.connect(self._on_data_changed)
         form.addRow('x-axis of file', self.data_unit_combo)
         self.data_compare_combo = QComboBox()
+        self.data_compare_combo.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+        self.data_compare_combo.setMinimumContentsLength(12)
         self.data_compare_combo.currentIndexChanged.connect(self._on_data_changed)
         form.addRow('Compare with', self.data_compare_combo)
         self.data_fit_check = QCheckBox('Fit scale of the calculation to the data')
@@ -534,7 +592,6 @@ class MainWindow(QMainWindow):
         note.setWordWrap(True)
         note.setEnabled(False)
         layout.addWidget(note)
-        layout.addStretch(1)
         return page
 
     def _scattering_tab(self) -> QWidget:
@@ -830,6 +887,7 @@ class MainWindow(QMainWindow):
         self.settings.setValue('geometry', self.saveGeometry())
         self.settings.setValue('window_state', self.saveState())
         self.settings.setValue('splitter', self.splitter.saveState())
+        self.settings.setValue('particle_mode', self.particle_mode_combo.currentData())
         self.settings.setValue('last_session', json.dumps(self.session()))
 
     def _restore_window_state(self) -> None:
@@ -887,20 +945,33 @@ class MainWindow(QMainWindow):
         else:
             self.add_file(path)
 
+    def open_paths(self, paths: List[str]) -> None:
+        """Open several dropped or command-line files with batched GUI updates."""
+        data_paths = [path for path in paths if Path(path).suffix.lower() in DATA_SUFFIXES]
+        structure_paths = [path for path in paths if Path(path).suffix.lower() not in DATA_SUFFIXES]
+        self.add_files(structure_paths)
+        self.add_data_files(data_paths)
+
     # -- structures --------------------------------------------------------------------------------------------------
 
     def add_files_dialog(self) -> None:
         patterns = ' '.join(f'*{suffix}' for suffix in STRUCTURE_SUFFIXES)
         paths, _ = QFileDialog.getOpenFileNames(self, 'Add structure files', self._last_directory(),
                                                 f'Structures ({patterns});;All files (*)')
-        for path in paths:
-            self.add_file(path)
+        self.add_files(paths)
+
+    def add_files(self, paths: List[str]) -> List[StructureItem]:
+        """Add several structures with one table rebuild and one calculation request."""
+        added = [self.add_file(path, _refresh=False) for path in paths]
+        if added:
+            self._finish_adding_files()
+        return added
 
     def add_file(self, path: str, radius: float = 10.0, label: Optional[str] = None, color: Optional[str] = None,
                  visible: bool = True, lightweight: bool = False, partial: Optional[str] = None,
-                 show_partials: bool = False) -> StructureItem:
+                 show_partials: bool = False, partials_only: bool = False, _refresh: bool = True) -> StructureItem:
         spec = StructureSpec(path=str(Path(path).resolve()), radius=radius, lightweight=lightweight, partial=partial,
-                             show_partials=show_partials)
+                             show_partials=show_partials, partials_only=partials_only)
         if label is None:
             label = Path(path).stem + (f' (r = {radius:g} Å)' if spec.is_cif else '')
         if color is None:
@@ -908,11 +979,17 @@ class MainWindow(QMainWindow):
         item = StructureItem(spec, label, QColor(color), visible)
         self.items.append(item)
         self._remember(path)
-        self._rebuild_table()
-        self.table.selectRow(len(self.items) - 1)
-        self._refresh_compare_combo()
-        self.schedule()
+        if _refresh:
+            self._finish_adding_files()
         return item
+
+    def _finish_adding_files(self, schedule: bool = True) -> None:
+        self._rebuild_table()
+        if self.items:
+            self.table.selectRow(len(self.items) - 1)
+        self._refresh_compare_combo()
+        if schedule:
+            self.schedule()
 
     def duplicate_selected(self) -> None:
         item = self._selected_item()
@@ -920,7 +997,7 @@ class MainWindow(QMainWindow):
             return
         spec = item.spec
         self.add_file(spec.path, radius=spec.radius, label=f'{item.label} (copy)', lightweight=spec.lightweight,
-                      partial=spec.partial, show_partials=spec.show_partials)
+                      partial=spec.partial, show_partials=spec.show_partials, partials_only=spec.partials_only)
 
     def remove_selected(self) -> None:
         item = self._selected_item()
@@ -1018,6 +1095,7 @@ class MainWindow(QMainWindow):
         item = self._selected_item()
         self.detail_box.setEnabled(item is not None)
         if item is None:
+            self._refresh_particle_view()
             return
         self._updating_controls = True
         self.label_edit.setText(item.label)
@@ -1026,6 +1104,7 @@ class MainWindow(QMainWindow):
         self.radius_slider.setValue(item.spec.radius)
         self.lightweight_check.setChecked(item.spec.lightweight)
         self.show_partials_check.setChecked(item.spec.show_partials)
+        self.partials_only_check.setChecked(item.spec.partials_only)
         self._fill_partials(item)
         self._updating_controls = False
         self._refresh_particle_view()
@@ -1040,6 +1119,7 @@ class MainWindow(QMainWindow):
         self.partial_combo.setCurrentIndex(max(index, 0))
         self.partial_combo.blockSignals(False)
         self.show_partials_check.setEnabled(item.spec.partial is None)
+        self.partials_only_check.setEnabled(item.spec.partial is None and item.spec.show_partials)
 
     def _refresh_partials(self) -> None:
         item = self._selected_item()
@@ -1049,6 +1129,7 @@ class MainWindow(QMainWindow):
     def _on_visible_toggled(self, item: StructureItem, checked: bool) -> None:
         item.visible = checked
         self._refresh_plots()
+        self._refresh_particle_view()
         self.schedule()
 
     def _on_color_changed(self, item: StructureItem, color: QColor) -> None:
@@ -1062,6 +1143,7 @@ class MainWindow(QMainWindow):
             self._refresh_table_values()
             self._refresh_compare_combo()
             self._refresh_plots()
+            self._refresh_particle_view()
 
     def _set_item_radius(self, item: StructureItem, radius: float) -> None:
         old_suffix = f' (r = {item.spec.radius:g} Å)'
@@ -1077,12 +1159,14 @@ class MainWindow(QMainWindow):
         self.label_edit.setText(item.label)
         self._refresh_table_values()
         self._refresh_compare_combo()
+        self._refresh_particle_view()
         self.schedule()
 
     def _on_lightweight_toggled(self, checked: bool) -> None:
         item = self._selected_item()
         if item is not None and not self._updating_controls:
             item.spec.lightweight = checked
+            self._refresh_particle_view()
             self.schedule()
 
     def _on_partial_changed(self, _index: int) -> None:
@@ -1090,35 +1174,122 @@ class MainWindow(QMainWindow):
         if item is not None and not self._updating_controls:
             item.spec.partial = self.partial_combo.currentData()
             self.show_partials_check.setEnabled(item.spec.partial is None)
+            self.partials_only_check.setEnabled(item.spec.partial is None and item.spec.show_partials)
             self.schedule()
 
     def _on_show_partials_toggled(self, checked: bool) -> None:
         item = self._selected_item()
         if item is not None and not self._updating_controls:
             item.spec.show_partials = checked
+            self.partials_only_check.setEnabled(checked and item.spec.partial is None)
+            self._refresh_plots()
             self.schedule()
+
+    def _on_partials_only_toggled(self, checked: bool) -> None:
+        item = self._selected_item()
+        if item is not None and not self._updating_controls:
+            item.spec.partials_only = checked
+            self._refresh_plots()
 
     # -- particle view -----------------------------------------------------------------------------------------------
 
+    def toggle_particle_view(self) -> None:
+        if self.particle_dock.isHidden():
+            self.particle_dock.show()
+            self.particle_dock.raise_()
+            if not self.particle_dock.isFloating():
+                # After the dock has been laid out
+                QTimer.singleShot(0, lambda: self.particle_dock.width() < 380 and
+                                  self.resizeDocks([self.particle_dock], [440], Qt.Horizontal))
+            self._refresh_particle_view()
+            QTimer.singleShot(50, self.particle_view.center_view)
+        else:
+            self.particle_dock.hide()
+
     def show_particle_view(self) -> None:
-        self.particle_dock.show()
-        self.particle_dock.raise_()
-        if not self.particle_dock.isFloating():
-            # After the dock has been laid out
-            QTimer.singleShot(0, lambda: self.particle_dock.width() < 380 and
-                              self.resizeDocks([self.particle_dock], [440], Qt.Horizontal))
+        """Compatibility helper for callers that explicitly open the viewer."""
+        if self.particle_dock.isHidden():
+            self.toggle_particle_view()
+
+    def _on_particle_view_visibility_changed(self, visible: bool) -> None:
+        self.view_button.setText('Hide particle in 3D' if visible else 'Show particle in 3D')
+        if visible:
+            self._refresh_particle_view()
+        elif self._view_debounce.isActive():
+            self._view_debounce.stop()
+            self._queued_view = None
+            self._pending_view_key = None
+
+    def _on_particle_mode_changed(self, _index: int) -> None:
+        self.settings.setValue('particle_mode', self.particle_mode_combo.currentData())
         self._refresh_particle_view()
-        QTimer.singleShot(50, lambda: self.particle_view.viewbox.autoRange(padding=0.05))
+
+    def _current_view_key(self):
+        item = self._selected_item()
+        if item is None:
+            return None
+        mode = self.particle_mode_combo.currentData()
+        geometry_key = item.spec.particle_key() if mode == 'particle' else (item.spec.path, mode)
+        return item.id, mode, geometry_key
+
+    def _show_view_geometry(self, structure) -> None:
+        item = self._selected_item()
+        if item is None:
+            return
+        self.particle_view.set_structure(
+            structure.elements, structure.xyz, item.label,
+            lattice=getattr(structure, 'lattice', None), atom_count=getattr(structure, 'atom_count', None),
+        )
 
     def _refresh_particle_view(self) -> None:
-        if not self.particle_dock.isVisible():
+        if self.particle_dock.isHidden():
             return
         item = self._selected_item()
-        particle = self._worker.engine._particles.get_item(item.spec.particle_key()) if item is not None else None
-        if particle is None:
-            self.particle_view.set_particle(None, None, item.label if item is not None else '')
-        else:
-            self.particle_view.set_particle(particle.elements, particle.xyz, item.label)
+        key = self._current_view_key()
+        if item is None or key is None:
+            self._view_debounce.stop()
+            self._queued_view = None
+            self._pending_view_key = None
+            self._displayed_view_key = None
+            self._displayed_view = None
+            self.particle_view.set_structure(None, None)
+            return
+        if key == self._displayed_view_key and self._displayed_view is not None:
+            self._show_view_geometry(self._displayed_view)
+            return
+        if key == self._pending_view_key:
+            return
+        self._pending_view_key = key
+        self.particle_view.set_message(item.label, 'Loading…')
+        self._queued_view = (key, copy.deepcopy(item.spec), self.particle_mode_combo.currentData())
+        self._view_debounce.start()
+
+    def _dispatch_particle_view(self) -> None:
+        request, self._queued_view = self._queued_view, None
+        if request is None:
+            return
+        key, spec, mode = request
+        if self.particle_dock.isHidden() or key != self._current_view_key():
+            if key == self._pending_view_key:
+                self._pending_view_key = None
+            return
+        self.view_request.emit(key, spec, mode)
+
+    @Slot(object, object, str)
+    def _on_view_ready(self, key: tuple, structure, error: str) -> None:
+        if key == self._pending_view_key:
+            self._pending_view_key = None
+        if key != self._current_view_key() or self.particle_dock.isHidden():
+            return
+        item = self._selected_item()
+        if error:
+            self._displayed_view_key = None
+            self._displayed_view = None
+            self.particle_view.set_message(item.label if item is not None else '', error)
+            return
+        self._displayed_view_key = key
+        self._displayed_view = structure
+        self._show_view_geometry(structure)
 
     # -- experimental data -------------------------------------------------------------------------------------------
 
@@ -1126,10 +1297,16 @@ class MainWindow(QMainWindow):
         patterns = ' '.join(f'*{suffix}' for suffix in DATA_SUFFIXES)
         paths, _ = QFileDialog.getOpenFileNames(self, 'Load experimental data', self._last_directory(),
                                                 f'Data ({patterns});;All files (*)')
-        for path in paths:
-            self.add_data(path)
+        self.add_data_files(paths)
 
-    def add_data(self, path: str, **kwargs) -> Optional[DataItem]:
+    def add_data_files(self, paths: List[str]) -> List[DataItem]:
+        """Load several data files with one table and plot refresh."""
+        added = [item for path in paths if (item := self.add_data(path, _refresh=False)) is not None]
+        if added:
+            self._finish_adding_data()
+        return added
+
+    def add_data(self, path: str, _refresh: bool = True, **kwargs) -> Optional[DataItem]:
         kwargs.setdefault('function', guess_function(path))
         kwargs.setdefault('wavelength', self.plot_options.wavelength)
         if 'compare_id' not in kwargs and self.items:
@@ -1144,13 +1321,18 @@ class MainWindow(QMainWindow):
         self._remember(path)
         if item.function not in self.plot_options.functions:
             self.plot_options.functions = tuple(f for f in FUNCTIONS if f in self.plot_options.functions + (item.function,))
-            self._apply_plot_options_to_controls()
-            self.plot_panel.set_options(self.plot_options)
-        self._rebuild_data_table()
-        self.data_table.selectRow(len(self.data_items) - 1)
-        self.tabs.setCurrentIndex(1)
-        self._refresh_plots()
+        if _refresh:
+            self._finish_adding_data()
         return item
+
+    def _finish_adding_data(self) -> None:
+        self._apply_plot_options_to_controls()
+        self.plot_panel.set_options(self.plot_options)
+        self._rebuild_data_table()
+        if self.data_items:
+            self.data_table.selectRow(len(self.data_items) - 1)
+            self.tabs.setCurrentIndex(1)
+        self._refresh_plots()
 
     def remove_selected_data(self) -> None:
         item = self._selected_data()
@@ -1422,7 +1604,10 @@ class MainWindow(QMainWindow):
     def _plot_entries(self):
         shown = [item for item in self.items if item.visible and item.result is not None]
         index_of = {item.id: index for index, item in enumerate(shown)}
-        entries = [PlotEntry(item.label, item.color, item.result) for item in shown]
+        entries = [PlotEntry(item.label, item.color, item.result,
+                             show_total=not (item.spec.partial is None and item.spec.show_partials
+                                             and item.spec.partials_only),
+                             show_partials=item.spec.partial is None and item.spec.show_partials) for item in shown]
 
         data_entries = []
         for data in self.data_items:
@@ -1453,6 +1638,7 @@ class MainWindow(QMainWindow):
 
     def _set_status(self, text: str, error: bool = False) -> None:
         self.status_label.setText(text)
+        self.status_label.setToolTip(text)
         self.status_label.setProperty('error', error)
         color = ('#ff6b68' if self.dark else '#c62828') if error else ''
         self.status_label.setStyleSheet(f'color: {color};' if color else '')
@@ -1464,10 +1650,8 @@ class MainWindow(QMainWindow):
             event.acceptProposedAction()
 
     def dropEvent(self, event) -> None:
-        for url in event.mimeData().urls():
-            path = url.toLocalFile()
-            if path and Path(path).is_file():
-                self.open_path(path)
+        paths = [url.toLocalFile() for url in event.mimeData().urls()]
+        self.open_paths([path for path in paths if path and Path(path).is_file()])
 
     # -- export ------------------------------------------------------------------------------------------------------
 
@@ -1602,14 +1786,18 @@ class MainWindow(QMainWindow):
             self.add_file(spec['path'], radius=spec.get('radius', 10.0), label=entry.get('label'),
                           color=entry.get('color'), visible=entry.get('visible', True),
                           lightweight=spec.get('lightweight', False), partial=spec.get('partial'),
-                          show_partials=spec.get('show_partials', False))
+                          show_partials=spec.get('show_partials', False),
+                          partials_only=spec.get('partials_only', False), _refresh=False)
+        self._finish_adding_files(schedule=False)
         for entry in session.get('data', []):
             compare_index = entry.get('compare_index')
             compare_id = self.items[compare_index].id if compare_index is not None and compare_index < len(self.items) else None
-            self.add_data(entry['path'], function=entry.get('function', 'i'), x_unit=entry.get('x_unit', 'Q'),
+            self.add_data(entry['path'], _refresh=False, function=entry.get('function', 'i'),
+                          x_unit=entry.get('x_unit', 'Q'),
                           wavelength=entry.get('wavelength', options.wavelength), label=entry.get('label'),
                           visible=entry.get('visible', True), color=entry.get('color'), compare_id=compare_id,
                           fit_scale=entry.get('fit_scale', True), show_difference=entry.get('show_difference', True))
+        self._finish_adding_data()
         self.tabs.setCurrentIndex(0)
         self._refresh_plots()
         self.schedule()
