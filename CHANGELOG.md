@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- `device='mps'` with PyTorch before 2.15 issues a `UserWarning` recommending an upgrade: with PyTorch 2.15, G(r) on
+  Apple GPUs is 2.7-3.5x faster for particles of 4,000-150,000 atoms (Apple M3 Max, float32), where with 2.14 it is no
+  faster than the CPU.
+
 ## 1.1.1
 
 ### Added

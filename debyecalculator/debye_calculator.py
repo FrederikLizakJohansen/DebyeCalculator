@@ -119,6 +119,21 @@ def _single_intra_op_thread():
                 torch.set_num_threads(_THREADS_STATE['saved'])
 
 
+def _warn_if_slow_mps_torch(stacklevel: int = 3) -> None:
+    """
+    Warn when device='mps' runs with a PyTorch release before 2.15, whose MPS backend runs the pair sum several times
+    slower (2.7-3.5x for 4,000-150,000 atoms on an M3 Max).
+    """
+    major, minor = (int(part) for part in re.match(r'(\d+)\.(\d+)', str(torch.__version__)).groups())
+    if (major, minor) < (2, 15):
+        warnings.warn(
+            f"PyTorch {torch.__version__} is installed. On Apple GPUs (device='mps'), DebyeCalculator runs "
+            "about 3 times faster with PyTorch 2.15 or later for particles above a few thousand atoms. "
+            "Upgrade with: pip install --upgrade torch",
+            UserWarning,
+            stacklevel=stacklevel,
+        )
+
 
 class CalculationCancelled(Exception):
     """
@@ -267,6 +282,8 @@ class DebyeCalculator:
             self.device = 'cpu'
         else:
             self.device = device
+        if self.device == 'mps':
+            _warn_if_slow_mps_torch()
             
         # Set parameters
         self.qmin = qmin

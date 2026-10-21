@@ -272,3 +272,30 @@ def test_single_thread_leaves_torch_settings_untouched(monkeypatch):
     monkeypatch.setattr(torch, 'set_num_threads', lambda n: calls.append(n))
     DebyeCalculator(device='cpu', num_threads=1).iq(particle(14.0))
     assert calls == []
+
+
+@pytest.mark.parametrize('version, warns', [('2.14.1', True), ('2.15.0rc1', False), ('2.15.0', False), ('2.16.0.dev20261020', False), ('2.14.1+cpu', True)])
+def test_mps_warning_for_pytorch_before_2_15(monkeypatch, version, warns):
+    import warnings
+    from debyecalculator.debye_calculator import _warn_if_slow_mps_torch
+    monkeypatch.setattr(torch, '__version__', version)
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter('always')
+        _warn_if_slow_mps_torch()
+    assert any('PyTorch 2.15' in str(w.message) for w in caught) == warns
+
+
+def test_mps_warning_only_for_mps(monkeypatch):
+    import warnings
+    monkeypatch.setattr(torch, '__version__', '2.14.1')
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter('always')
+        DebyeCalculator(device='cpu')
+    assert not any('PyTorch 2.15' in str(w.message) for w in caught)
+
+
+@pytest.mark.skipif(not torch.backends.mps.is_available(), reason='needs an Apple GPU')
+def test_mps_warning_from_constructor(monkeypatch):
+    monkeypatch.setattr(torch, '__version__', '2.14.1')
+    with pytest.warns(UserWarning, match='PyTorch 2.15'):
+        DebyeCalculator(device='mps')
