@@ -11,8 +11,6 @@ readme = "README.md"
 repository = "https://github.com/FrederikLizakJohansen/DebyeCalculator"
 classifiers = [
   "Programming Language :: Python :: 3",
-  "Programming Language :: Python :: 3.8",
-  "Programming Language :: Python :: 3.9",
   "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
@@ -25,13 +23,13 @@ packages = [
 ]
 
 [tool.poetry.dependencies]
-python = ">=3.8,<3.15"
+python = ">=3.10,<3.15"
 numpy = ">=1.21.5"
 matplotlib = ">=3.4.3"
 pyyaml = ">=6.0.1"
 tqdm = ">=4.66.1"
 ase = ">=3.22.1"
-pymatgen = {version = ">=2020.0.0", python = ">=3.10"}
+pymatgen = ">=2020.0.0"
 notebook = ">=6.4.1"
 ipywidgets = ">=8.0.3"
 scipy = ">=1.7.3"

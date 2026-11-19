@@ -1,5 +1,5 @@
 [![pypi](https://img.shields.io/pypi/v/Debyecalculator?label=pypi)](https://pypi.org/project/DebyeCalculator/)
-[![Python](https://img.shields.io/badge/python-3.8%E2%80%933.14-blue)](https://www.python.org/downloads/)
+[![Python](https://img.shields.io/badge/python-3.10%E2%80%933.14-blue)](https://www.python.org/downloads/)
 [![License](https://img.shields.io/github/license/FrederikLizakJohansen/DebyeCalculator)]([https://github.com/lfwa/carbontracker/blob/master/LICENSE](https://github.com/FrederikLizakJohansen/DebyeCalculator/blob/main/LICENSE.txt))
 [![ChemRxiv](https://img.shields.io/badge/ChemRxiv%20%20-8A2BE2)](https://chemrxiv.org/engage/chemrxiv/article-details/651ec9668bab5d2055b2d009)
 [![ReadTheDocs](https://img.shields.io/readthedocs/debyecalculator)](https://debyecalculator.readthedocs.io/en/latest/)
@@ -35,7 +35,7 @@ Here, we provide an optimised code for the calculation of the Debye scattering e
 
 ## Prerequisites
 
-`DebyeCalculator` requires Python 3.8–3.14. If needed, create an environment with one of these Python versions:
+`DebyeCalculator` requires Python 3.10–3.14. If needed, create an environment with one of these Python versions:
 ```bash
 conda create -n debyecalculator_env python=3.12
 ```
@@ -45,11 +45,9 @@ conda activate debyecalculator_env
 
 Before installing the `DebyeCalculator` package, ensure that you have PyTorch installed. Follow the instructions on the official PyTorch website to install the appropriate version for your system: [PyTorch Installation Guide](https://pytorch.org/get-started/locally/). 
 
-**NOTE**: Recent PyTorch releases require Python 3.9 or higher; on Python 3.8, pip installs PyTorch 2.4, the last release supporting it.
-
 ## Install with [pip](https://pypi.org/project/DebyeCalculator/)
 
-Run the following command to install the __DebyeCalculator__ package. (**Requires**: Python 3.8–3.14)
+Run the following command to install the __DebyeCalculator__ package. (**Requires**: Python 3.10–3.14)
 ```
 pip install debyecalculator
 ```
@@ -61,7 +59,7 @@ Clone the repo
 git clone https://github.com/FrederikLizakJohansen/DebyeCalculator.git
 ```
 
-Run the following command to install the __DebyeCalculator__ package. (**Requires**: Python 3.8–3.14)
+Run the following command to install the __DebyeCalculator__ package. (**Requires**: Python 3.10–3.14)
 ```
 python -m pip install .
 ```
@@ -128,7 +126,7 @@ calc = DebyeCalculator(device='cuda')
 
 ## Desktop app
 
-A standalone desktop app (Windows, macOS, Linux) calculates and plots I(Q), S(Q), F(Q) and G(r) live while parameters change. Install it with the `gui` extra (Python 3.8 or later) and start it from a terminal:
+A standalone desktop app (Windows, macOS, Linux) calculates and plots I(Q), S(Q), F(Q) and G(r) live while parameters change. Install it with the `gui` extra (Python 3.10 or later) and start it from a terminal:
 
 ```bash
 pip install "debyecalculator[gui]"
