@@ -5,7 +5,6 @@ import numpy as np
 from ase.io import read
 import importlib.resources
 import yaml
-import sys
 import math
 
 try:
@@ -158,8 +157,8 @@ def test_generate_nanoparticle():
     ('structure_AntiFluorite_Co2O_radius10.0.xyz', 0.05, 0.05)
 ])
 @pytest.mark.skipif(
-    sys.version_info < (3, 10),
-    reason="Requires Python 3.10 or above"
+    not pymatgen_available,
+    reason="Requires pymatgen"
 )
 def test_ase_and_pymatgen_input(debye_calc, filename, qstep, gr_qstep):
     # Load structure from ASE

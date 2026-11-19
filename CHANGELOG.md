@@ -7,6 +7,11 @@
   Apple GPUs is 2.7-3.5x faster for particles of 4,000-150,000 atoms (Apple M3 Max, float32), where with 2.14 it is no
   faster than the CPU.
 
+### Removed
+- Python 3.8 and 3.9 are no longer supported; both are end-of-life, and current PyTorch releases (2.9 and later)
+  require Python 3.10. pip reads `Requires-Python: >=3.10,<3.15` and keeps Python 3.8 and 3.9 users on 1.1.1.
+- CI runs on Python 3.10–3.14 (Linux) and 3.10/3.14 (Windows, macOS).
+
 ## 1.1.1
 
 ### Added
