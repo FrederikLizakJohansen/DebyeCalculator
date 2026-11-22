@@ -15,8 +15,7 @@ trap 'rm -rf "$JOB_TMP"' EXIT
 
 echo "== $(date) job ${SLURM_JOB_ID:-} on $(hostname), partition $PARTITION, arch $ARCH, results in $OUT"
 
-module purge
-module load "$DC_PYTHON_MODULE"
+dc_load_modules
 if [ ! -x "$VENV/bin/python" ]; then
     echo "No environment $VENV: run 'bash hpc/niflheim/setup.sh' on the login node for $PARTITION first." >&2
     exit 1

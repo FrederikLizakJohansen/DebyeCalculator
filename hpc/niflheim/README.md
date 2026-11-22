@@ -64,8 +64,11 @@ This:
 2. installs PyTorch with CUDA 12.6 from the PyTorch wheel index. On Linux these wheels include Triton, and they
    bring their own CUDA libraries, so no CUDA module is needed;
 3. installs DebyeCalculator from this folder (editable) plus `pytest`, `psutil` and `maturin`;
-4. installs Rust with rustup into `~/.cargo` if `cargo` isn't found (Niflheim has no Rust module), and builds the Rust
-   and C kernels.
+4. loads the `Rust/1.88.0-GCCcore-14.3.0` module (rustup into `~/.cargo` only if that module is missing), and builds
+   the Rust and C kernels.
+
+Niflheim has no PyTorch or Triton module, so PyTorch comes from pip (about 8 GB in the venv, mostly the CUDA
+libraries). The CUDA and cuDNN modules aren't needed: the wheels bring their own.
 
 It ends by printing the versions and `native CPU kernels: ['c', 'rust']`. If you will also use the H200 or the
 RTX 3090, log in to `sara` or `vid` and run the same command there; `~/.cargo` and the clone are shared.
@@ -174,7 +177,7 @@ to make the full table and charts across machines and backends.
 
 | problem | what to do |
 |---|---|
-| `module load Python/3.13.5-GCCcore-14.3.0` fails | `module avail Python/`, then e.g. `export DC_PYTHON_MODULE=Python/3.12.3-GCCcore-13.3.0` before `setup.sh` and `submit_all.sh` |
+| `module load Python/3.13.5-GCCcore-14.3.0` fails | `module avail Python/`, then e.g. `export DC_PYTHON_MODULE=Python/3.12.3-GCCcore-13.3.0` (and a `DC_RUST_MODULE` of the same GCCcore) before `setup.sh` and `submit_all.sh` |
 | `No environment ...debyecalculator-<arch>` in a job | run `setup.sh` on the login node for that partition (table in step 1) |
 | CUDA errors, or `torch.cuda.is_available()` is False on a GPU node | compare the driver's CUDA version in `nvidia-smi` (in `environment.txt`) with the wheels: `export DC_TORCH_INDEX=https://download.pytorch.org/whl/cu121` (or `cu118`) and re-run `setup.sh` |
 | `triton kernels: unavailable: ...` | the reason is printed; the GPU job still benchmarks PyTorch CUDA; send me `environment.txt` and `pytest.log` |

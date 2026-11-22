@@ -1,7 +1,9 @@
 #!/bin/bash
 # One-time setup of DebyeCalculator with the Rust, C and Triton kernels on Niflheim.
 #
-# Run it on the login node that matches the partitions you will use (it builds for that node's CPU architecture):
+# Uses the Niflheim modules for Python and Rust; PyTorch (with CUDA and Triton) comes from pip, since Niflheim has
+# no PyTorch module. Run it on the login node that matches the partitions you will use (it builds for that node's
+# CPU architecture):
 #   hrid  -> xeon56el9 (CPU benchmark) and a100el9
 #   sara  -> h200el9
 #   vid   -> sm3090el9
@@ -21,8 +23,7 @@ fi
 VENV=$(dc_venv "$ARCH")
 echo "== Setting up $VENV for CPU_ARCH=$ARCH on $(hostname)"
 
-module purge
-module load "$DC_PYTHON_MODULE"
+dc_load_modules
 python --version
 
 if [ ! -x "$VENV/bin/python" ]; then
@@ -38,7 +39,7 @@ python -m pip install torch --index-url "$DC_TORCH_INDEX"
 echo "== DebyeCalculator (editable) and benchmark tools"
 python -m pip install -e "$REPO" pytest psutil maturin
 
-echo "== Rust toolchain"
+echo "== Rust toolchain (module $DC_RUST_MODULE, else rustup)"
 if ! command -v cargo >/dev/null 2>&1; then
     curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs -o "${TMPDIR:-/tmp}/rustup-init.sh"
     sh "${TMPDIR:-/tmp}/rustup-init.sh" -y --profile minimal --no-modify-path
