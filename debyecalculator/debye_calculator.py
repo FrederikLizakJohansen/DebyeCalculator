@@ -37,6 +37,19 @@ except ModuleNotFoundError:
 import numpy as np
 import matplotlib.pyplot as plt
 
+# Optional native CPU kernels for the grid pair sum (see kernels/README.md): 'rust' (debyecalculator_kernels) and
+# 'c' (debyecalculator_ckernels). Without them the pair sum runs in PyTorch, as before. The environment variable
+# DEBYECALCULATOR_PAIR_BACKEND selects 'auto' (default: rust, then c, then torch on CPU; the fused Metal or Triton kernels
+# on MPS or CUDA, see debyecalculator/metal_pair_sum.py and triton_pair_sum.py), 'rust', 'c', 'metal', 'triton' or 'torch'
+_NATIVE_BACKENDS = {}
+for _backend, _module_name in (('rust', 'debyecalculator_kernels'), ('c', 'debyecalculator_ckernels')):
+    try:
+        _module = importlib.import_module(_module_name)
+    except ImportError:
+        continue
+    if getattr(_module, 'INTERFACE_VERSION', None) == 1:
+        _NATIVE_BACKENDS[_backend] = _module
+
 from ase import Atoms
 from ase.io import read, write
 from ase.build import make_supercell
@@ -361,6 +374,9 @@ class DebyeCalculator:
         # Optional callable receiving the completed fraction (0 to 1) of each pair sum; returning False cancels the
         # calculation with CalculationCancelled
         self.progress_callback = None
+
+        # Backend of the grid pair sum on CPU: None follows DEBYECALCULATOR_PAIR_BACKEND (see _native_pair_kernels)
+        self._pair_backend = None
 
     def __repr__(self):
         return (
@@ -830,6 +846,13 @@ class DebyeCalculator:
         Returns:
             torch.Tensor: Moments sum(w), sum(w s), sum(w s^2), sum(w s^3) per distance bin, of shape (n_element_pairs, n_nodes, 4).
         """
+        native = self._native_pair_kernels(acc_dtype, xyz, occupancy)
+        if native is not None:
+            return self._spread_pairs_native(native, jobs, xyz, occupancy, atom_indices, n_element_pairs, n_nodes, dr, progress)
+        gpu = self._gpu_pair_kernels(acc_dtype, xyz, occupancy)
+        if gpu is not None:
+            return gpu.spread_pairs(jobs, xyz, occupancy, atom_indices, n_element_pairs, n_nodes, dr, self.rthres, progress)
+
         hist = torch.zeros((n_element_pairs, n_nodes, 4), device=self.device, dtype=acc_dtype)
         batch_moments = torch.zeros((4, n_nodes), device=self.device, dtype=self.dtype)
         uniform_occupancy = bool(torch.all(occupancy == 1))
@@ -881,6 +904,119 @@ class DebyeCalculator:
                 progress.step()
 
         return hist
+
+    def _pair_backend_choice(self) -> Tuple[str, bool]:
+        """
+        The requested backend of the grid pair sum and whether it was set explicitly on this instance: self._pair_backend
+        if set, else the environment variable DEBYECALCULATOR_PAIR_BACKEND ('auto' by default).
+        """
+        backend = getattr(self, '_pair_backend', None)
+        explicit = backend is not None
+        if not explicit:
+            backend = os.environ.get('DEBYECALCULATOR_PAIR_BACKEND', 'auto')
+        return backend.lower(), explicit
+
+    def _gpu_pair_kernels(self, acc_dtype: torch.dtype, *tensors: torch.Tensor):
+        """
+        The fused GPU kernels that apply to this calculation: Metal on MPS (see _metal_pair_kernels), Triton on CUDA
+        (see _triton_pair_kernels), else None.
+        """
+        return self._metal_pair_kernels(*tensors) or self._triton_pair_kernels(acc_dtype, *tensors)
+
+    def _triton_pair_kernels(self, acc_dtype: torch.dtype, *tensors: torch.Tensor):
+        """
+        The fused Triton kernels of the grid pair sum (debyecalculator.triton_pair_sum) if they apply to this calculation
+        (CUDA tensors of the calculation dtype, float32 or float64, accumulated in float64), the backend is 'auto' or
+        'triton', and they pass their self-test on this machine; else None for the PyTorch code.
+        An explicitly set self._pair_backend = 'triton' that can't be used raises RuntimeError.
+        """
+        backend, explicit = self._pair_backend_choice()
+        if backend not in ('auto', 'triton') or self.dtype not in (torch.float32, torch.float64) or acc_dtype != torch.float64:
+            return None
+        if not tensors or any(t.device.type != 'cuda' or t.dtype != self.dtype for t in tensors):
+            return None
+        from debyecalculator import triton_pair_sum
+        if triton_pair_sum.library() is None:
+            if explicit and backend == 'triton':
+                raise RuntimeError(f'The Triton pair-sum kernels are not available: {triton_pair_sum.unavailable_reason()}')
+            return None
+        return triton_pair_sum
+
+    def _metal_pair_kernels(self, *tensors: torch.Tensor):
+        """
+        The fused Metal kernels of the grid pair sum (debyecalculator.metal_pair_sum) if they apply to this calculation
+        (MPS tensors (xyz, occupancy) in float32, non-negative occupancies) and the backend is 'auto' or 'metal', else
+        None for the PyTorch code.
+        An explicitly set self._pair_backend = 'metal' that can't be used raises RuntimeError.
+        """
+        backend, explicit = self._pair_backend_choice()
+        if backend not in ('auto', 'metal') or self.dtype != torch.float32:
+            return None
+        if not tensors or any(t.device.type != 'mps' or t.dtype != torch.float32 for t in tensors):
+            return None
+        from debyecalculator import metal_pair_sum
+        if metal_pair_sum.library() is None:
+            if explicit and backend == 'metal':
+                raise RuntimeError(f'The Metal pair-sum kernels are not available: {metal_pair_sum._unavailable}')
+            return None
+        # The fixed-point histogram of the kernels needs non-negative occupancies
+        if len(tensors) > 1 and not metal_pair_sum.applies(tensors[1]):
+            return None
+        return metal_pair_sum
+
+    def _native_pair_kernels(self, acc_dtype: torch.dtype, *tensors: torch.Tensor):
+        """
+        The native CPU kernels of the grid pair sum if they apply to this calculation (CPU tensors of the calculation
+        dtype, float32 or float64, accumulated in float64), else None for the PyTorch code.
+
+        The backend is self._pair_backend if set, else the environment variable DEBYECALCULATOR_PAIR_BACKEND:
+        'auto' (default) uses the Rust kernels, then the C kernels, whichever is installed (and the fused GPU kernels on
+        MPS and CUDA, see _gpu_pair_kernels); 'rust' or 'c' use only that one; 'torch' uses the PyTorch code. An explicitly
+        set self._pair_backend that is not installed raises RuntimeError.
+        """
+        backend, explicit = self._pair_backend_choice()
+        if backend == 'auto':
+            module = _NATIVE_BACKENDS.get('rust', _NATIVE_BACKENDS.get('c'))
+        elif backend in ('rust', 'c'):
+            module = _NATIVE_BACKENDS.get(backend)
+            if module is None and explicit:
+                raise RuntimeError(f"The '{backend}' pair-sum kernels are not installed")
+        else:
+            module = None
+        if (module is None
+                or acc_dtype != torch.float64
+                or self.dtype not in (torch.float32, torch.float64)
+                or any(t.device.type != 'cpu' or t.dtype != self.dtype for t in tensors)):
+            return None
+        return module
+
+    def _spread_pairs_native(
+        self,
+        native,
+        jobs: List[Tuple[int, int, int, int, int]],
+        xyz: torch.Tensor,
+        occupancy: torch.Tensor,
+        atom_indices: List[torch.Tensor],
+        n_element_pairs: int,
+        n_nodes: int,
+        dr: float,
+        progress: Optional['_Progress'] = None,
+    ) -> torch.Tensor:
+        """
+        _spread_pairs with the native kernels: the same per-pair arithmetic in a single pass per batch, accumulated in float64.
+        """
+        spread = native.spread_pairs_f32 if self.dtype == torch.float32 else native.spread_pairs_f64
+        xyz_np = xyz.detach().contiguous().reshape(-1).numpy()
+        occupancy_np = None if bool(torch.all(occupancy == 1)) else occupancy.detach().contiguous().numpy()
+        indices = [idx.to(torch.int64).contiguous().numpy() for idx in atom_indices]
+        hist = np.zeros((n_element_pairs, n_nodes * 4), dtype=np.float64)
+
+        for pair_number, a, b, start, stop in jobs:
+            spread(xyz_np, occupancy_np, indices[a], indices[b], start, stop, a == b, 1 / dr, float(self.rthres), hist[pair_number])
+            if progress is not None:
+                progress.step()
+
+        return torch.from_numpy(hist).view(n_element_pairs, n_nodes, 4)
 
     def _run_jobs(self, function, jobs: list, n_threads: int) -> list:
         """
@@ -957,6 +1093,47 @@ class DebyeCalculator:
 
         # Per-pair arithmetic in the calculation dtype; tables and accumulation in acc_dtype
         h_nodes, k_nodes = h_nodes.to(self.dtype), k_nodes.to(self.dtype)
+
+        xyz_calc, occupancy_calc = xyz.detach().to(self.dtype), occupancy.detach().to(self.dtype)
+        gpu = self._gpu_pair_kernels(acc_dtype, xyz_calc, occupancy_calc)
+        if gpu is not None:
+            element_pairs = [None] * grid.n_element_pairs
+            for pair_number, a, b, _, _ in grid.jobs:
+                element_pairs[pair_number] = (a, b)
+            pairs = [(t, ab) for t, ab in enumerate(element_pairs) if ab is not None]
+            grad_xyz, grad_occupancy = gpu.pair_gradients(
+                xyz_calc, occupancy_calc, grid.atom_indices, [ab for _, ab in pairs],
+                h_nodes.T[[t for t, _ in pairs]], k_nodes.T[[t for t, _ in pairs]],
+                grid.dr, self.rthres, need_xyz, need_occupancy)
+            return (grad_xyz.view(xyz.shape).to(xyz.dtype) if need_xyz else None,
+                    grad_occupancy.view(occupancy.shape).to(occupancy.dtype) if need_occupancy else None)
+
+        native = self._native_pair_kernels(acc_dtype, xyz_calc, occupancy_calc)
+        if native is not None:
+            backward = native.grid_backward_f32 if self.dtype == torch.float32 else native.grid_backward_f64
+            xyz_np = xyz_calc.contiguous().reshape(-1).numpy()
+            occupancy_np = occupancy_calc.contiguous().numpy()
+            indices = [idx.to(torch.int64).contiguous().numpy() for idx in grid.atom_indices]
+            # Node tables per element pair, contiguous
+            h_tables = h_nodes.T.contiguous().numpy() if need_xyz else None
+            k_tables = k_nodes.T.contiguous().numpy() if need_occupancy else None
+
+            def native_worker(jobs):
+                grad_xyz = np.zeros(xyz.numel(), dtype=np.float64) if need_xyz else None
+                grad_occupancy = np.zeros(occupancy.numel(), dtype=np.float64) if need_occupancy else None
+                for pair_number, a, b, start, stop in jobs:
+                    backward(xyz_np, occupancy_np, indices[a], indices[b], start, stop, a == b, 1 / grid.dr,
+                             float(self.rthres),
+                             h_tables[pair_number] if need_xyz else None,
+                             k_tables[pair_number] if need_occupancy else None,
+                             grad_xyz, grad_occupancy)
+                return (torch.from_numpy(grad_xyz).view(xyz.shape) if need_xyz else None,
+                        torch.from_numpy(grad_occupancy).view(occupancy.shape) if need_occupancy else None)
+
+            results = self._run_jobs(native_worker, grid.jobs, grid.n_threads)
+            grad_xyz = torch.stack([gx for gx, _ in results]).sum(0).to(xyz.dtype) if need_xyz else None
+            grad_occupancy = torch.stack([go for _, go in results]).sum(0).to(occupancy.dtype) if need_occupancy else None
+            return grad_xyz, grad_occupancy
 
         def worker(jobs):
             grad_xyz = torch.zeros(xyz.shape, device=self.device, dtype=acc_dtype) if need_xyz else None

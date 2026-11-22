@@ -299,3 +299,255 @@ def test_mps_warning_from_constructor(monkeypatch):
     monkeypatch.setattr(torch, '__version__', '2.14.1')
     with pytest.warns(UserWarning, match='PyTorch 2.15'):
         DebyeCalculator(device='mps')
+
+
+# -- native CPU kernels (kernels/ and kernels_c/) --------------------------------------------------------------------
+
+from debyecalculator.debye_calculator import _NATIVE_BACKENDS, CalculationCancelled
+
+native_backends = pytest.mark.parametrize('backend', sorted(_NATIVE_BACKENDS) or [
+    pytest.param(None, marks=pytest.mark.skip(reason='no native pair-sum kernels installed'))])
+
+
+def with_backend(backend, **kwargs):
+    calc = DebyeCalculator(device='cpu', **kwargs)
+    calc._pair_backend = backend
+    return calc
+
+
+def pair_iq_and_gradients(calc, structure, occupancy, partial=None):
+    xyz = structure.xyz.detach().clone().requires_grad_(True)
+    occ = occupancy.to(calc.dtype).clone().requires_grad_(True)
+    pair_iq, _ = calc._compute_iq_parts(structure._replace(xyz=xyz, occupancy=occ), partial=partial,
+                                        include_self_scattering=False)
+    weights = torch.linspace(0.5, 1.5, pair_iq.numel(), dtype=pair_iq.dtype, device=pair_iq.device)
+    (pair_iq * weights).sum().backward()
+    return pair_iq.detach().cpu().double(), xyz.grad.cpu().double(), occ.grad.cpu().double()
+
+
+@native_backends
+@pytest.mark.parametrize('dtype, tolerance', [(torch.float32, 1e-5), (torch.float64, 1e-12)])
+@pytest.mark.parametrize('kwargs, partial, uniform', [
+    (dict(), None, True),
+    (dict(), None, False),
+    (dict(rthres=2.5), None, False),
+    (dict(rthres=2.5), None, True),
+    (dict(), 'Co-O', False),
+    (dict(), 'O-O', True),
+    (dict(num_threads=1, batch_size=5_000), None, False),
+])
+def test_native_kernels_match_torch(backend, dtype, tolerance, kwargs, partial, uniform):
+    reference, native = with_backend('torch', dtype=dtype, **kwargs), with_backend(backend, dtype=dtype, **kwargs)
+    structure = reference._initialize_structures(particle(10.0))[0]
+    assert native._native_pair_kernels(torch.float64, structure.xyz, structure.occupancy) is _NATIVE_BACKENDS[backend]
+    assert reference._native_pair_kernels(torch.float64, structure.xyz, structure.occupancy) is None
+    n = len(structure.elements)
+    occupancy = torch.ones(n, dtype=torch.float64) if uniform else \
+        torch.rand(n, dtype=torch.float64, generator=torch.Generator().manual_seed(0)) * 0.5 + 0.5
+    for got, want in zip(pair_iq_and_gradients(native, structure, occupancy, partial),
+                         pair_iq_and_gradients(reference, structure, occupancy, partial)):
+        assert (got - want).norm() / want.norm() < tolerance
+
+
+@native_backends
+def test_native_kernels_threads_and_batches_do_not_change_results(backend):
+    structure = DebyeCalculator(device='cpu')._initialize_structures(particle(12.0))[0]
+    occupancy = torch.ones(len(structure.elements), dtype=torch.float64)
+    reference = pair_iq_and_gradients(with_backend(backend, dtype=torch.float64), structure._replace(
+        xyz=structure.xyz.double(), occupancy=structure.occupancy.double()), occupancy)
+    calc = with_backend(backend, dtype=torch.float64, num_threads=1, batch_size=1_000)
+    got = pair_iq_and_gradients(calc, structure._replace(xyz=structure.xyz.double(),
+                                                         occupancy=structure.occupancy.double()), occupancy)
+    for g, r in zip(got, reference):
+        assert (g - r).norm() / r.norm() < 1e-13
+
+
+@native_backends
+def test_native_kernels_report_progress_and_cancel(backend):
+    source = particle(12.0)
+    calc = with_backend(backend, num_threads=2, batch_size=20_000)
+    fractions = []
+    calc.progress_callback = fractions.append
+    calc.iq(source)
+    assert len(fractions) > 1 and fractions[-1] == pytest.approx(1.0)
+
+    calc.progress_callback = lambda fraction: False
+    with pytest.raises(CalculationCancelled):
+        calc.iq(source)
+
+
+@native_backends
+@pytest.mark.parametrize('dtype', [np.float32, np.float64])
+def test_native_kernels_reject_invalid_input(backend, dtype):
+    module = _NATIVE_BACKENDS[backend]
+    suffix = 'f32' if dtype == np.float32 else 'f64'
+    spread, backward = getattr(module, 'spread_pairs_' + suffix), getattr(module, 'grid_backward_' + suffix)
+    xyz = np.array([0, 0, 0, 1, 0, 0, 0, 2, 0], dtype=dtype)
+    idx = np.arange(3, dtype=np.int64)
+    hist = np.zeros(4 * 1000)
+
+    spread(xyz, None, idx, idx, 0, 3, True, 2.0 ** 8, 0.0, hist)
+    assert hist[0::4].sum() == 3  # three pairs i < j
+    with pytest.raises(ValueError):  # atom index out of range
+        spread(xyz, None, idx, np.array([0, 5], dtype=np.int64), 0, 3, False, 2.0 ** 8, 0.0, hist)
+    with pytest.raises(ValueError):  # distance beyond the grid
+        spread(xyz, None, idx, idx, 0, 3, True, 2.0 ** 8, 0.0, np.zeros(4 * 10))
+    with pytest.raises(ValueError):  # NaN position
+        spread(np.where(np.arange(9) == 4, np.nan, xyz).astype(dtype), None, idx, idx, 0, 3, True, 2.0 ** 8, 0.0, hist)
+    with pytest.raises(ValueError):  # rows beyond the element
+        spread(xyz, None, idx, idx, 0, 4, True, 2.0 ** 8, 0.0, hist)
+    with pytest.raises((TypeError, ValueError)):  # wrong dtype
+        spread(xyz.astype(np.float16), None, idx, idx, 0, 3, True, 2.0 ** 8, 0.0, hist)
+
+    table, occupancy = np.ones(1003, dtype=dtype), np.ones(3, dtype=dtype)
+    grad_xyz, grad_occupancy = np.zeros(9), np.zeros(3)
+    backward(xyz, occupancy, idx, idx, 0, 3, True, 2.0 ** 8, 0.0, table, table, grad_xyz, grad_occupancy)
+    assert np.allclose(grad_occupancy, 2.0)  # each atom pairs with two others, k = 1
+    with pytest.raises(ValueError):  # gradient without its table
+        backward(xyz, occupancy, idx, idx, 0, 3, True, 2.0 ** 8, 0.0, None, table, grad_xyz, grad_occupancy)
+
+
+# -- fused Metal kernels (debyecalculator/metal_pair_sum.py) ---------------------------------------------------------
+
+def _metal_available():
+    try:
+        from debyecalculator import metal_pair_sum
+        return metal_pair_sum.library() is not None
+    except Exception:
+        return False
+
+
+metal = pytest.mark.skipif(not _metal_available(), reason='Metal kernels need an Apple GPU and PyTorch 2.6 or later')
+
+
+def mps_source(radius):
+    elements, xyz = particle(radius)
+    return elements, xyz.astype(np.float32)
+
+
+@metal
+@pytest.mark.parametrize('kwargs, partial, uniform', [
+    (dict(), None, True),
+    (dict(), None, False),
+    (dict(rthres=2.5), None, False),
+    (dict(), 'Co-O', True),
+])
+def test_metal_kernels_match_float64(kwargs, partial, uniform):
+    source = mps_source(10.0)
+    reference = DebyeCalculator(device='cpu', dtype=torch.float64, **kwargs)
+    reference._pair_backend = 'torch'
+    calc = DebyeCalculator(device='mps', dtype=torch.float32, **kwargs)
+    calc._pair_backend = 'metal'
+    structure_ref = reference._initialize_structures(source)[0]
+    structure = calc._initialize_structures(source)[0]
+    assert calc._metal_pair_kernels(structure.xyz, structure.occupancy) is not None
+    n = len(structure.elements)
+    occupancy = torch.ones(n, dtype=torch.float64) if uniform else \
+        torch.rand(n, dtype=torch.float64, generator=torch.Generator().manual_seed(0)) * 0.5 + 0.5
+    got = pair_iq_and_gradients(calc, structure, occupancy.float().to('mps'), partial)
+    want = pair_iq_and_gradients(reference, structure_ref, occupancy, partial)
+    for g, w in zip(got, want):
+        assert (g.cpu() - w).norm() / w.norm() < 1e-4
+
+
+@metal
+def test_metal_kernels_report_progress_and_cancel():
+    source = mps_source(12.0)
+    calc = DebyeCalculator(device='mps', batch_size=20_000)
+    calc._pair_backend = 'metal'
+    fractions = []
+    calc.progress_callback = fractions.append
+    calc.iq(source)
+    assert len(fractions) > 1 and fractions[-1] == pytest.approx(1.0)
+    calc.progress_callback = lambda fraction: False
+    with pytest.raises(CalculationCancelled):
+        calc.iq(source)
+
+
+@metal
+def test_metal_kernels_fall_back_for_negative_occupancy():
+    calc = DebyeCalculator(device='mps')
+    calc._pair_backend = 'metal'
+    xyz = torch.zeros((4, 3), device='mps')
+    assert calc._metal_pair_kernels(xyz, torch.ones(4, device='mps')) is not None
+    assert calc._metal_pair_kernels(xyz, torch.tensor([1.0, -0.5, 1.0, 1.0], device='mps')) is None
+    calc._pair_backend = 'torch'
+    assert calc._metal_pair_kernels(xyz, torch.ones(4, device='mps')) is None
+
+
+# -- NVIDIA GPUs: PyTorch on CUDA and the fused Triton kernels (debyecalculator/triton_pair_sum.py) -----------------
+
+def _triton_available():
+    try:
+        from debyecalculator import triton_pair_sum
+        return triton_pair_sum.library() is not None
+    except Exception:
+        return False
+
+
+cuda = pytest.mark.skipif(not torch.cuda.is_available(), reason='needs an NVIDIA GPU')
+triton_kernels = pytest.mark.skipif(not _triton_available(), reason='Triton kernels need an NVIDIA GPU and Triton')
+
+
+@cuda
+def test_triton_kernels_are_available_on_cuda():
+    from debyecalculator import triton_pair_sum
+    assert triton_pair_sum.library() is not None, f'Triton kernels unavailable: {triton_pair_sum.unavailable_reason()}'
+
+
+@cuda
+@pytest.mark.parametrize('backend', ['torch', 'triton'])
+@pytest.mark.parametrize('dtype, tolerance', [(torch.float32, 1e-5), (torch.float64, 1e-10)])
+@pytest.mark.parametrize('kwargs, partial, uniform', [
+    (dict(), None, True),
+    (dict(), None, False),
+    (dict(rthres=2.5), None, False),
+    (dict(), 'Co-O', True),
+    (dict(), 'O-O', False),
+])
+def test_cuda_backends_match_float64(backend, dtype, tolerance, kwargs, partial, uniform):
+    if backend == 'triton' and not _triton_available():
+        pytest.skip('Triton kernels unavailable')
+    source = particle(10.0)
+    reference = with_backend('torch', dtype=torch.float64, **kwargs)
+    calc = DebyeCalculator(device='cuda', dtype=dtype, **kwargs)
+    calc._pair_backend = backend
+    structure_ref = reference._initialize_structures(source)[0]
+    structure = calc._initialize_structures(source)[0]
+    expected = backend == 'triton'
+    assert (calc._triton_pair_kernels(torch.float64, structure.xyz, structure.occupancy) is not None) == expected
+    n = len(structure.elements)
+    occupancy = torch.ones(n, dtype=torch.float64) if uniform else \
+        torch.rand(n, dtype=torch.float64, generator=torch.Generator().manual_seed(0)) * 0.5 + 0.5
+    got = pair_iq_and_gradients(calc, structure, occupancy.to(device='cuda', dtype=dtype), partial)
+    want = pair_iq_and_gradients(reference, structure_ref, occupancy, partial)
+    for g, w in zip(got, want):
+        assert (g - w).norm() / w.norm() < tolerance
+
+
+@triton_kernels
+def test_triton_kernels_match_torch_cuda_on_threaded_sizes():
+    source = particle(14.0)
+    results = {}
+    for backend in ('torch', 'triton'):
+        calc = DebyeCalculator(device='cuda', dtype=torch.float64, batch_size=50_000)
+        calc._pair_backend = backend
+        structure = calc._initialize_structures(source)[0]
+        occupancy = torch.ones(len(structure.elements), dtype=torch.float64, device='cuda')
+        results[backend] = pair_iq_and_gradients(calc, structure, occupancy)
+    for g, w in zip(results['triton'], results['torch']):
+        assert (g - w).norm() / w.norm() < 1e-10
+
+
+@triton_kernels
+def test_triton_kernels_report_progress_and_cancel():
+    source = particle(12.0)
+    calc = DebyeCalculator(device='cuda', batch_size=20_000)
+    calc._pair_backend = 'triton'
+    fractions = []
+    calc.progress_callback = fractions.append
+    calc.iq(source)
+    assert len(fractions) > 1 and fractions[-1] == pytest.approx(1.0)
+    calc.progress_callback = lambda fraction: False
+    with pytest.raises(CalculationCancelled):
+        calc.iq(source)
