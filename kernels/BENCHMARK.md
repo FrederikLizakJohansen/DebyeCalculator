@@ -1,155 +1,149 @@
 # Benchmark: grid pair sum backends
 
-Machine: Apple M3 Max (12 performance + 4 efficiency cores; 12 PyTorch threads), macOS, Python 3.11.8,
-PyTorch 2.14.0. Structures: spherical Co₂O (anti-fluorite) particles of radius 10, 20, 30, 45 and 63 Å
-from `debyecalculator/data/AntiFluorite_Co2O.cif`; Q from 1 to 30 Å⁻¹; default settings otherwise.
+Today's code (PyTorch on CPU, MPS and CUDA) against the fused kernels of this branch: **Rust** on CPU, **Metal**
+on Apple GPUs, **Triton** on NVIDIA GPUs. The C kernels that were benchmarked alongside Rust gave no advantage and
+were removed; their results stay in the tables for reference.
 
-- **Time**: fastest of up to 5 runs (at least 2), synchronised for MPS.
-- **Memory**: peak above the level just before the run, sampled every millisecond in a fresh process per
-  configuration: resident RAM plus, on MPS, memory held by live GPU tensors. The MPS driver figure (which includes the
-  allocator's cached heaps) is in the GPU memory table.
-- **I(Q) + gradient**: I(Q) and the gradient of a weighted sum of I(Q) with respect to all atomic positions.
-- **Accuracy**: relative to the float64 result of the Rust kernels, which agrees with the float64 PyTorch code to
-  ~1e-14 (shown in the accuracy table).
+**Machines.** Apple M3 Max (12 PyTorch threads, macOS); Niflheim (DTU): one whole `xeon56el9` node (Intel Xeon Gold
+6348, 56 cores), one A100-SXM4-40GB (`a100el9`, 32 cores), one RTX 3090 (`sm3090el9`, 8 cores); PyTorch 2.14,
+CUDA 12.6 wheels, Triton 3.8.
 
-Reproduce with `python kernels/benchmark.py --out results.jsonl` and
-`python kernels/benchmark_report.py results.jsonl --out-dir <dir>`; the raw results are in
-[benchmark_results/apple_m3_max.jsonl](benchmark_results/apple_m3_max.jsonl).
+**Workload.** Spherical Co₂O (anti-fluorite) particles of radius 10, 20, 30, 45 and 63 Å (473 to 112,331 atoms),
+on Niflheim also 80 and 100 Å (228,653 and 444,263 atoms) for the fast backends; Q from 1 to 30 Å⁻¹, default
+settings otherwise. *I(Q)* is the forward calculation; *I(Q) + gradient* adds the gradient of a weighted sum of
+I(Q) with respect to all positions.
 
-## Summary
+**Method.** Each configuration runs in a fresh process after an untimed warm-up on a tiny particle (which pays
+one-time costs such as CUDA start-up and kernel compilation). Time: fastest of up to 5 runs (at least 2). Memory:
+peak resident RAM above the level before the run, sampled every millisecond, plus peak memory of live GPU tensors.
+Accuracy: against the float64 result of the Rust kernels, which agrees with the float64 PyTorch code to ~1e-14.
+Reproduce with `kernels/benchmark.py` and `kernels/benchmark_report.py`; Niflheim scripts in `hpc/niflheim/`.
+Raw results: `kernels/benchmark_results/*.jsonl`.
 
-- **CPU, Rust and C kernels**: 7–15× faster than the PyTorch CPU code for 12,000 atoms and more, in float32 and float64,
-  for I(Q) and for I(Q) with gradients; 1.5–5× for small particles. Peak memory is 2–8× lower. Rust is 3–30% faster
-  than C at 40,000 atoms and more (same algorithm; the difference is code generation) and equal for small particles.
-- **Apple GPU, Metal kernels**: 5–7× faster than the PyTorch MPS code for I(Q) and 16–36× for I(Q) with gradients
-  above 40,000 atoms, with 20–125× less memory (tens of MB instead of GB). For I(Q) alone the M3 Max GPU is as fast as
-  the Rust kernels on the CPU (atomic adds limit it); with gradients it is 1.6–2.6× faster than Rust above 40,000
-  atoms. Below ~15,000 atoms the GPU launch overhead makes the CPU kernels faster.
-- **PyTorch MPS** is at most 1.3× faster than the PyTorch CPU code (slower with gradients at 112,000 atoms), uses up
-  to 8 GB of GPU memory, and is 5–20× less accurate than CPU float32 (it accumulates in float32). The Metal kernels
-  have the accuracy of the PyTorch MPS code: the node sums around them still run in float32 on MPS.
-- **Accuracy**: float64 kernels agree with the PyTorch code to ~1e-14. In float32 the CPU kernels have the same or
-  smaller error than the PyTorch CPU code.
+**Not complete.** On the RTX 3090, PyTorch CUDA in float64 and Triton at 444,263 atoms were still running when this
+was written (the RTX 3090 runs float64 at 1/64 of its float32 rate).
 
-![time](benchmark_results/time.png)
+## Summary: I(Q) + gradient, today's code against the new backend on the same device
 
-![memory](benchmark_results/memory.png)
+| machine | device | atoms | precision | today: time / memory | new: time / memory | speed-up | memory ratio |
+|---|---|---:|---|---|---|---:|---:|
+| Apple M3 Max | CPU (rust) | 12,581 | float32 | 678 ms / 192 MB | 60 ms / 118 MB | 11.3× | 1.6× |
+| Apple M3 Max | CPU (rust) | 12,581 | float64 | 869 ms / 247 MB | 95 ms / 151 MB | 9.1× | 1.6× |
+| Apple M3 Max | CPU (rust) | 112,331 | float32 | 60.6 s / 1329 MB | 6.5 s / 184 MB | 9.3× | 7.2× |
+| Apple M3 Max | CPU (rust) | 112,331 | float64 | 76.4 s / 1033 MB | 6.0 s / 337 MB | 12.6× | 3.1× |
+| Apple M3 Max | MPS (metal) | 12,581 | float32 | 607 ms / 310 MB | 89 ms / 76 MB | 6.8× | 4.1× |
+| Apple M3 Max | MPS (metal) | 112,331 | float32 | 80.3 s / 8244 MB | 2.2 s / 64 MB | 36.9× | 128.2× |
+| Xeon Gold 6348 (56 cores) | CPU (rust) | 12,581 | float32 | 2.4 s / 159 MB | 154 ms / 152 MB | 15.7× | 1.1× |
+| Xeon Gold 6348 (56 cores) | CPU (rust) | 12,581 | float64 | 2.8 s / 345 MB | 220 ms / 371 MB | 12.6× | 0.9× |
+| Xeon Gold 6348 (56 cores) | CPU (rust) | 112,331 | float32 | 199.3 s / 529 MB | 6.7 s / 203 MB | 29.7× | 2.6× |
+| Xeon Gold 6348 (56 cores) | CPU (rust) | 112,331 | float64 | 206.0 s / 720 MB | 7.9 s / 710 MB | 26.1× | 1.0× |
+| NVIDIA A100 | CUDA (triton) | 12,581 | float32 | 408 ms / 247 MB | 42 ms / 117 MB | 9.8× | 2.1× |
+| NVIDIA A100 | CUDA (triton) | 12,581 | float64 | 505 ms / 443 MB | 64 ms / 144 MB | 7.9× | 3.1× |
+| NVIDIA A100 | CUDA (triton) | 112,331 | float32 | 35.3 s / 264 MB | 1.0 s / 175 MB | 34.9× | 1.5× |
+| NVIDIA A100 | CUDA (triton) | 112,331 | float64 | 35.3 s / 470 MB | 1.4 s / 327 MB | 25.9× | 1.4× |
+| NVIDIA A100 | CUDA (triton) | 444,263 | float32 | 569.6 s / 672 MB | 14.4 s / 650 MB | 39.4× | 1.0× |
+| NVIDIA A100 | CUDA (triton) | 444,263 | float64 | 561.8 s / 1294 MB | 20.0 s / 1291 MB | 28.1× | 1.0× |
+| NVIDIA RTX 3090 | CUDA (triton) | 12,581 | float32 | 411 ms / 247 MB | 26 ms / 117 MB | 15.6× | 2.1× |
+| NVIDIA RTX 3090 | CUDA (triton) | 12,581 | float64 | 1.3 s / 444 MB | 87 ms / 144 MB | 15.3× | 3.1× |
+| NVIDIA RTX 3090 | CUDA (triton) | 112,331 | float32 | 32.4 s / 265 MB | 980 ms / 177 MB | 33.1× | 1.5× |
+| NVIDIA RTX 3090 | CUDA (triton) | 112,331 | float64 | 103.0 s / 470 MB | 5.6 s / 327 MB | 18.4× | 1.4× |
 
-## What to expect on NVIDIA GPUs (not measured)
+- **Speed:** 7–16× at 12,581 atoms and 18–39× at 112,000–444,000 atoms, on every device and precision.
+- **Memory:** today's code already bounds its working memory by the batch size, so the CPU and CUDA kernels save
+  less memory than time (1–7×). On Apple GPUs the PyTorch MPS code needs up to 8 GB; Metal needs tens of MB.
+- **Accuracy:** float64 agrees with the PyTorch code to ~1e-14 on every backend. In float32 the kernels have the same
+  or smaller error than the PyTorch code (float64 accumulation); the PyTorch MPS code and Metal have ~1e-5 (MPS has
+  no float64 for the node sums around the kernel).
+- **Tests:** all tests pass on every machine and backend (103 on the GPU nodes, 70+ on CPU).
 
-On CUDA, DebyeCalculator uses the PyTorch code unchanged. It has the same structure as the MPS path, so expect the
-same pattern: limited by memory traffic for batch-sized temporaries, GB-scale memory, and gains below what the GPU can
-do. A fused CUDA (or Triton) kernel with the design of the Metal kernels would be the equivalent of this work:
+## Charts (one per machine)
 
-- The forward pass is limited by atomic adds into the histogram. NVIDIA GPUs execute global atomics in L2 at much
-  higher rates than Apple GPUs (and have native float64 atomics from compute capability 6.0), so a fused forward
-  pass should run at several times the 3–4·10⁹ pairs/s of the M3 Max, roughly 10⁹ ·(10–30) pairs/s on an A100/H100 or
-  RTX 4090: I(Q) of 112,000 atoms (6.3·10⁹ pairs) in a few hundred ms. The fused computation without atomics runs at
-  7·10¹⁰ pairs/s on the M3 Max GPU; NVIDIA data-centre GPUs have 3–5× its float32 throughput.
-- The backward pass needs no per-pair atomics and should scale with float32 throughput.
-- float64: data-centre GPUs (A100, H100) run float64 at half the float32 rate, so float64 is practical there;
-  consumer GPUs (RTX) run float64 at 1/64 of float32, where float64 would be slower than the Rust kernels on a
-  workstation CPU. The float64 histogram accumulation itself is cheap on any recent NVIDIA GPU (native atomics).
-- Memory: like the Metal kernels, tens of MB instead of GB.
+| | time | memory |
+|---|---|---|
+| Apple M3 Max | ![](benchmark_results/apple_m3_max/time.png) | ![](benchmark_results/apple_m3_max/memory.png) |
+| Xeon Gold 6348 | ![](benchmark_results/xeon56el9/time.png) | ![](benchmark_results/xeon56el9/memory.png) |
+| A100 | ![](benchmark_results/a100el9/time.png) | ![](benchmark_results/a100el9/memory.png) |
+| RTX 3090 | ![](benchmark_results/sm3090el9/time.png) | ![](benchmark_results/sm3090el9/memory.png) |
 
-## Results
+Per-machine tables with accuracy and GPU memory (tensors and driver): `benchmark_results/<machine>/tables.md`.
 
-**I(Q), float32**: time (speed-up vs PyTorch CPU) / peak memory (RAM + GPU tensors)
+## All machines and backends
 
-| atoms | PyTorch CPU (1.1) | Rust CPU | C CPU | PyTorch MPS | Metal MPS |
-|---:|---:|---:|---:|---:|---:|
-| 473 | 3.9 ms / 6 MB | 2.0 ms (1.9×) / 4 MB | 2.1 ms (1.8×) / 4 MB | 28.4 ms (0.1×) / 15 MB | 23.7 ms (0.2×) / 17 MB |
-| 3,833 | 22.6 ms / 178 MB | 7.8 ms (2.9×) / 35 MB | 7.4 ms (3.1×) / 32 MB | 67.9 ms (0.3×) / 86 MB | 32.5 ms (0.7×) / 18 MB |
-| 12,581 | 182.7 ms / 291 MB | 20.1 ms (9.1×) / 47 MB | 23.4 ms (7.8×) / 44 MB | 211.4 ms (0.9×) / 150 MB | 51.1 ms (3.6×) / 20 MB |
-| 41,801 | 1.99 s / 596 MB | 195.6 ms (10.2×) / 104 MB | 232.6 ms (8.5×) / 99 MB | 1.54 s (1.3×) / 369 MB | 296.1 ms (6.7×) / 17 MB |
-| 112,331 | 15.57 s / 1832 MB | 1.65 s (9.4×) / 217 MB | 1.85 s (8.4×) / 228 MB | 11.65 s (1.3×) / 2007 MB | 1.63 s (9.5×) / 30 MB |
+**Machines**
 
-**I(Q) + gradient, float32**: time (speed-up vs PyTorch CPU) / peak memory (RAM + GPU tensors)
+- **apple_m3_max**: Apple M3 Max, 12 threads, PyTorch 2.14.0
+- **xeon56el9**: Intel(R) Xeon(R) Gold 6348 CPU @ 2.60GHz, 56 threads, PyTorch 2.14.1+cu126
+- **a100el9**: Intel(R) Xeon(R) Platinum 8358 CPU @ 2.60GHz, 32 threads, NVIDIA A100-SXM4-40GB, PyTorch 2.14.1+cu126, CUDA 12.6, Triton 3.8.0
+- **sm3090el9**: Intel(R) Xeon(R) Gold 5218R CPU @ 2.10GHz, 8 threads, NVIDIA GeForce RTX 3090, PyTorch 2.14.1+cu126, CUDA 12.6, Triton 3.8.0
 
-| atoms | PyTorch CPU (1.1) | Rust CPU | C CPU | PyTorch MPS | Metal MPS |
-|---:|---:|---:|---:|---:|---:|
-| 473 | 12.6 ms / 48 MB | 5.1 ms (2.5×) / 45 MB | 5.3 ms (2.4×) / 45 MB | 58.2 ms (0.2×) / 54 MB | 31.1 ms (0.4×) / 25 MB |
-| 3,833 | 79.2 ms / 140 MB | 15.9 ms (5.0×) / 86 MB | 16.5 ms (4.8×) / 89 MB | 128.5 ms (0.6×) / 242 MB | 41.4 ms (1.9×) / 44 MB |
-| 12,581 | 675.2 ms / 196 MB | 59.7 ms (11.3×) / 122 MB | 64.9 ms (10.4×) / 121 MB | 600.8 ms (1.1×) / 336 MB | 96.0 ms (7.0×) / 66 MB |
-| 41,801 | 7.65 s / 667 MB | 623.7 ms (12.3×) / 110 MB | 712.3 ms (10.7×) / 111 MB | 6.09 s (1.3×) / 1329 MB | 384.5 ms (19.9×) / 63 MB |
-| 112,331 | 58.01 s / 1210 MB | 5.66 s (10.3×) / 147 MB | 5.81 s (10.0×) / 124 MB | 79.08 s (0.7×) / 8182 MB | 2.17 s (26.7×) / 65 MB |
+**I(Q), float32**: time / peak memory (RAM + GPU tensors)
 
-**I(Q), float64**: time (speed-up vs PyTorch CPU) / peak memory (RAM + GPU tensors)
+| machine | backend | 473 atoms | 3,833 atoms | 12,581 atoms | 41,801 atoms | 112,331 atoms | 228,653 atoms | 444,263 atoms |
+|---|---|---:|---:|---:|---:|---:|---:|---:|
+| apple_m3_max | PyTorch CPU (1.1) | 4.0 ms / 2 MB | 22.6 ms / 115 MB | 176.8 ms / 224 MB | 1.96 s / 491 MB | 16.37 s / 1760 MB | – | – |
+| apple_m3_max | Rust CPU | 2.0 ms / 2 MB | 7.2 ms / 21 MB | 20.3 ms / 40 MB | 205.8 ms / 105 MB | 1.90 s / 254 MB | – | – |
+| apple_m3_max | C CPU | 2.1 ms / 1 MB | 7.4 ms / 20 MB | 23.8 ms / 45 MB | 239.5 ms / 100 MB | 1.98 s / 243 MB | – | – |
+| apple_m3_max | PyTorch MPS | 26.1 ms / 2 MB | 63.1 ms / 90 MB | 200.1 ms / 120 MB | 1.53 s / 340 MB | 13.34 s / 1982 MB | – | – |
+| apple_m3_max | Metal MPS | 20.7 ms / 4 MB | 26.1 ms / 8 MB | 51.0 ms / 8 MB | 291.0 ms / 12 MB | 1.65 s / 15 MB | – | – |
+| xeon56el9 | PyTorch CPU (1.1) | 3.6 ms / 3 MB | 82.9 ms / 273 MB | 637.9 ms / 438 MB | 8.30 s / 546 MB | 57.14 s / 766 MB | – | – |
+| xeon56el9 | Rust CPU | 2.7 ms / 2 MB | 31.8 ms / 105 MB | 69.4 ms / 170 MB | 316.3 ms / 277 MB | 1.70 s / 468 MB | 6.13 s / 805 MB | 27.98 s / 1416 MB |
+| xeon56el9 | C CPU | 2.6 ms / 2 MB | 35.6 ms / 103 MB | 98.8 ms / 168 MB | 707.7 ms / 268 MB | 5.00 s / 427 MB | 11.06 s / 726 MB | 23.94 s / 1266 MB |
+| a100el9 | Rust CPU | 4.7 ms / 2 MB | 71.7 ms / 61 MB | 123.4 ms / 98 MB | 461.4 ms / 158 MB | 2.74 s / 292 MB | 12.40 s / 620 MB | 52.15 s / 1129 MB |
+| a100el9 | PyTorch CUDA | 10.0 ms / 3 MB | 36.7 ms / 94 MB | 187.0 ms / 122 MB | 1.89 s / 120 MB | 13.47 s / 165 MB | 56.52 s / 335 MB | 217.03 s / 651 MB |
+| a100el9 | Triton CUDA | 8.4 ms / 3 MB | 11.3 ms / 6 MB | 26.0 ms / 22 MB | 104.6 ms / 62 MB | 628.5 ms / 213 MB | 2.37 s / 337 MB | 8.61 s / 655 MB |
+| sm3090el9 | Rust CPU | 3.5 ms / 0 MB | 28.0 ms / 15 MB | 126.4 ms / 28 MB | 1.19 s / 60 MB | 8.76 s / 199 MB | 40.08 s / 400 MB | 182.66 s / 799 MB |
+| sm3090el9 | PyTorch CUDA | 4.1 ms / 3 MB | 28.8 ms / 94 MB | 191.9 ms / 118 MB | 2.03 s / 120 MB | 14.58 s / 165 MB | 60.83 s / 333 MB | 232.34 s / 651 MB |
+| sm3090el9 | Triton CUDA | 3.7 ms / 3 MB | 5.6 ms / 6 MB | 17.6 ms / 19 MB | 100.7 ms / 62 MB | 606.7 ms / 214 MB | 2.28 s / 335 MB | – |
 
-| atoms | PyTorch CPU (1.1) | Rust CPU | C CPU |
-|---:|---:|---:|---:|
-| 473 | 5.8 ms / 21 MB | 3.9 ms (1.5×) / 15 MB | 4.0 ms (1.4×) / 18 MB |
-| 3,833 | 30.4 ms / 348 MB | 10.9 ms (2.8×) / 128 MB | 10.8 ms (2.8×) / 124 MB |
-| 12,581 | 203.3 ms / 625 MB | 25.6 ms (8.0×) / 202 MB | 29.0 ms (7.0×) / 199 MB |
-| 41,801 | 2.23 s / 1132 MB | 180.2 ms (12.4×) / 298 MB | 235.5 ms (9.5×) / 297 MB |
-| 112,331 | 19.26 s / 2046 MB | 1.50 s (12.9×) / 600 MB | 1.97 s (9.8×) / 599 MB |
+**I(Q) + gradient, float32**: time / peak memory (RAM + GPU tensors)
 
-**I(Q) + gradient, float64**: time (speed-up vs PyTorch CPU) / peak memory (RAM + GPU tensors)
+| machine | backend | 473 atoms | 3,833 atoms | 12,581 atoms | 41,801 atoms | 112,331 atoms | 228,653 atoms | 444,263 atoms |
+|---|---|---:|---:|---:|---:|---:|---:|---:|
+| apple_m3_max | PyTorch CPU (1.1) | 12.4 ms / 41 MB | 73.7 ms / 134 MB | 677.6 ms / 192 MB | 7.59 s / 402 MB | 60.60 s / 1329 MB | – | – |
+| apple_m3_max | Rust CPU | 5.0 ms / 41 MB | 16.0 ms / 83 MB | 59.8 ms / 118 MB | 631.6 ms / 102 MB | 6.54 s / 184 MB | – | – |
+| apple_m3_max | C CPU | 5.2 ms / 40 MB | 17.6 ms / 83 MB | 63.9 ms / 116 MB | 710.2 ms / 112 MB | 6.07 s / 128 MB | – | – |
+| apple_m3_max | PyTorch MPS | 55.2 ms / 31 MB | 120.6 ms / 231 MB | 606.6 ms / 310 MB | 5.99 s / 1311 MB | 80.29 s / 8244 MB | – | – |
+| apple_m3_max | Metal MPS | 30.2 ms / 26 MB | 38.8 ms / 45 MB | 89.0 ms / 76 MB | 376.8 ms / 64 MB | 2.17 s / 64 MB | – | – |
+| xeon56el9 | PyTorch CPU (1.1) | 13.6 ms / 64 MB | 238.7 ms / 189 MB | 2.43 s / 159 MB | 29.24 s / 242 MB | 199.25 s / 529 MB | – | – |
+| xeon56el9 | Rust CPU | 8.2 ms / 39 MB | 59.4 ms / 118 MB | 154.4 ms / 152 MB | 578.8 ms / 168 MB | 6.71 s / 203 MB | 30.08 s / 627 MB | 129.53 s / 1432 MB |
+| xeon56el9 | C CPU | 10.2 ms / 33 MB | 52.3 ms / 113 MB | 207.1 ms / 119 MB | 1.68 s / 185 MB | 11.52 s / 209 MB | 31.07 s / 712 MB | 102.54 s / 1322 MB |
+| a100el9 | Rust CPU | 17.3 ms / 48 MB | 87.0 ms / 118 MB | 211.1 ms / 138 MB | 1.13 s / 144 MB | 8.54 s / 238 MB | 52.61 s / 371 MB | 217.43 s / 820 MB |
+| a100el9 | PyTorch CUDA | 40.5 ms / 53 MB | 89.4 ms / 281 MB | 407.8 ms / 247 MB | 4.16 s / 289 MB | 35.33 s / 264 MB | 145.54 s / 350 MB | 569.56 s / 672 MB |
+| a100el9 | Triton CUDA | 22.1 ms / 44 MB | 26.7 ms / 129 MB | 41.6 ms / 117 MB | 161.0 ms / 117 MB | 1.01 s / 175 MB | 3.90 s / 334 MB | 14.45 s / 650 MB |
+| sm3090el9 | Rust CPU | 15.7 ms / 56 MB | 81.3 ms / 127 MB | 377.5 ms / 174 MB | 4.28 s / 108 MB | 25.35 s / 183 MB | 119.42 s / 336 MB | 589.32 s / 696 MB |
+| sm3090el9 | PyTorch CUDA | 9.4 ms / 41 MB | 54.0 ms / 281 MB | 411.2 ms / 247 MB | 4.43 s / 288 MB | 32.45 s / 265 MB | 135.62 s / 353 MB | 514.56 s / 669 MB |
+| sm3090el9 | Triton CUDA | 6.1 ms / 41 MB | 9.8 ms / 82 MB | 26.3 ms / 117 MB | 154.6 ms / 117 MB | 980.3 ms / 177 MB | 3.97 s / 334 MB | – |
 
-| atoms | PyTorch CPU (1.1) | Rust CPU | C CPU |
-|---:|---:|---:|---:|
-| 473 | 21.5 ms / 168 MB | 14.3 ms (1.5×) / 165 MB | 14.5 ms (1.5×) / 167 MB |
-| 3,833 | 100.6 ms / 200 MB | 34.8 ms (2.9×) / 161 MB | 34.7 ms (2.9×) / 143 MB |
-| 12,581 | 840.6 ms / 295 MB | 96.1 ms (8.7×) / 157 MB | 97.8 ms (8.6×) / 148 MB |
-| 41,801 | 9.35 s / 538 MB | 646.6 ms (14.5×) / 147 MB | 734.0 ms (12.7×) / 144 MB |
-| 112,331 | 76.73 s / 1006 MB | 5.75 s (13.3×) / 266 MB | 6.29 s (12.2×) / 211 MB |
+**I(Q), float64**: time / peak memory (RAM + GPU tensors)
 
-**GPU memory** (peak above the level before the run; the driver figure includes the allocator's cached heaps)
+| machine | backend | 473 atoms | 3,833 atoms | 12,581 atoms | 41,801 atoms | 112,331 atoms | 228,653 atoms | 444,263 atoms |
+|---|---|---:|---:|---:|---:|---:|---:|---:|
+| apple_m3_max | PyTorch CPU (1.1) | 5.7 ms / 11 MB | 25.3 ms / 254 MB | 203.1 ms / 544 MB | 2.24 s / 891 MB | 19.20 s / 2076 MB | – | – |
+| apple_m3_max | Rust CPU | 4.0 ms / 4 MB | 11.4 ms / 69 MB | 25.9 ms / 160 MB | 177.0 ms / 206 MB | 1.63 s / 633 MB | – | – |
+| apple_m3_max | C CPU | 3.8 ms / 4 MB | 11.7 ms / 91 MB | 29.3 ms / 167 MB | 239.6 ms / 210 MB | 2.06 s / 613 MB | – | – |
+| xeon56el9 | PyTorch CPU (1.1) | 4.7 ms / 2 MB | 104.9 ms / 806 MB | 868.9 ms / 1245 MB | 9.49 s / 1623 MB | 61.61 s / 2182 MB | – | – |
+| xeon56el9 | Rust CPU | 3.4 ms / 1 MB | 71.1 ms / 339 MB | 118.0 ms / 562 MB | 367.5 ms / 918 MB | 2.07 s / 1421 MB | 9.34 s / 1966 MB | 37.15 s / 2927 MB |
+| xeon56el9 | C CPU | 3.5 ms / 1 MB | 75.7 ms / 354 MB | 137.2 ms / 549 MB | 781.2 ms / 897 MB | 5.42 s / 1395 MB | 12.55 s / 1918 MB | 35.32 s / 2827 MB |
+| a100el9 | Rust CPU | 6.3 ms / 1 MB | 118.3 ms / 196 MB | 195.3 ms / 322 MB | 486.8 ms / 527 MB | 3.56 s / 814 MB | 17.83 s / 1301 MB | 73.96 s / 2255 MB |
+| a100el9 | PyTorch CUDA | 9.3 ms / 41 MB | 38.3 ms / 209 MB | 199.8 ms / 269 MB | 2.02 s / 273 MB | 14.50 s / 355 MB | 61.04 s / 689 MB | 235.20 s / 1310 MB |
+| a100el9 | Triton CUDA | 8.4 ms / 113 MB | 11.3 ms / 127 MB | 28.0 ms / 138 MB | 133.2 ms / 270 MB | 697.2 ms / 472 MB | 2.46 s / 761 MB | 8.81 s / 1384 MB |
+| sm3090el9 | Rust CPU | 5.2 ms / 1 MB | 34.6 ms / 49 MB | 121.8 ms / 96 MB | 975.6 ms / 192 MB | 7.42 s / 422 MB | 34.66 s / 813 MB | 197.45 s / 1550 MB |
+| sm3090el9 | PyTorch CUDA | 5.0 ms / 41 MB | 78.0 ms / 206 MB | 619.7 ms / 268 MB | 6.66 s / 273 MB | 47.98 s / 351 MB | 198.67 s / 684 MB | – |
+| sm3090el9 | Triton CUDA | 3.7 ms / 113 MB | 6.2 ms / 123 MB | 20.9 ms / 138 MB | 146.4 ms / 271 MB | 962.2 ms / 471 MB | 3.83 s / 757 MB | – |
 
-| atoms | backend | I(Q): GPU tensors / GPU driver | I(Q) + gradient: GPU tensors / GPU driver |
-|---:|---|---:|---:|
-| 473 | PyTorch MPS | 2 MB / 40 MB | 21 MB / 48 MB |
-| 473 | Metal MPS | 1 MB / 0 MB | 21 MB / 32 MB |
-| 3,833 | PyTorch MPS | 72 MB / 1024 MB | 210 MB / 1024 MB |
-| 3,833 | Metal MPS | 3 MB / 33 MB | 40 MB / 64 MB |
-| 12,581 | PyTorch MPS | 113 MB / 2056 MB | 232 MB / 2088 MB |
-| 12,581 | Metal MPS | 4 MB / 34 MB | 58 MB / 1056 MB |
-| 41,801 | PyTorch MPS | 102 MB / 3248 MB | 251 MB / 3705 MB |
-| 41,801 | Metal MPS | 6 MB / 1056 MB | 59 MB / 1056 MB |
-| 112,331 | PyTorch MPS | 131 MB / 4128 MB | 241 MB / 8393 MB |
-| 112,331 | Metal MPS | 9 MB / 1024 MB | 61 MB / 1032 MB |
+**I(Q) + gradient, float64**: time / peak memory (RAM + GPU tensors)
 
-**Accuracy** (relative to the float64 reference)
-
-| atoms | backend | dtype | I(Q) max. rel. error | gradient rel. error |
-|---:|---|---|---:|---:|
-| 473 | PyTorch CPU (1.1) | float32 | 5.3e-07 | 2.3e-06 |
-| 473 | PyTorch CPU (1.1) | float64 | 0.0e+00 | 5.6e-15 |
-| 473 | Rust CPU | float32 | 5.3e-07 | 5.8e-07 |
-| 473 | Rust CPU | float64 | 0.0e+00 | 0.0e+00 |
-| 473 | C CPU | float32 | 5.3e-07 | 5.8e-07 |
-| 473 | C CPU | float64 | 0.0e+00 | 0.0e+00 |
-| 473 | PyTorch MPS | float32 | 1.3e-06 | 2.6e-06 |
-| 473 | Metal MPS | float32 | 1.3e-06 | 2.3e-06 |
-| 3,833 | PyTorch CPU (1.1) | float32 | 4.9e-07 | 1.5e-05 |
-| 3,833 | PyTorch CPU (1.1) | float64 | 7.9e-16 | 2.7e-14 |
-| 3,833 | Rust CPU | float32 | 4.9e-07 | 4.1e-06 |
-| 3,833 | Rust CPU | float64 | 0.0e+00 | 0.0e+00 |
-| 3,833 | C CPU | float32 | 4.9e-07 | 4.1e-06 |
-| 3,833 | C CPU | float64 | 0.0e+00 | 0.0e+00 |
-| 3,833 | PyTorch MPS | float32 | 4.9e-06 | 4.0e-05 |
-| 3,833 | Metal MPS | float32 | 4.9e-06 | 4.0e-05 |
-| 12,581 | PyTorch CPU (1.1) | float32 | 7.3e-07 | 4.6e-05 |
-| 12,581 | PyTorch CPU (1.1) | float64 | 5.7e-16 | 1.3e-14 |
-| 12,581 | Rust CPU | float32 | 7.3e-07 | 4.5e-05 |
-| 12,581 | Rust CPU | float64 | 0.0e+00 | 0.0e+00 |
-| 12,581 | C CPU | float32 | 7.3e-07 | 4.5e-05 |
-| 12,581 | C CPU | float64 | 0.0e+00 | 0.0e+00 |
-| 12,581 | PyTorch MPS | float32 | 1.3e-05 | 1.3e-05 |
-| 12,581 | Metal MPS | float32 | 1.2e-05 | 1.3e-05 |
-| 41,801 | PyTorch CPU (1.1) | float32 | 1.8e-06 | 4.6e-05 |
-| 41,801 | PyTorch CPU (1.1) | float64 | 1.9e-15 | 2.2e-14 |
-| 41,801 | Rust CPU | float32 | 1.8e-06 | 4.3e-05 |
-| 41,801 | Rust CPU | float64 | 0.0e+00 | 0.0e+00 |
-| 41,801 | C CPU | float32 | 1.8e-06 | 4.3e-05 |
-| 41,801 | C CPU | float64 | 0.0e+00 | 0.0e+00 |
-| 41,801 | PyTorch MPS | float32 | 1.3e-05 | 2.9e-05 |
-| 41,801 | Metal MPS | float32 | 1.2e-05 | 2.9e-05 |
-| 112,331 | PyTorch CPU (1.1) | float32 | 4.6e-06 | 4.5e-05 |
-| 112,331 | PyTorch CPU (1.1) | float64 | 2.7e-15 | 4.9e-14 |
-| 112,331 | Rust CPU | float32 | 4.6e-06 | 3.2e-05 |
-| 112,331 | Rust CPU | float64 | 0.0e+00 | 0.0e+00 |
-| 112,331 | C CPU | float32 | 4.6e-06 | 3.2e-05 |
-| 112,331 | C CPU | float64 | 0.0e+00 | 0.0e+00 |
-| 112,331 | PyTorch MPS | float32 | 2.6e-05 | 3.0e-05 |
-| 112,331 | Metal MPS | float32 | 2.6e-05 | 3.0e-05 |
+| machine | backend | 473 atoms | 3,833 atoms | 12,581 atoms | 41,801 atoms | 112,331 atoms | 228,653 atoms | 444,263 atoms |
+|---|---|---:|---:|---:|---:|---:|---:|---:|
+| apple_m3_max | PyTorch CPU (1.1) | 23.4 ms / 164 MB | 104.5 ms / 190 MB | 869.4 ms / 247 MB | 9.34 s / 382 MB | 76.37 s / 1033 MB | – | – |
+| apple_m3_max | Rust CPU | 15.7 ms / 161 MB | 38.9 ms / 138 MB | 95.0 ms / 151 MB | 636.9 ms / 144 MB | 6.04 s / 337 MB | – | – |
+| apple_m3_max | C CPU | 15.8 ms / 160 MB | 39.6 ms / 143 MB | 97.5 ms / 144 MB | 732.7 ms / 139 MB | 7.56 s / 294 MB | – | – |
+| xeon56el9 | PyTorch CPU (1.1) | 24.4 ms / 161 MB | 284.9 ms / 254 MB | 2.77 s / 345 MB | 30.78 s / 1306 MB | 206.02 s / 720 MB | – | – |
+| xeon56el9 | Rust CPU | 14.1 ms / 95 MB | 97.8 ms / 265 MB | 220.2 ms / 371 MB | 711.4 ms / 495 MB | 7.89 s / 710 MB | 42.98 s / 922 MB | 158.37 s / 1371 MB |
+| xeon56el9 | C CPU | 14.3 ms / 74 MB | 101.9 ms / 248 MB | 265.0 ms / 358 MB | 2.00 s / 495 MB | 13.16 s / 703 MB | 42.62 s / 909 MB | 145.69 s / 1352 MB |
+| a100el9 | Rust CPU | 33.5 ms / 137 MB | 163.3 ms / 258 MB | 309.7 ms / 264 MB | 1.23 s / 283 MB | 10.75 s / 402 MB | 66.49 s / 694 MB | 275.42 s / 1356 MB |
+| a100el9 | PyTorch CUDA | 46.2 ms / 116 MB | 90.5 ms / 433 MB | 504.8 ms / 443 MB | 5.16 s / 511 MB | 35.31 s / 470 MB | 146.64 s / 665 MB | 561.83 s / 1294 MB |
+| a100el9 | Triton CUDA | 27.1 ms / 171 MB | 30.6 ms / 193 MB | 64.2 ms / 144 MB | 227.9 ms / 168 MB | 1.37 s / 327 MB | 5.32 s / 663 MB | 20.01 s / 1291 MB |
+| sm3090el9 | Rust CPU | 40.8 ms / 137 MB | 134.0 ms / 233 MB | 460.6 ms / 384 MB | 3.67 s / 271 MB | 25.09 s / 339 MB | 126.54 s / 658 MB | 725.18 s / 1322 MB |
+| sm3090el9 | PyTorch CUDA | 11.6 ms / 116 MB | 168.3 ms / 434 MB | 1.33 s / 444 MB | 14.29 s / 513 MB | 102.97 s / 470 MB | 430.56 s / 666 MB | – |
+| sm3090el9 | Triton CUDA | 9.0 ms / 119 MB | 20.5 ms / 143 MB | 87.0 ms / 144 MB | 799.0 ms / 168 MB | 5.61 s / 327 MB | 22.97 s / 663 MB | – |
