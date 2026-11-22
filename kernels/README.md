@@ -6,16 +6,16 @@ grid pair sum (`DebyeCalculator._spread_pairs`, forward) and in its analytic gra
 threading, batching, progress callbacks and cancellation) is the existing PyTorch code, so results, gradients and the
 public API are unchanged.
 
-There are three implementations of the same per-pair work:
+There are three implementations of the same per-pair work (a C version of the CPU kernels was benchmarked and
+removed: it was no faster than Rust):
 
 | backend | device | package / module | source |
 |---|---|---|---|
 | Rust | CPU, float32 and float64 | `debyecalculator-kernels` / `debyecalculator_kernels` (PyO3, one abi3 wheel per platform for Python ≥ 3.8) | `kernels/src/lib.rs` |
-| C | CPU, float32 and float64 | `debyecalculator-ckernels` / `debyecalculator_ckernels` (plain shared library, loaded with ctypes) | `kernels_c/src/kernels.c` |
 | Metal | Apple GPU (`device='mps'`), float32 | part of DebyeCalculator: `debyecalculator.metal_pair_sum`, compiled at run time with `torch.mps.compile_shader` (PyTorch ≥ 2.6) | `debyecalculator/metal_pair_sum.py` |
 | Triton | NVIDIA GPU (`device='cuda'`), float32 and float64 | part of DebyeCalculator: `debyecalculator.triton_pair_sum`, compiled at run time by Triton (ships with PyTorch's Linux CUDA wheels) | `debyecalculator/triton_pair_sum.py` |
 
-Without the Rust and C packages, without `torch.mps.compile_shader` or Triton, DebyeCalculator runs exactly as before.
+Without the Rust package, without `torch.mps.compile_shader` or Triton, DebyeCalculator runs exactly as before.
 The Triton kernels check themselves against a float64 reference on first use and are skipped (PyTorch code) if the
 check fails. Running on Niflheim (DTU): see [hpc/niflheim/README.md](../hpc/niflheim/README.md).
 
@@ -28,20 +28,14 @@ pip install maturin
 pip install ./kernels          # or, while developing: maturin develop --release -m kernels/Cargo.toml
 ```
 
-C (needs a C compiler):
-
-```bash
-pip install ./kernels_c
-```
-
 ## Choosing the backend
 
 The environment variable `DEBYECALCULATOR_PAIR_BACKEND` selects the backend of the grid pair sum:
 
 | value | CPU | MPS | CUDA |
 |---|---|---|---|
-| `auto` (default) | Rust if installed, else C if installed, else PyTorch | Metal if available, else PyTorch | Triton if available, else PyTorch |
-| `rust` / `c` | only that one (PyTorch if it is not installed) | PyTorch | PyTorch |
+| `auto` (default) | Rust if installed, else PyTorch | Metal if available, else PyTorch | Triton if available, else PyTorch |
+| `rust` | Rust (PyTorch if it is not installed) | PyTorch | PyTorch |
 | `metal` | PyTorch | Metal (PyTorch if not available) | PyTorch |
 | `triton` | PyTorch | PyTorch | Triton (PyTorch if not available) |
 | `torch` | PyTorch | PyTorch | PyTorch |
@@ -98,7 +92,7 @@ Invalid input (atom indices out of range, distances outside the grid, NaN positi
 ```bash
 pytest debyecalculator                                   # all tests, with the default backend
 DEBYECALCULATOR_PAIR_BACKEND=torch pytest debyecalculator  # all tests on the PyTorch code
-pytest debyecalculator/test_pair_sum.py -k native        # every installed native backend against PyTorch
+pytest debyecalculator/test_pair_sum.py -k native        # the Rust kernels against PyTorch
 python kernels/benchmark.py --out results.jsonl          # time and peak memory, all backends and precisions
 ```
 

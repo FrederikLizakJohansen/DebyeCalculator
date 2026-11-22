@@ -1,5 +1,5 @@
 #!/bin/bash
-# One-time setup of DebyeCalculator with the Rust, C and Triton kernels on Niflheim.
+# One-time setup of DebyeCalculator with the Rust and Triton kernels on Niflheim.
 #
 # Uses the Niflheim modules for Python and Rust; PyTorch (with CUDA and Triton) comes from pip, since Niflheim has
 # no PyTorch module. Run it on the login node that matches the partitions you will use (it builds for that node's
@@ -48,8 +48,8 @@ if ! command -v cargo >/dev/null 2>&1; then
 fi
 cargo --version
 
-echo "== Rust and C kernels (portable builds; the batch jobs rebuild them for the compute node's CPU)"
-python -m pip install "$REPO/kernels" "$REPO/kernels_c"
+echo "== Rust kernels (portable build; the batch jobs rebuild them for the compute node's CPU)"
+python -m pip install "$REPO/kernels"
 # Download the Rust dependencies now, so the batch jobs can build without network access
 cargo fetch --manifest-path "$REPO/kernels/Cargo.toml"
 

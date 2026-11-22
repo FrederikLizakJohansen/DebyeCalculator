@@ -37,12 +37,12 @@ except ModuleNotFoundError:
 import numpy as np
 import matplotlib.pyplot as plt
 
-# Optional native CPU kernels for the grid pair sum (see kernels/README.md): 'rust' (debyecalculator_kernels) and
-# 'c' (debyecalculator_ckernels). Without them the pair sum runs in PyTorch, as before. The environment variable
-# DEBYECALCULATOR_PAIR_BACKEND selects 'auto' (default: rust, then c, then torch on CPU; the fused Metal or Triton kernels
-# on MPS or CUDA, see debyecalculator/metal_pair_sum.py and triton_pair_sum.py), 'rust', 'c', 'metal', 'triton' or 'torch'
+# Optional native CPU kernels for the grid pair sum (see kernels/README.md): 'rust' (debyecalculator_kernels).
+# Without them the pair sum runs in PyTorch, as before. The environment variable
+# DEBYECALCULATOR_PAIR_BACKEND selects 'auto' (default: rust, else torch on CPU; the fused Metal or Triton kernels
+# on MPS or CUDA, see debyecalculator/metal_pair_sum.py and triton_pair_sum.py), 'rust', 'metal', 'triton' or 'torch'
 _NATIVE_BACKENDS = {}
-for _backend, _module_name in (('rust', 'debyecalculator_kernels'), ('c', 'debyecalculator_ckernels')):
+for _backend, _module_name in (('rust', 'debyecalculator_kernels'),):
     try:
         _module = importlib.import_module(_module_name)
     except ImportError:
@@ -970,14 +970,14 @@ class DebyeCalculator:
         dtype, float32 or float64, accumulated in float64), else None for the PyTorch code.
 
         The backend is self._pair_backend if set, else the environment variable DEBYECALCULATOR_PAIR_BACKEND:
-        'auto' (default) uses the Rust kernels, then the C kernels, whichever is installed (and the fused GPU kernels on
-        MPS and CUDA, see _gpu_pair_kernels); 'rust' or 'c' use only that one; 'torch' uses the PyTorch code. An explicitly
+        'auto' (default) uses the Rust kernels if installed (and the fused GPU kernels on MPS and CUDA, see
+        _gpu_pair_kernels); 'rust' uses only them; 'torch' uses the PyTorch code. An explicitly
         set self._pair_backend that is not installed raises RuntimeError.
         """
         backend, explicit = self._pair_backend_choice()
         if backend == 'auto':
-            module = _NATIVE_BACKENDS.get('rust', _NATIVE_BACKENDS.get('c'))
-        elif backend in ('rust', 'c'):
+            module = _NATIVE_BACKENDS.get('rust')
+        elif backend == 'rust':
             module = _NATIVE_BACKENDS.get(backend)
             if module is None and explicit:
                 raise RuntimeError(f"The '{backend}' pair-sum kernels are not installed")

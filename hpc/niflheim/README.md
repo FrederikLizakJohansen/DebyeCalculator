@@ -4,13 +4,13 @@ This runs the test suite and the pair-sum benchmark of every backend on Niflheim
 
 | job | partition | hardware | backends |
 |---|---|---|---|
-| CPU benchmark | `xeon56el9` | 1 whole node, Intel Ice Lake, 56 cores | PyTorch CPU, Rust, C |
+| CPU benchmark | `xeon56el9` | 1 whole node, Intel Ice Lake, 56 cores | PyTorch CPU, Rust |
 | GPU benchmark | `a100el9` (default) | 1 × NVIDIA A100, 32 cores | PyTorch CUDA, Triton, Rust (on the 32 cores) |
 | | `h200el9` | 1 × NVIDIA H200, 24 cores | same |
 | | `sm3090el9` | 1 × NVIDIA RTX 3090, 8 cores | same |
 
 Each job writes JSON-lines results that `kernels/benchmark_report.py` combines with the Mac results
-(`kernels/benchmark_results/apple_m3_max.jsonl`) into one table: CPU, MPS and GPU; PyTorch, Rust, C, Metal and
+(`kernels/benchmark_results/apple_m3_max.jsonl`) into one table: CPU, MPS and GPU; PyTorch, Rust, Metal and
 Triton; float32 and float64; time and peak memory.
 
 Facts about Niflheim here come from https://wiki.fysik.dtu.dk/Niflheim_users/Niflheim_Getting_Started/ (read
@@ -65,12 +65,12 @@ This:
    bring their own CUDA libraries, so no CUDA module is needed;
 3. installs DebyeCalculator from this folder (editable) plus `pytest`, `psutil` and `maturin`;
 4. loads the `Rust/1.88.0-GCCcore-14.3.0` module (rustup into `~/.cargo` only if that module is missing), and builds
-   the Rust and C kernels.
+   the Rust kernels.
 
 Niflheim has no PyTorch or Triton module, so PyTorch comes from pip (about 8 GB in the venv, mostly the CUDA
 libraries). The CUDA and cuDNN modules aren't needed: the wheels bring their own.
 
-It ends by printing the versions and `native CPU kernels: ['c', 'rust']`. If you will also use the H200 or the
+It ends by printing the versions and `native CPU kernels: ['rust']`. If you will also use the H200 or the
 RTX 3090, log in to `sara` or `vid` and run the same command there; `~/.cargo` and the clone are shared.
 
 Login nodes limit a process to 20 minutes of CPU time. If the setup is stopped, run it again: it continues where it
@@ -117,11 +117,11 @@ with the same `--partition`/`--cpus-per-task` options as in step 3.
 What runs:
 
 - particles of radius 10, 20, 30, 45 and 63 Å (473 to 112,331 atoms) for every backend, and of 80 and 100 Å
-  (~230,000 and ~450,000 atoms) for the fast backends (Rust and C on the CPU node; Triton, PyTorch CUDA and Rust on the
+  (~230,000 and ~450,000 atoms) for the fast backends (Rust on the CPU node; Triton, PyTorch CUDA and Rust on the
   GPU node);
 - float32 and float64; I(Q) and I(Q) with the gradient with respect to all positions; time and peak memory (RAM and
   GPU); accuracy against the float64 result of the Rust kernels;
-- each job first runs the test suite, and rebuilds the Rust and C kernels for the node's CPU (e.g. AVX-512).
+- each job first runs the test suite, and rebuilds the Rust kernels for the node's CPU (e.g. AVX-512).
 
 Expected run times: the CPU job is dominated by PyTorch CPU at 112,331 atoms (minutes per configuration); the GPU
 jobs by PyTorch CUDA at the largest sizes. Change the sizes with `DC_RADII` and `DC_EXTRA_RADII`, e.g.
@@ -147,7 +147,7 @@ Each job writes `hpc_results/<partition>_<jobid>/`:
 | `benchmark.log` | the same as a readable log |
 | `pytest.log` | test results |
 | `environment.txt` | node, CPU (`lscpu`), GPU (`nvidia-smi`), modules, Python packages |
-| `native_build.log` | the node-specific build of the Rust and C kernels |
+| `native_build.log` | the node-specific build of the Rust kernels |
 
 plus the Slurm output `hpc_results/slurm-<job name>-<jobid>.out`.
 

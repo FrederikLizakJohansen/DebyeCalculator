@@ -4,7 +4,7 @@ to the positions (forward + backward), per backend, precision and particle size.
 
 Backends:
     torch   PyTorch on CPU (the code of DebyeCalculator 1.1)
-    rust, c native CPU kernels (kernels/, kernels_c/)
+    rust    native CPU kernels (kernels/)
     mps     PyTorch on an Apple GPU (float32 only)
     metal   fused Metal kernels on an Apple GPU (float32 only)
     cuda    PyTorch on an NVIDIA GPU
@@ -93,7 +93,7 @@ def worker(args):
     particle = generate_nanoparticles(CIF, args.radius, disable_pbar=True, device='cpu')[0]
     source = (list(particle.elements), particle.xyz.numpy())
     calc = DebyeCalculator(device=device, dtype=dtype, qmin=1.0, qmax=30.0)
-    calc._pair_backend = args.backend if args.backend in ('rust', 'c', 'metal', 'triton') else 'torch'
+    calc._pair_backend = args.backend if args.backend in ('rust', 'metal', 'triton') else 'torch'
     structure = calc._initialize_structures(source)[0]
     weights = torch.linspace(1.0, 2.0, calc.q.numel(), device=device, dtype=dtype)
     process = psutil.Process()
@@ -194,7 +194,7 @@ def worker(args):
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--backends', nargs='+', default=None,
-                        help='torch, rust, c, mps, metal, cuda, triton (default: all available)')
+                        help='torch, rust, mps, metal, cuda, triton (default: all available)')
     parser.add_argument('--dtypes', nargs='+', default=['float32', 'float64'])
     parser.add_argument('--radii', nargs='+', type=float, default=[10, 20, 30, 45, 63])
     parser.add_argument('--extra-radii', nargs='+', type=float, default=[],
@@ -204,7 +204,7 @@ def main():
                         help='name of this machine in reports (default: Slurm partition, else host name)')
     parser.add_argument('--repeats', type=int, default=5, help='maximum timed runs per configuration (at least 2)')
     parser.add_argument('--budget', type=float, default=10.0, help='seconds of timed runs after which to stop repeating')
-    parser.add_argument('--reference', nargs='+', default=['rust', 'c', 'torch'])
+    parser.add_argument('--reference', nargs='+', default=['rust', 'torch'])
     parser.add_argument('--out', default='benchmark_results.jsonl')
     parser.add_argument('--arrays-dir', default=None, help='where to keep I(Q) and gradients (default: next to --out)')
     parser.add_argument('--worker', action='store_true', help=argparse.SUPPRESS)

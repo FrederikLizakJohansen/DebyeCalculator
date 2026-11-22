@@ -27,12 +27,12 @@ export OMP_NUM_THREADS=${SLURM_CPUS_PER_TASK:-$(nproc)}
 export MKL_NUM_THREADS=$OMP_NUM_THREADS
 export QT_QPA_PLATFORM=offscreen
 
-# Rebuild the Rust and C kernels for this node's CPU (e.g. AVX-512), offline, into the job's local disk.
+# Rebuild the Rust kernels for this node's CPU (e.g. AVX-512), offline, into the job's local disk.
 # They take precedence over the portable builds in the venv. DC_NATIVE_BUILD=0 keeps the portable builds.
 if [ "${DC_NATIVE_BUILD:-1}" = 1 ] && command -v cargo >/dev/null 2>&1; then
     if CARGO_NET_OFFLINE=true CARGO_TARGET_DIR="$JOB_TMP/cargo-target" RUSTFLAGS="-C target-cpu=native" \
         CFLAGS="-march=native" python -m pip install --no-deps --no-build-isolation --no-index \
-        --target "$JOB_TMP/native" "$REPO/kernels" "$REPO/kernels_c" > "$OUT/native_build.log" 2>&1; then
+        --target "$JOB_TMP/native" "$REPO/kernels" > "$OUT/native_build.log" 2>&1; then
         export PYTHONPATH="$JOB_TMP/native${PYTHONPATH:+:$PYTHONPATH}"
         echo "kernels built for this node's CPU (see native_build.log)"
     else

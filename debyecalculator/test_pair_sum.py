@@ -301,7 +301,7 @@ def test_mps_warning_from_constructor(monkeypatch):
         DebyeCalculator(device='mps')
 
 
-# -- native CPU kernels (kernels/ and kernels_c/) --------------------------------------------------------------------
+# -- native CPU kernels (kernels/) ----------------------------------------------------------------------------------
 
 from debyecalculator.debye_calculator import _NATIVE_BACKENDS, CalculationCancelled
 

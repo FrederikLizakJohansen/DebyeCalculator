@@ -19,7 +19,7 @@ source "$REPO/hpc/niflheim/job_common.sh"
 dc_run_tests
 
 echo "== $(date) small benchmark"
-python kernels/benchmark.py --backends torch rust c cuda triton --dtypes float32 float64 --radii 10 20 \
+python kernels/benchmark.py --backends torch rust cuda triton --dtypes float32 float64 --radii 10 20 \
     --label "${PARTITION}_smoke" --out "$OUT/results.jsonl" --arrays-dir "$JOB_TMP/arrays" 2>&1 | tee "$OUT/benchmark.log"
 
 echo "== $(date) done; results in $OUT"
