@@ -9,7 +9,7 @@
 | 41,801 | 1.19 s / 60 MB | 2.03 s / 120 MB | 100.7 ms / 62 MB |
 | 112,331 | 8.76 s / 199 MB | 14.58 s / 165 MB | 606.7 ms / 214 MB |
 | 228,653 | 40.08 s / 400 MB | 60.83 s / 333 MB | 2.28 s / 335 MB |
-| 444,263 | 182.66 s / 799 MB | 232.34 s / 651 MB | – |
+| 444,263 | 182.66 s / 799 MB | 232.34 s / 651 MB | 8.50 s / 653 MB |
 
 **I(Q) + gradient, float32**: time (speed-up vs PyTorch CPU) / peak memory (RAM + GPU tensors)
 
@@ -21,7 +21,7 @@
 | 41,801 | 4.28 s / 108 MB | 4.43 s / 288 MB | 154.6 ms / 117 MB |
 | 112,331 | 25.35 s / 183 MB | 32.45 s / 265 MB | 980.3 ms / 177 MB |
 | 228,653 | 119.42 s / 336 MB | 135.62 s / 353 MB | 3.97 s / 334 MB |
-| 444,263 | 589.32 s / 696 MB | 514.56 s / 669 MB | – |
+| 444,263 | 589.32 s / 696 MB | 514.56 s / 669 MB | 14.95 s / 650 MB |
 
 **I(Q), float64**: time (speed-up vs PyTorch CPU) / peak memory (RAM + GPU tensors)
 
@@ -33,7 +33,7 @@
 | 41,801 | 975.6 ms / 192 MB | 6.66 s / 273 MB | 146.4 ms / 271 MB |
 | 112,331 | 7.42 s / 422 MB | 47.98 s / 351 MB | 962.2 ms / 471 MB |
 | 228,653 | 34.66 s / 813 MB | 198.67 s / 684 MB | 3.83 s / 757 MB |
-| 444,263 | 197.45 s / 1550 MB | – | – |
+| 444,263 | 197.45 s / 1550 MB | 758.78 s / 1310 MB | 14.27 s / 1384 MB |
 
 **I(Q) + gradient, float64**: time (speed-up vs PyTorch CPU) / peak memory (RAM + GPU tensors)
 
@@ -45,7 +45,7 @@
 | 41,801 | 3.67 s / 271 MB | 14.29 s / 513 MB | 799.0 ms / 168 MB |
 | 112,331 | 25.09 s / 339 MB | 102.97 s / 470 MB | 5.61 s / 327 MB |
 | 228,653 | 126.54 s / 658 MB | 430.56 s / 666 MB | 22.97 s / 663 MB |
-| 444,263 | 725.18 s / 1322 MB | – | – |
+| 444,263 | 725.18 s / 1322 MB | 1648.75 s / 1294 MB | 86.72 s / 1291 MB |
 
 **GPU memory** (peak above the level before the run; the driver figure includes the allocator's cached memory)
 
@@ -76,6 +76,9 @@
 | 228,653 | Triton CUDA | 329 MB / 332 MB | 332 MB / 332 MB |
 | 228,653 | Triton CUDA | 654 MB / 720 MB | 660 MB / 740 MB |
 | 444,263 | PyTorch CUDA | 639 MB / 780 MB | 644 MB / 798 MB |
+| 444,263 | PyTorch CUDA | 1275 MB / 1550 MB | 1285 MB / 1580 MB |
+| 444,263 | Triton CUDA | 639 MB / 652 MB | 644 MB / 672 MB |
+| 444,263 | Triton CUDA | 1275 MB / 1358 MB | 1285 MB / 1370 MB |
 
 **Accuracy** (relative to the float64 reference)
 
@@ -120,3 +123,6 @@
 | 444,263 | Rust CPU | float32 | 9.2e-06 | 3.6e-05 |
 | 444,263 | Rust CPU | float64 | 0.0e+00 | 0.0e+00 |
 | 444,263 | PyTorch CUDA | float32 | 9.2e-06 | 3.6e-05 |
+| 444,263 | PyTorch CUDA | float64 | 1.4e-14 | 2.1e-14 |
+| 444,263 | Triton CUDA | float32 | 8.9e-06 | 3.4e-05 |
+| 444,263 | Triton CUDA | float64 | 7.8e-14 | 1.6e-14 |
