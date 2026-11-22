@@ -1063,18 +1063,19 @@ class DebyeCalculator:
         if self.biso != 0.0:
             pair_iq *= torch.exp(-q.pow(2) * self.biso / (8 * torch.pi ** 2))
 
-        # Self-scattering contribution
+        # Self-scattering contribution: sum_i (o_i f_{e_i}(q))^2 / 2 = sum_e f_e(q)^2 sum_{i in e} o_i^2 / 2.
+        # Summing the squared occupancies per element first keeps the memory independent of the number of atoms
+        # (per atom and q value, it would take as much memory as atoms times q values)
         self_iq = None
         if include_self_scattering:
             if partial_elements is None:
-                self_mask = torch.ones_like(element_index, dtype=torch.bool)
+                elements = range(len(unique_elements))
             else:
-                self_mask = torch.zeros_like(element_index, dtype=torch.bool)
-                for el in partial_elements:
-                    self_mask |= element_index == unique_elements.index(el)
-            self_iq = torch.sum(
-                (occupancy[self_mask].unsqueeze(-1) * form_factors[element_index[self_mask]]) ** 2,
-                dim=0
+                elements = sorted({unique_elements.index(el) for el in partial_elements})
+            occupancy_sq = occupancy.pow(2)
+            self_iq = sum(
+                occupancy_sq[element_index == e].sum() * form_factors[e].pow(2)
+                for e in elements
             ) / 2
 
         if self.profile:

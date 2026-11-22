@@ -216,6 +216,69 @@ def test_gradients_through_public_api():
     assert isinstance(calc.iq((elements, xyz))[1], np.ndarray)
 
 
+# -- self-scattering --------------------------------------------------------------------------------------------------
+
+def per_atom_self_iq(structure, occupancy, partial_elements=None):
+    """
+    sum_i (o_i f_{e_i}(q))^2 / 2 over the atoms of the elements in partial_elements, one row per atom (the previous
+    implementation), in the dtype of occupancy.
+    """
+    elements = np.asarray(structure.elements)
+    keep = np.ones(len(elements), dtype=bool) if partial_elements is None else np.isin(elements, list(partial_elements))
+    keep = torch.from_numpy(keep)
+    form_factors = structure.unique_form_factors.to(occupancy.dtype)[structure.structure_inverse]
+    return torch.sum((occupancy[keep].unsqueeze(-1) * form_factors[keep]) ** 2, dim=0) / 2
+
+
+def self_iq(calc, structure, occupancy, partial=None):
+    _, result = calc._compute_iq_parts(structure._replace(occupancy=occupancy), partial=partial,
+                                       include_self_scattering=True)
+    return result
+
+
+@pytest.mark.parametrize('partial, partial_elements', [(None, None), ('Co-O', ('Co', 'O')), ('O-O', ('O',)), ('Co-Co', ('Co',))])
+@pytest.mark.parametrize('dtype, tolerance', [(torch.float32, 1e-6), (torch.float64, 1e-13)])
+def test_self_scattering_matches_per_atom_sum(partial, partial_elements, dtype, tolerance):
+    calc = DebyeCalculator(device='cpu', dtype=dtype)
+    structure = calc._initialize_structures(particle(8.0))[0]
+    occupancy = torch.rand(len(structure.elements), dtype=dtype, generator=torch.Generator().manual_seed(0)) * 0.5 + 0.5
+    reference = per_atom_self_iq(structure, occupancy.double(), partial_elements)
+    assert relative_error(self_iq(calc, structure, occupancy, partial).double().numpy(), reference.numpy()) < tolerance
+
+
+def test_self_scattering_occupancy_gradient():
+    calc = DebyeCalculator(device='cpu', dtype=torch.float64)
+    structure = calc._initialize_structures(particle(5.0))[0]
+    occupancy = torch.rand(len(structure.elements), dtype=torch.float64, generator=torch.Generator().manual_seed(1)) + 0.5
+    weights = torch.rand(calc.q.numel(), dtype=torch.float64, generator=torch.Generator().manual_seed(2))
+    for partial, partial_elements in [(None, None), ('O-O', ('O',))]:
+        occ = occupancy.clone().requires_grad_(True)
+        (self_iq(calc, structure, occ, partial) * weights).sum().backward()
+        occ_ref = occupancy.clone().requires_grad_(True)
+        (per_atom_self_iq(structure, occ_ref, partial_elements) * weights).sum().backward()
+        assert torch.allclose(occ.grad, occ_ref.grad, rtol=1e-12, atol=0)
+
+
+def test_self_scattering_memory_does_not_scale_with_atoms_times_q(monkeypatch):
+    # The per-atom form would index the form factors with one row per atom: (atoms, q values)
+    calc = DebyeCalculator(device='cpu', qmin=1.0, qmax=30.0, qstep=0.01)
+    structure = calc._initialize_structures(particle(8.0))[0]
+    n_atoms, nq = len(structure.elements), calc.q.numel()
+    largest = []
+    original = torch.Tensor.__getitem__
+
+    def recording_getitem(tensor, index):
+        out = original(tensor, index)
+        if isinstance(out, torch.Tensor):
+            largest.append(out.numel())
+        return out
+
+    monkeypatch.setattr(torch.Tensor, '__getitem__', recording_getitem)
+    calc._finish_iq_parts(torch.zeros(nq), calc.q.squeeze(-1), structure.structure_inverse, structure.occupancy,
+                          structure.unique_form_factors, list(np.unique(structure.elements)), None, True)
+    assert max(largest) < n_atoms * nq // 10
+
+
 # -- compatibility with 1.0.x ----------------------------------------------------------------------------------------
 
 def test_constructor_keeps_parameter_order_of_1_0():
