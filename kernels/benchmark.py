@@ -129,7 +129,12 @@ def worker(args):
         return iq, xyz.grad
 
     def measure(function):
-        """Minimum time over repeats, and peak memory above the level before the run (sampled every millisecond)."""
+        """
+        Minimum time over repeats, and peak memory above the level before the run (sampled every millisecond), after one
+        untimed warm-up run (which includes one-time costs: CUDA/MPS start-up, kernel compilation, self-tests).
+        """
+        del function()[0]
+        sync()
         times, peak_rss, peak_device, peak_tensors = [], 0, 0, 0
         while len(times) < 2 or (len(times) < args.repeats and sum(times) < args.budget):
             gc.collect()

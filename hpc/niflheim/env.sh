@@ -34,7 +34,7 @@ dc_venv() {
 dc_load_modules() {
     module purge
     module load "$DC_PYTHON_MODULE"
-    if ! module load "$DC_RUST_MODULE" >/dev/null 2>&1 && [ -x "$HOME/.cargo/bin/cargo" ]; then
+    if ! module load "$DC_RUST_MODULE" >/dev/null 2>&1 && "$HOME/.cargo/bin/cargo" --version >/dev/null 2>&1; then
         export PATH="$HOME/.cargo/bin:$PATH"
     fi
 }
