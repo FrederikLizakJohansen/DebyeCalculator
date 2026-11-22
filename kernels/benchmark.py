@@ -128,13 +128,20 @@ def worker(args):
         (iq * weights).sum().backward()
         return iq, xyz.grad
 
-    def measure(function):
+    def warm_up():
         """
-        Minimum time over repeats, and peak memory above the level before the run (sampled every millisecond), after one
-        untimed warm-up run (which includes one-time costs: CUDA/MPS start-up, kernel compilation, self-tests).
+        One I(Q) and gradient of a tiny particle, untimed: pays one-time costs (CUDA/MPS start-up, library loading,
+        kernel compilation, self-tests) while allocating little, so they don't show up in the measured peak memory.
+        A warm-up on the measured particle would leave freed memory with the process and hide the real peak.
         """
-        del function()[0]
+        tiny = generate_nanoparticles(CIF, 6.0, disable_pbar=True, device='cpu')[0]
+        small = calc._initialize_structures((list(tiny.elements), tiny.xyz.numpy()))[0]
+        xyz = small.xyz.detach().clone().requires_grad_(True)
+        (calc.compute_iq(small._replace(xyz=xyz)) * weights).sum().backward()
         sync()
+
+    def measure(function):
+        """Minimum time over repeats, and peak memory above the level before the run (sampled every millisecond)."""
         times, peak_rss, peak_device, peak_tensors = [], 0, 0, 0
         while len(times) < 2 or (len(times) < args.repeats and sum(times) < args.budget):
             gc.collect()
@@ -174,6 +181,7 @@ def worker(args):
 
     record = {'backend': args.backend, 'dtype': args.dtype, 'radius': args.radius, 'n_atoms': len(source[0]),
               'threads': torch.get_num_threads(), 'device_name': device_name(torch, device)}
+    warm_up()
     for name, function in (('forward', forward), ('forward_backward', forward_backward)):
         seconds, rss, device_bytes, tensor_bytes, runs = measure(function)
         record[name] = {'seconds': seconds, 'peak_rss_mb': rss / 2 ** 20, 'peak_device_mb': device_bytes / 2 ** 20,
