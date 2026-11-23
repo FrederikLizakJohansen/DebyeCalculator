@@ -84,8 +84,7 @@ Invalid input (atom indices out of range, distances outside the grid, NaN positi
   and makes one float64 atomic add per row atom: no per-pair atomics.
 - Square roots and float32 divisions are correctly rounded (`sqrt_rn`, `div_rn`); tile sizes can be tuned with
   `DEBYECALCULATOR_TRITON_BLOCK_R`, `..._BLOCK_C` and `..._NUM_WARPS`.
-- Not yet measured: written and checked for consistency here, without an NVIDIA GPU; the test suite on a GPU node
-  (`hpc/niflheim/smoke_test.sbatch`) is its first run.
+- Tested and benchmarked on an NVIDIA A100 and an RTX 3090 (see [BENCHMARK.md](BENCHMARK.md)).
 
 ## Tests and benchmark
 
