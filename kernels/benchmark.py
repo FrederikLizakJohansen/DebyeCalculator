@@ -10,7 +10,7 @@ Backends:
     cuda    PyTorch on an NVIDIA GPU
     triton  fused Triton kernels on an NVIDIA GPU
 Every configuration runs in a fresh process, so peak memory is not affected by earlier runs. Each result line records
-the machine (host, CPU, GPU, Slurm job), so results from several machines can be combined by benchmark_report.py.
+the machine (label, CPU, GPU, versions), so results from several machines can be combined by benchmark_report.py.
 
     python kernels/benchmark.py --out results.jsonl                 # all available backends, default sizes
     python kernels/benchmark.py --backends torch rust --radii 10 30 --dtypes float32
@@ -59,15 +59,11 @@ def machine_info(torch, label):
     """Where and with what the benchmark ran."""
     info = {
         'label': label,
-        'host': socket.gethostname(),
         'cpu': cpu_model(),
         'logical_cpus': os.cpu_count(),
         'torch_threads': torch.get_num_threads(),
         'python': platform.python_version(),
         'torch': torch.__version__,
-        'slurm_job_id': os.environ.get('SLURM_JOB_ID'),
-        'slurm_partition': os.environ.get('SLURM_JOB_PARTITION'),
-        'slurm_cpus': os.environ.get('SLURM_CPUS_PER_TASK') or os.environ.get('SLURM_CPUS_ON_NODE'),
     }
     if torch.cuda.is_available():
         info.update(gpu=torch.cuda.get_device_name(0), cuda=torch.version.cuda)
@@ -201,7 +197,7 @@ def main():
                         help='larger particles, run only for --extra-backends')
     parser.add_argument('--extra-backends', nargs='+', default=['rust', 'triton', 'metal'])
     parser.add_argument('--label', default=None,
-                        help='name of this machine in reports (default: Slurm partition, else host name)')
+                        help='name of this machine in reports (default: host name)')
     parser.add_argument('--repeats', type=int, default=5, help='maximum timed runs per configuration (at least 2)')
     parser.add_argument('--budget', type=float, default=10.0, help='seconds of timed runs after which to stop repeating')
     parser.add_argument('--reference', nargs='+', default=['rust', 'torch'])
@@ -234,7 +230,7 @@ def main():
         else:
             print(f'triton: not available ({triton_pair_sum.unavailable_reason()})', file=sys.stderr)
     backends = args.backends or available
-    label = args.label or os.environ.get('SLURM_JOB_PARTITION') or socket.gethostname().split('.')[0]
+    label = args.label or socket.gethostname().split('.')[0]
     machine = machine_info(torch, label)
     print('machine:', json.dumps(machine), flush=True)
     arrays_dir = args.arrays_dir or os.path.splitext(os.path.abspath(args.out))[0] + '_arrays'

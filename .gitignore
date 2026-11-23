@@ -7,4 +7,3 @@ runtime_tests/
 dist/
 poetry.lock
 benchmarks/
-hpc_results/

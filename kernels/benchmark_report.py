@@ -2,7 +2,7 @@
 Charts and markdown tables from the output of kernels/benchmark.py, for one machine or several.
 
     python kernels/benchmark_report.py results.jsonl --out-dir kernels/benchmark_results
-    python kernels/benchmark_report.py mac.jsonl xeon56el9.jsonl a100el9.jsonl --out-dir combined
+    python kernels/benchmark_report.py apple_m3_max.jsonl a100.jsonl --out-dir combined
 
 Each record is labelled with its machine (the 'label' that benchmark.py stored, else the file name). With several
 machines, the report adds tables over all machines and backends, and one chart per machine.

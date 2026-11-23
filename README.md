@@ -136,7 +136,7 @@ The pair sum can run in fused native kernels. These give the same results and gr
 | Apple GPU (`mps`, float32) | Metal | Automatic with PyTorch 2.6 or later | 37× faster |
 | NVIDIA GPU (`cuda`) | Triton | Automatic on Linux | 33–35× faster |
 
-They are used whenever they are available. Set `DEBYECALCULATOR_PAIR_BACKEND` to `rust`, `metal`, `triton` or `torch` to choose one. Details and benchmarks are in [kernels/README.md](kernels/README.md) and [kernels/BENCHMARK.md](kernels/BENCHMARK.md).
+The speed-ups were measured on our test machines (Apple M3 Max, Intel Xeon Gold 6348, NVIDIA A100 and RTX 3090) and will differ on other hardware. The kernels are used whenever they are available. Set `DEBYECALCULATOR_PAIR_BACKEND` to `rust`, `metal`, `triton` or `torch` to choose one. Details and benchmarks are in [kernels/README.md](kernels/README.md) and [kernels/BENCHMARK.md](kernels/BENCHMARK.md).
 
 # Usage
 

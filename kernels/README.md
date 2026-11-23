@@ -17,7 +17,7 @@ removed: it was no faster than Rust):
 
 Without the Rust package, without `torch.mps.compile_shader` or Triton, DebyeCalculator runs exactly as before.
 The Triton kernels check themselves against a float64 reference on first use and are skipped (PyTorch code) if the
-check fails. Running on Niflheim (DTU): see [hpc/niflheim/README.md](../hpc/niflheim/README.md).
+check fails.
 
 ## Install
 
