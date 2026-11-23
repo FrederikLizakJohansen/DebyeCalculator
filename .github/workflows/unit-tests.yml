@@ -55,5 +55,15 @@ jobs:
     - name: Install DebyeCalculator with the GUI extra
       run: pip install -e ".[gui]" pytest
 
+    # The optional Rust kernels of the grid pair sum (kernels/), so the tests
+    # in test_pair_sum.py run them instead of skipping; the runner images ship
+    # a stable Rust toolchain
+    - name: Build the Rust kernels
+      shell: bash
+      run: |
+        cargo --version
+        pip install ./kernels
+        python -c "from debyecalculator.debye_calculator import _NATIVE_BACKENDS; assert 'rust' in _NATIVE_BACKENDS, 'Rust kernels not loaded'"
+
     - name: Run pytest
       run: pytest -q debyecalculator

@@ -11,6 +11,7 @@
 Welcome to `DebyeCalculator`! This is a simple tool for calculating the scattering intensity $I(Q)$ through the Debye scattering equation, the Total Scattering Structure Function $S(Q)$, the Reduced Total Scattering Function $F(Q)$, and the Reduced Atomic Pair Distribution Function $G(r)$ from an atomic structure. 
 The Debye scattering equation can be used to compute the scattering pattern of any atomic structure and is commonly used to study both crystalline and non-crystalline materials with a range of scattering techniques like powder diffraction, total scattering with pair distribution function and small-angle scattering. Although the Debye scattering equation is extremely versatile, the computation of the double sum, which scales O(N<sup>2</sup>), has limited the practical use of the equation.
 Here, we provide an optimised code for the calculation of the Debye scattering equation on Graphics processing units (GPUs) which accelerate the calculations with orders of magnitudes.
+Optional [native kernels](#faster-calculations-with-native-kernels) (Rust on CPU, Metal on Apple GPUs, Triton on NVIDIA GPUs) make large calculations another 9–37× faster.
 > For ideal periodic crystals, [BraggCalculator](https://github.com/FrederikLizakJohansen/BraggCalculator) provides a complementary reciprocal-space approach to powder X-ray and neutron diffraction that exploits translational symmetry, while `DebyeCalculator` retains finite-size and non-periodic information through its real-space pair sum.
 
 1. [Installation](#installation)
@@ -19,6 +20,7 @@ Here, we provide an optimised code for the calculation of the Debye scattering e
     3. [Install locally](#install-locally)
     4. [Upgrading from 1.0.x](#upgrading-from-10x)
     5. [GPU support](#gpu-support)
+    6. [Faster calculations with native kernels](#faster-calculations-with-native-kernels)
 3. [Usage](#usage)
     1. [Desktop app](#desktop-app)
     2. [Interactive mode](#interactive-mode)
@@ -123,6 +125,18 @@ from debyecalculator import DebyeCalculator
 
 calc = DebyeCalculator(device='cuda')
 ```
+
+## Faster calculations with native kernels
+
+The pair sum can run in fused native kernels. These give the same results and gradients as the PyTorch code and usually use less memory:
+
+| Device | Kernel | Setup | I(Q) + gradient, 112,331 atoms |
+|---|---|---|---:|
+| CPU | Rust | `pip install ./kernels` from a clone (needs [Rust](https://rustup.rs)) | 9–30× faster |
+| Apple GPU (`mps`, float32) | Metal | Automatic with PyTorch 2.6 or later | 37× faster |
+| NVIDIA GPU (`cuda`) | Triton | Automatic on Linux | 33–35× faster |
+
+The speed-ups were measured on our test machines (Apple M3 Max, Intel Xeon Gold 6348, NVIDIA A100 and RTX 3090) and will differ on other hardware. The kernels are used whenever they are available. Set `DEBYECALCULATOR_PAIR_BACKEND` to `rust`, `metal`, `triton` or `torch` to choose one. Details and benchmarks are in [kernels/README.md](kernels/README.md) and [kernels/BENCHMARK.md](kernels/BENCHMARK.md).
 
 # Usage
 

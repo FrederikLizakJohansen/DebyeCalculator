@@ -3,6 +3,12 @@
 ## Unreleased
 
 ### Added
+- Optional fused kernels for the grid pair sum and its gradient: Rust on the CPU (the `debyecalculator-kernels`
+  package in `kernels/`, `pip install ./kernels`), Metal on Apple GPUs and Triton on NVIDIA GPUs (both part of the
+  package, compiled at run time). They are used automatically when available. The environment variable
+  `DEBYECALCULATOR_PAIR_BACKEND` (`auto`, `rust`, `metal`, `triton`, `torch`) selects one. For 112,331 atoms they are
+  8-37x faster for I(Q) and I(Q) with gradients. Results and gradients agree with the PyTorch code to ~1e-14 in
+  float64 and to round-off in float32. See `kernels/README.md` and `kernels/BENCHMARK.md`.
 - `device='mps'` with PyTorch before 2.15 issues a `UserWarning` recommending an upgrade: with PyTorch 2.15, G(r) on
   Apple GPUs is 2.7-3.5x faster for particles of 4,000-150,000 atoms (Apple M3 Max, float32), where with 2.14 it is no
   faster than the CPU.
